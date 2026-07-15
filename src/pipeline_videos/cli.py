@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -66,6 +67,30 @@ app.add_typer(captions_app, name="captions")
 app.add_typer(metadata_app, name="metadata")
 app.add_typer(youtube_app, name="youtube")
 app.add_typer(remote_app, name="remote")
+
+
+def _codex_image_generation_status() -> tuple[str, str]:
+    codex = shutil.which("codex")
+    if not codex:
+        return "AUSENTE", "instale e autentique o Codex CLI"
+    try:
+        completed = subprocess.run(
+            [codex, "features", "list"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "PENDENTE", "não foi possível consultar os recursos do Codex CLI"
+    enabled = any(
+        line.split()[:3] == ["image_generation", "stable", "true"]
+        for line in completed.stdout.splitlines()
+    )
+    if enabled:
+        return "DISPONÍVEL", "Codex CLI com image_generation habilitado"
+    return "PENDENTE", "image_generation não está habilitado neste Codex CLI"
 
 
 @remote_app.command("enqueue")
@@ -233,11 +258,8 @@ def doctor() -> None:
         "CONFIGURADA" if os.getenv("ELEVENLABS_VOICE_ID") else "PENDENTE",
         os.getenv("ELEVENLABS_VOICE_ID", "defina localmente antes do TTS real"),
     )
-    table.add_row(
-        "Imagem Codex",
-        "VIA CONVERSA",
-        "a ferramenta embutida não é um endpoint invocável pelo CLI",
-    )
+    image_status, image_detail = _codex_image_generation_status()
+    table.add_row("Imagem Codex", image_status, image_detail)
     from pipeline_videos.publication import token_file
 
     youtube_token = token_file()
