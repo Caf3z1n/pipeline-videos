@@ -906,6 +906,9 @@ def _load_thumbnail_font(font_path: Path | None, size: int) -> ImageFont.FreeTyp
     candidates = [font_path] if font_path else []
     candidates.extend(
         [
+            Path(__file__).resolve().parent / "assets/fonts/Montserrat-ExtraBold.ttf",
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
             Path("C:/Windows/Fonts/arialbd.ttf"),
             Path("C:/Windows/Fonts/arial.ttf"),
         ]
