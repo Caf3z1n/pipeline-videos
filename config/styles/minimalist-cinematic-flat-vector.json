@@ -1,0 +1,35 @@
+{
+  "style_id": "minimalist-cinematic-flat-vector",
+  "name": "Flat Vetorial Bíblico — padrão Davi poupa Saul",
+  "medium": "ilustração vetorial 2D flat minimalista, construída com formas orgânicas grandes e camadas de cor chapada",
+  "principles": [
+    "formas vetoriais grandes, limpas, amplas e claramente simplificadas",
+    "cores chapadas em poucos blocos, com no máximo sombreamento suave e discreto",
+    "contornos definidos pela separação entre massas de cor, sem acabamento pintado",
+    "composição vertical cinematográfica com leitura imediata de gesto e silhueta",
+    "personagens estilizados com rostos, cabelos, mãos e roupas simplificados",
+    "fundos reduzidos a formas orgânicas em camadas, sem textura ambiental detalhada",
+    "uso forte de espaço negativo e enquadramentos simbólicos em gestos ou objetos",
+    "contraste entre azul-noite, azul-petróleo, dourado, marfim e terracota",
+    "aparência elegante, moderna, reverente e legível em celular"
+  ],
+  "negative_constraints": [
+    "sem fotorrealismo",
+    "sem semirrealismo",
+    "sem pintura digital ou aparência de concept art",
+    "sem renderização 3D",
+    "sem luz volumétrica realista ou céu pintado com nuvens detalhadas",
+    "sem textura realista de pele, cabelo, tecido, pedra, areia ou metal",
+    "sem fios individuais de cabelo, poros, rugas, costuras ou microdetalhes",
+    "sem anatomia excessivamente detalhada",
+    "sem multidões ou cenários carregados quando um gesto simples comunicar a cena",
+    "sem colagem, quadrinhos, storyboard, díptico, tríptico ou múltiplos painéis",
+    "sem tela dividida, cenas empilhadas ou momentos diferentes na mesma imagem",
+    "sem faixa branca, retângulo vazio ou divisor horizontal separando a composição",
+    "sem estética medieval europeia, fantasia ou anime",
+    "sem texto, logotipo ou marca-d'água",
+    "sem violência gráfica"
+  ],
+  "visual_standard_id": "davi-poupa-saul-flat-v1",
+  "reference_note": "Padrão derivado das imagens aprovadas do projeto davi-poupa-saul: formas vetoriais planas, poucos detalhes, silhuetas simples, enquadramentos simbólicos e espaço negativo forte."
+}

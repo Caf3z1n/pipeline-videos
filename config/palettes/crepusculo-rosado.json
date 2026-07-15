@@ -1,0 +1,12 @@
+{
+  "palette_id": "crepusculo-rosado",
+  "name": "Crepúsculo rosado",
+  "mood": "ternura, recolhimento e transição",
+  "colors": [
+    {"name": "rosa antigo", "hex": "#C9858C", "role": "céu baixo"},
+    {"name": "lavanda", "hex": "#8D7B9D", "role": "distância"},
+    {"name": "azul cinza", "hex": "#52697A", "role": "sombras"},
+    {"name": "dourado pálido", "hex": "#E6C98A", "role": "última luz"},
+    {"name": "ameixa", "hex": "#4E354C", "role": "silhuetas"}
+  ]
+}

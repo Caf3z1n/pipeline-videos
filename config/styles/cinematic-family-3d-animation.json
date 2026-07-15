@@ -1,0 +1,35 @@
+{
+  "style_id": "cinematic-family-3d-animation",
+  "name": "Animação 3D Bíblica Cinematográfica — padrão familiar premium",
+  "medium": "animação 3D cinematográfica estilizada de longa-metragem familiar, com personagens expressivos, formas arredondadas, materiais suaves e acabamento premium",
+  "principles": [
+    "linguagem visual de longa-metragem de animação 3D familiar contemporânea, no espírito do apelo emocional de produções Pixar e Disney, sem copiar personagens existentes",
+    "personagens carismáticos e claramente estilizados, com olhos expressivos, emoções legíveis, gestos naturais e silhuetas marcantes",
+    "proporções humanas estilizadas e harmoniosas, formas arredondadas e rostos atraentes, evitando aparência realista ou estranha",
+    "modelagem 3D refinada com pele, cabelo, tecido, pedra, madeira e metal estilizados, macios e coerentes",
+    "iluminação cinematográfica direcional, luz de recorte suave, sombras naturais, profundidade atmosférica e sensação de volume",
+    "composição cinematográfica com assunto dominante, profundidade em camadas e leitura imediata em tela de celular",
+    "cores ricas e equilibradas, contraste emocional claro e integração fiel com a paleta definida para o projeto",
+    "ambientes bíblicos respeitosos e historicamente plausíveis, tratados com beleza, calor humano e escala de aventura",
+    "uma única cena contínua, um único momento e uma ação principal, com espaço negativo orgânico para legendas",
+    "tom reverente, emocionante e acessível para todas as idades, sem transformar a mensagem bíblica em paródia infantil"
+  ],
+  "negative_constraints": [
+    "sem fotorrealismo, live action ou aparência de fotografia",
+    "sem rosto congelado, olhar vazio, anatomia estranha, uncanny valley ou aparência assustadora",
+    "sem aparência de boneco de plástico, brinquedo, jogo mobile barato, low-poly ou render 3D genérico",
+    "sem ilustração vetorial flat, desenho 2D, cel shading, anime ou mangá",
+    "sem caricatura extrema, proporção chibi ou infantilização excessiva dos personagens",
+    "sem copiar personagens, figurinos, cenários ou elementos protegidos de filmes existentes",
+    "sem roupas, objetos ou arquitetura modernos em cenas bíblicas",
+    "sem estética medieval europeia, fantasia épica genérica ou armaduras anacrônicas",
+    "sem excesso de elementos, multidões ou detalhes que prejudiquem a ação principal",
+    "sem colagem, quadrinhos, storyboard, díptico, tríptico ou múltiplos painéis",
+    "sem tela dividida, cenas empilhadas ou momentos diferentes na mesma imagem",
+    "sem faixa branca, retângulo vazio ou divisor horizontal separando a composição",
+    "sem texto, logotipo ou marca-d'água",
+    "sem violência gráfica"
+  ],
+  "visual_standard_id": "cinematic-family-3d-v1",
+  "reference_note": "Padrão de animação 3D bíblica cinematográfica familiar: personagens expressivos e arredondados, emoção legível, iluminação de longa-metragem, materiais estilizados premium, profundidade em camadas e uma única composição contínua por imagem."
+}

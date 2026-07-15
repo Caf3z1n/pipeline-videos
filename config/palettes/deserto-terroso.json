@@ -1,0 +1,13 @@
+{
+  "palette_id": "deserto-terroso",
+  "name": "Tons terrosos de deserto",
+  "mood": "travessia, sobriedade e presença",
+  "colors": [
+    {"name": "areia", "hex": "#D8B47A", "role": "solo e luz"},
+    {"name": "ocre", "hex": "#B7773C", "role": "rochas"},
+    {"name": "argila", "hex": "#8E4F3D", "role": "contraste"},
+    {"name": "azul lavado", "hex": "#7895A2", "role": "céu"},
+    {"name": "carvão", "hex": "#34343A", "role": "silhuetas"}
+  ]
+}
+

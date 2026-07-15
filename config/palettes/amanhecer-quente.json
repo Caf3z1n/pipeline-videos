@@ -1,0 +1,13 @@
+{
+  "palette_id": "amanhecer-quente",
+  "name": "Amanhecer quente",
+  "mood": "renovação, acolhimento e esperança",
+  "colors": [
+    {"name": "azul manhã", "hex": "#7FA7B8", "role": "céu"},
+    {"name": "pêssego", "hex": "#EFAF86", "role": "luz baixa"},
+    {"name": "amarelo suave", "hex": "#F2D27A", "role": "destaques"},
+    {"name": "oliva", "hex": "#76825D", "role": "vegetação"},
+    {"name": "vinho", "hex": "#6D3E4A", "role": "silhuetas e contraste"}
+  ]
+}
+

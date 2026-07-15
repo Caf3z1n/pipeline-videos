@@ -1,0 +1,28 @@
+.env
+client_secrets.json
+client_secret_*.json
+youtube-token.json
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+remote-jobs/
+dist/
+*.egg-info/
+
+# Projetos reais e artefatos pesados ficam fora do Git por padrão.
+projects/*
+!projects/.gitkeep
+!projects/videos-longos/
+!projects/shorts/
+projects/videos-longos/*
+projects/shorts/*
+!projects/videos-longos/.gitkeep
+!projects/shorts/.gitkeep
+
+# Biblioteca local do usuário; somente as instruções ficam versionadas.
+music-library/*
+!music-library/README.md
