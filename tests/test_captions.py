@@ -166,11 +166,13 @@ def test_active_card_layout_can_compensate_for_font_metric_width() -> None:
         variant="active_card_v2",
     )
 
-    regular = _layout_active_card_block(words, style, width=1080, height=1920)
+    # Use a deliberately wide canvas so both variants remain on the same line
+    # regardless of the platform's DejaVu font metrics.
+    regular = _layout_active_card_block(words, style, width=1920, height=1920)
     compact = _layout_active_card_block(
         words,
         style.model_copy(update={"layout_width_scale": 0.68}),
-        width=1080,
+        width=1920,
         height=1920,
     )
 
