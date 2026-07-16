@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "generated_at": "2026-07-16T22:49:10Z",
+  "generated_at": "2026-07-16T22:49:14Z",
   "records": [
     {
       "registry_id": "desktop:16-07-2026_1-pedro-5-7-ansiedade",
@@ -52,6 +52,37 @@
       "characters": [],
       "created_at": "2026-07-16T22:49:08Z",
       "updated_at": null
+    },
+    {
+      "registry_id": "desktop:16-07-2026_mateus-11-28-descanso",
+      "environment": "desktop",
+      "project_id": "16-07-2026_mateus-11-28-descanso",
+      "project_path": "videos-longos/16-07-2026_mateus-11-28-descanso",
+      "video_format": "landscape",
+      "status": "reserved",
+      "references": [
+        "Mateus 11:28",
+        "Mateus 11:28-30"
+      ],
+      "normalized_references": [
+        "mateus|11|28",
+        "mateus|11|29",
+        "mateus|11|30"
+      ],
+      "main_passage": "Mateus 11:28",
+      "topic": "Jesus chama pessoas cansadas para encontrarem descanso nele.",
+      "normalized_topic": "jesus chama pessoas cansadas para encontrarem descanso nele.",
+      "themes": [
+        "Jesus chama pessoas cansadas para encontrarem descanso nele.",
+        "cansaço",
+        "descanso",
+        "Jesus"
+      ],
+      "characters": [
+        "Jesus"
+      ],
+      "created_at": "2026-07-16T22:49:14Z",
+      "updated_at": "2026-07-16T22:49:14Z"
     }
   ]
 }
