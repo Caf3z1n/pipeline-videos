@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "generated_at": "2026-07-16T22:49:04Z",
+  "generated_at": "2026-07-16T22:49:10Z",
   "records": [
     {
       "registry_id": "desktop:16-07-2026_1-pedro-5-7-ansiedade",
@@ -33,6 +33,25 @@
       ],
       "created_at": "2026-07-16T22:49:04Z",
       "updated_at": "2026-07-16T22:49:04Z"
+    },
+    {
+      "registry_id": "desktop:16-07-2026_coragem-para-conversas-dificeis",
+      "environment": "desktop",
+      "project_id": "16-07-2026_coragem-para-conversas-dificeis",
+      "project_path": "shorts/16-07-2026_coragem-para-conversas-dificeis",
+      "video_format": "short",
+      "status": "reserved",
+      "references": [],
+      "normalized_references": [],
+      "main_passage": null,
+      "topic": "coragem para conversas difíceis",
+      "normalized_topic": "coragem para conversas dificeis",
+      "themes": [
+        "coragem para conversas difíceis"
+      ],
+      "characters": [],
+      "created_at": "2026-07-16T22:49:08Z",
+      "updated_at": null
     }
   ]
 }
