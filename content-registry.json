@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-07-16T22:49:04Z",
+  "records": [
+    {
+      "registry_id": "desktop:16-07-2026_1-pedro-5-7-ansiedade",
+      "environment": "desktop",
+      "project_id": "16-07-2026_1-pedro-5-7-ansiedade",
+      "project_path": "videos-longos/16-07-2026_1-pedro-5-7-ansiedade",
+      "video_format": "landscape",
+      "status": "reserved",
+      "references": [
+        "1 Pedro 5:7",
+        "1 Pedro 5:6-9"
+      ],
+      "normalized_references": [
+        "1-pedro|5|6",
+        "1-pedro|5|7",
+        "1-pedro|5|8",
+        "1-pedro|5|9"
+      ],
+      "main_passage": "1 Pedro 5:7",
+      "topic": "Levar as preocupações a Deus porque seu cuidado é real.",
+      "normalized_topic": "levar as preocupacoes a deus porque seu cuidado e real.",
+      "themes": [
+        "Levar as preocupações a Deus porque seu cuidado é real.",
+        "ansiedade",
+        "cuidado",
+        "oração"
+      ],
+      "characters": [
+        "Pedro"
+      ],
+      "created_at": "2026-07-16T22:49:04Z",
+      "updated_at": "2026-07-16T22:49:04Z"
+    }
+  ]
+}
