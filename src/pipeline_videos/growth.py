@@ -629,13 +629,40 @@ def _validate_thumbnail_visual_standard(
         _PHOTOGRAPHIC_THUMBNAIL_STYLE_MARKERS,
     )
     if any(
-        _normalized_search_text(str(marker)) in normalized_prompt
+        _contains_positive_style_marker(normalized_prompt, str(marker))
         for marker in photographic_markers
         if str(marker).strip()
     ):
         raise ValueError(
             "O prompt da thumbnail tenta usar fotografia ou fotorrealismo em vez do padrão 3D."
         )
+
+
+def _contains_positive_style_marker(normalized_prompt: str, marker: str) -> bool:
+    prompt_tokens = normalized_prompt.split()
+    marker_tokens = _normalized_search_text(marker).split()
+    if not marker_tokens:
+        return False
+    negations = {
+        "avoid",
+        "evitar",
+        "evite",
+        "nao",
+        "não",
+        "never",
+        "not",
+        "nunca",
+        "sem",
+        "without",
+    }
+    marker_length = len(marker_tokens)
+    for index in range(len(prompt_tokens) - marker_length + 1):
+        if prompt_tokens[index : index + marker_length] != marker_tokens:
+            continue
+        prefix = prompt_tokens[max(0, index - 4) : index]
+        if not any(token in negations for token in prefix):
+            return True
+    return False
 
 
 def _safe_staging_file(layout: ProjectLayout, relative_path: str) -> Path:
