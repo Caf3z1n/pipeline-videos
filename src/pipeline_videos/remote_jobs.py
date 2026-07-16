@@ -425,9 +425,9 @@ def _available_verse_candidates(
     projects_root: Path,
 ) -> tuple[list[VerseCandidate], str | None]:
     from pipeline_videos.verse_selection import (
-        build_usage_index,
         load_verse_catalog,
         references_overlap,
+        sync_shared_usage,
     )
 
     catalog = load_verse_catalog()
@@ -443,7 +443,7 @@ def _available_verse_candidates(
         ),
         None,
     )
-    usage = build_usage_index(projects_root, catalog=catalog)
+    usage = sync_shared_usage(projects_root, catalog=catalog)
     project_id = layout.load_manifest().project_id
     used_elsewhere = [
         reference
@@ -591,9 +591,9 @@ def _import_editorial_source_selection(
     from pipeline_videos.state import complete_stage
     from pipeline_videos.utils import relative_posix, sha256_value
     from pipeline_videos.verse_selection import (
-        VERSE_USAGE_FILENAME,
-        build_usage_index,
         load_verse_catalog,
+        reserve_project_candidates,
+        sync_shared_usage,
     )
 
     selection = read_json(selection_path)
@@ -617,6 +617,13 @@ def _import_editorial_source_selection(
         raise ValueError("A seleção remota de passagens não corresponde ao catálogo permitido.")
     selected = [by_id[item] for item in selected_ids]
     main = selected[0]
+    reserve_project_candidates(
+        projects_root,
+        project_id=project.project_id,
+        video_format=project.video_format,
+        candidates=selected,
+        catalog=load_verse_catalog(),
+    )
     current = Briefing.model_validate(read_json(layout.briefing))
     title = job.request.title or job.request.topic or current.title or main.title
     central_theme = current.central_theme.strip() or job.request.topic or main.central_theme
@@ -684,11 +691,7 @@ def _import_editorial_source_selection(
             "human_approval_recorded": False,
         }
     )
-    catalog = load_verse_catalog()
-    write_json(
-        projects_root / VERSE_USAGE_FILENAME,
-        build_usage_index(projects_root, catalog=catalog),
-    )
+    sync_shared_usage(projects_root, catalog=load_verse_catalog())
 
 
 def _shorts_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
@@ -1078,6 +1081,12 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
             "briefing": read_json(layout.briefing),
             "sources": read_json(layout.sources),
             "literal_citation_target": {"minimum": minimum, "maximum": maximum},
+            "creative_contract": {
+                "content_promise_source": "briefing.central_theme",
+                "payoff_source": "briefing.practical_application",
+                "pacing_profile": "balanced_long_v1",
+                "required_reengagements": 2,
+            },
             "schemas": {
                 "script": compact_json_schema(ScriptDocument.model_json_schema()),
                 "biblical_review": compact_json_schema(BiblicalReview.model_json_schema()),
@@ -1093,6 +1102,15 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 ),
                 "Verbalize Livro, capítulo e versículo; deixe somente o excerpt entre aspas.",
                 "Classifique afirmações e preserve limites de interpretação do briefing.",
+                (
+                    "Faça a opening cumprir a promessa do briefing imediatamente; progrida sem "
+                    "trechos de preenchimento, reengaje aproximadamente em um terço e dois terços "
+                    "e entregue o payoff na aplicação/closing."
+                ),
+                (
+                    "Preencha retention_goal em toda seção com sua função e valor para o público. "
+                    "Silêncio ou contemplação só podem permanecer quando tiverem função declarada."
+                ),
                 "A closing deve pedir uma resposta específica entre aspas nos comentários.",
                 "A revisão deve manter approved=false e registrar blockers reais sem ocultá-los.",
                 f"Grave ScriptDocument em {script_output}.",

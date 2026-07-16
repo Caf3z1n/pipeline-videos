@@ -184,8 +184,8 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
             search_intent="Entender Davi e Golias e aplicar a mensagem",
             primary_keyword="Davi e Golias",
             secondary_keywords=["1 Samuel 17", "coragem e fé"],
-            content_promise="Explicar a narrativa e sua aplicação sem inventar fatos.",
-            opening_hook="Um jovem diante de um guerreiro impossível de vencer.",
+            content_promise=queue["contract_guard"]["content_promise"],
+            opening_hook=queue["contract_guard"]["opening_hook"],
             title_rationale="Combina busca clara e curiosidade legítima.",
             thumbnail_rationale="O contraste de escala comunica o conflito rapidamente.",
             title_thumbnail_complement="O título explica; a imagem dramatiza a escala.",
@@ -267,7 +267,9 @@ def test_growth_queue_is_idempotent_and_imports_three_long_form_candidates(tmp_p
     assert queue["visual_standard"]["reference_policy"] == "opening_scene_image_when_available"
     context = read_json(layout.growth_context)
     assert context["visual_system"]["style"]["visual_standard_id"] == ("cinematic-family-3d-v1")
-    assert context["opening_scene"]["assembled_prompt"] == "Davi diante de Golias"
+    assert context["opening_scene"]["visual_subject"] == "Davi diante de Golias"
+    assert context["creative_contract"]["content_promise"] == "Coragem e confiança em Deus"
+    assert "narration" not in context["script_outline"]["sections"][0]
     assert layout.growth_context.is_file()
     assert len(json.dumps(queue["schemas"]["package"])) < len(
         json.dumps(YouTubeGrowthPackage.model_json_schema())
@@ -660,6 +662,18 @@ def test_growth_rejects_reused_thumbnail_phrase_across_title_pairs(tmp_path) -> 
 
     with pytest.raises(ValueError, match="frase de thumbnail distinta"):
         _validate_package(layout, package.model_copy(update={"strategy": strategy}), queue)
+
+
+def test_growth_rejects_semantic_drift_from_the_creative_contract(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(tmp_path)
+    queue = prepare_growth_queue(layout)
+    package = _package(queue)
+    drifted = package.strategy.model_copy(
+        update={"content_promise": "Uma promessa mais dramática que o roteiro não fez."}
+    )
+
+    with pytest.raises(ValueError, match="promessa do contrato criativo"):
+        _validate_package(layout, package.model_copy(update={"strategy": drifted}), queue)
 
 
 def test_thumbnail_design_contract_is_strict_but_legacy_package_remains_valid(tmp_path) -> None:

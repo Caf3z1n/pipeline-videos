@@ -9,6 +9,8 @@ bíblicos ou técnicos.
 Projetos reais novos usam `token_optimized_v1`:
 
 - roteiro e revisão bíblica continuam com raciocínio alto;
+- `script/creative-contract.json` deriva deterministicamente uma única decisão de promessa, gancho,
+  payoff, funções narrativas e ritmo para todas as etapas seguintes;
 - trabalhadores de imagem usam contexto compacto, `fork_turns=none` e raciocínio baixo;
 - o especialista do YouTube lê apenas `youtube/growth-context.json`;
 - a prévia usa 1080p, CRF 16, preset `fast` e supersampling 2;
@@ -44,6 +46,10 @@ O processo aguarda staging, importa cada lote uma única vez, compõe capas, ren
 valida o projeto. Uma falha pode ser retomada com o mesmo comando; hashes e stagings válidos evitam
 repetir artefatos. Bloqueios de moderação de saída admitem no máximo três tentativas por item:
 original, repetição idêntica e alternativa visual com continuidade rígida.
+
+O join de imagens valida todo o staging primeiro e grava manifesto, cenas e fila uma única vez por
+lote, com a fila por último. Ele não chama o importador individual em loop; se houver interrupção
+entre essas gravações, o mesmo lote reaproveita os hashes e conclui o estado no retry.
 
 ## Workers de imagem
 
@@ -81,6 +87,8 @@ entregue somente `youtube/growth-queue.json`; a própria fila aponta para o cont
 - usa conflito concreto, palavra de destaque vermelha e elemento narrativo com alvo real;
 - confirma grafia e acentos e rejeita texto flutuante ou sobreposto aos personagens;
 - segue somente orientações oficiais e nunca promete alcance ou viralização.
+- copia literalmente `content_promise` e `opening_hook` do contrato criativo; divergência bloqueia o
+  import antes de promover metadados.
 
 Em `remote_review`, não crie o subagente: o agente principal lê a mesma fila compacta, escreve o
 staging declarado e importa uma única vez. A fila exige um título e um design integrados. O contrato

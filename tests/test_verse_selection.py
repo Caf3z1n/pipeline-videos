@@ -1,3 +1,4 @@
+import subprocess
 from datetime import date
 
 from pipeline_videos.models import (
@@ -18,6 +19,55 @@ from pipeline_videos.verse_selection import (
     references_overlap,
     select_unused_verse,
 )
+
+
+def test_shared_git_registry_prevents_repetition_between_project_roots(
+    tmp_path, monkeypatch
+) -> None:
+    remote = tmp_path / "registry.git"
+    subprocess.run(
+        ["git", "init", "--bare", "--quiet", str(remote)],
+        capture_output=True,
+        check=True,
+        shell=False,
+    )
+    monkeypatch.setenv("PIPELINE_VIDEOS_CONTENT_REGISTRY_MODE", "git")
+    monkeypatch.setenv("PIPELINE_VIDEOS_CONTENT_REGISTRY_REMOTE", str(remote))
+    monkeypatch.setenv(
+        "PIPELINE_VIDEOS_CONTENT_REGISTRY_REF",
+        "refs/heads/test-content-registry",
+    )
+    monkeypatch.setenv("PIPELINE_VIDEOS_CONTENT_REGISTRY_ENVIRONMENT", "test-host")
+
+    first, first_candidate, _ = create_auto_short(
+        projects_dir=tmp_path / "local-projects",
+        project_date=date(2026, 7, 14),
+    )
+    second, second_candidate, _ = create_auto_short(
+        projects_dir=tmp_path / "remote-projects",
+        project_date=date(2026, 7, 14),
+    )
+
+    assert first_candidate.reference != second_candidate.reference
+    assert first.root.parent.parent != second.root.parent.parent
+    registry = subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(remote),
+            "show",
+            "test-content-registry:content-registry.json",
+        ],
+        capture_output=True,
+        check=True,
+        text=True,
+        shell=False,
+    ).stdout
+    usage = VerseUsageIndex.model_validate_json(registry)
+    assert {item.project_id for item in usage.records} == {
+        first.root.name,
+        second.root.name,
+    }
 
 
 def test_reference_normalization_expands_ranges_and_chapters() -> None:

@@ -181,12 +181,11 @@ def test_preflight_requires_approved_real_assets_and_builds_safe_plan(tmp_path) 
         prepare_publication(layout, privacy_status="public", verify_validation=False)
 
 
-def test_remote_review_candidate_can_upload_only_as_private_without_human_approval(
+def test_private_review_candidate_can_upload_only_as_private_without_human_approval(
     tmp_path,
 ) -> None:
     layout = _ready_project(tmp_path)
     manifest = layout.load_manifest()
-    manifest.config.production.mode = "remote_review"
     manifest.config.youtube_publication.allow_automated_private_review_upload = True
     manifest.stages["render"] = manifest.stages["render"].model_copy(
         update={"provider": "ffmpeg-review-candidate"}
@@ -214,10 +213,9 @@ def test_remote_review_candidate_can_upload_only_as_private_without_human_approv
         )
 
 
-def test_remote_review_upload_does_not_record_human_approval(tmp_path) -> None:
+def test_private_review_upload_does_not_record_human_approval(tmp_path) -> None:
     layout = _ready_project(tmp_path)
     manifest = layout.load_manifest()
-    manifest.config.production.mode = "remote_review"
     manifest.config.youtube_publication.allow_automated_private_review_upload = True
     manifest.stages["render"] = manifest.stages["render"].model_copy(
         update={"provider": "ffmpeg-review-candidate"}

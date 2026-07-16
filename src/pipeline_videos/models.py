@@ -217,7 +217,7 @@ class YouTubePublicationConfig(PipelineModel):
     contains_synthetic_media: bool = True
     upload_captions: bool = True
     notify_subscribers: bool = False
-    allow_automated_private_review_upload: bool = False
+    allow_automated_private_review_upload: bool = True
     allow_automated_scheduled_release: bool = False
 
 
@@ -395,6 +395,8 @@ class VerseCatalog(PipelineModel):
 
 
 class VerseUsageRecord(PipelineModel):
+    registry_id: str | None = None
+    environment: str | None = None
     project_id: str
     project_path: str
     video_format: Literal["landscape", "short"]
@@ -402,9 +404,12 @@ class VerseUsageRecord(PipelineModel):
     references: list[str] = Field(default_factory=list)
     normalized_references: list[str] = Field(default_factory=list)
     main_passage: str | None = None
+    topic: str | None = None
+    normalized_topic: str | None = None
     themes: list[str] = Field(default_factory=list)
     characters: list[str] = Field(default_factory=list)
     created_at: str
+    updated_at: str | None = None
 
 
 class VerseUsageIndex(PipelineModel):
@@ -439,6 +444,87 @@ class ScriptDocument(PipelineModel):
 
     def narration_text(self) -> str:
         return "\n\n".join(section.narration.strip() for section in self.sections).strip()
+
+
+class CreativePacingProfile(PipelineModel):
+    profile_id: Literal["balanced_long_v1", "short_v1"]
+    default_scene_seconds: float = Field(gt=0.0)
+    opening_scene_seconds: float = Field(gt=0.0)
+    reengagement_scene_seconds: float = Field(gt=0.0)
+    contemplative_scene_seconds: float = Field(gt=0.0)
+    payoff_scene_seconds: float = Field(gt=0.0)
+
+
+class CreativeBeat(PipelineModel):
+    section_id: str
+    functions: list[
+        Literal[
+            "hook",
+            "progression",
+            "reengagement",
+            "contemplation",
+            "payoff",
+            "application",
+            "cta",
+        ]
+    ]
+    viewer_value: str
+    target_start_seconds: float = Field(ge=0.0)
+    target_end_seconds: float = Field(gt=0.0)
+    critical: bool = False
+
+    @model_validator(mode="after")
+    def validate_timing(self) -> CreativeBeat:
+        if self.target_end_seconds <= self.target_start_seconds:
+            raise ValueError("target_end_seconds deve ser posterior a target_start_seconds")
+        if not self.functions:
+            raise ValueError("Cada beat criativo precisa declarar ao menos uma função")
+        if not self.viewer_value.strip():
+            raise ValueError("Cada beat criativo precisa declarar valor para o público")
+        return self
+
+
+class CreativeContract(PipelineModel):
+    schema_version: Literal["1.0"] = "1.0"
+    algorithm: Literal["creative-contract-v1"] = "creative-contract-v1"
+    input_hash: str
+    format: Literal["long_form", "short"]
+    target_viewer: str
+    content_promise: str
+    opening_hook: str
+    payoff: str
+    practical_application: str
+    main_passage: str
+    source_ids: list[str] = Field(default_factory=list)
+    section_ids: list[str]
+    claims_to_avoid: list[str] = Field(default_factory=list)
+    beats: list[CreativeBeat]
+    critical_component_ids: list[str]
+    pacing: CreativePacingProfile
+
+    @model_validator(mode="after")
+    def validate_critical_components(self) -> CreativeContract:
+        if not all(
+            value.strip()
+            for value in (self.target_viewer, self.content_promise, self.opening_hook, self.payoff)
+        ):
+            raise ValueError("Público, promessa, gancho e payoff não podem ficar vazios")
+        beat_section_ids = [beat.section_id for beat in self.beats]
+        if not self.section_ids or beat_section_ids != self.section_ids:
+            raise ValueError("O contrato criativo precisa cobrir cada seção exatamente uma vez")
+        if len(set(self.section_ids)) != len(self.section_ids):
+            raise ValueError("section_id precisa ser único no contrato criativo")
+        expected_critical = [beat.section_id for beat in self.beats if beat.critical]
+        if self.critical_component_ids != expected_critical:
+            raise ValueError("A lista de componentes críticos não corresponde aos beats")
+        functions = {function for beat in self.beats for function in beat.functions}
+        if not {"hook", "payoff"}.issubset(functions):
+            raise ValueError("O contrato criativo precisa declarar gancho e payoff")
+        if self.format == "long_form" and len(self.beats) >= 5:
+            reengagements = sum("reengagement" in beat.functions for beat in self.beats)
+            if reengagements < 2:
+                raise ValueError("O vídeo longo precisa de dois pontos de reengajamento")
+        return self
 
 
 class ReviewFinding(PipelineModel):

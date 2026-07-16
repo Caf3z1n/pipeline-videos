@@ -1331,8 +1331,6 @@ def render_project(layout: ProjectLayout, *, force: bool = False) -> RenderResul
 def render_review_candidate(layout: ProjectLayout, *, force: bool = False) -> RenderResult:
     """Render full quality from active assets without recording a human approval."""
     project = layout.load_manifest()
-    if project.config.production.mode != "remote_review":
-        raise RuntimeError("O render candidato só está disponível no modo remote_review.")
     if not project.config.youtube_publication.allow_automated_private_review_upload:
         raise RuntimeError("A política de candidato privado não está habilitada neste projeto.")
     result = _render_project_output(
@@ -1343,7 +1341,7 @@ def render_review_candidate(layout: ProjectLayout, *, force: bool = False) -> Re
     )
     layout.append_event(
         {
-            "event": "remote_review_candidate_rendered",
+            "event": "private_review_candidate_rendered",
             "path": relative_posix(result.final_video, layout.root),
             "human_approval_recorded": False,
         }

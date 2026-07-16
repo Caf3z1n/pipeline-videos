@@ -321,12 +321,12 @@ def prepare_publication(
         automated_review
         and config.allow_automated_private_review_upload
         and visibility == "private"
-        and manifest.config.production.mode == "remote_review"
         and manifest.stages["render"].provider == "ffmpeg-review-candidate"
     )
     if automated_review and not automated_candidate:
         raise RuntimeError(
-            "Upload automatizado bloqueado: exige candidato remote_review validado e privado."
+            "Upload automatizado bloqueado: exige candidato privado validado, "
+            "produzido por render-review e com a política habilitada."
         )
     if not automated_candidate:
         for approval in ("metadata", "final_render"):

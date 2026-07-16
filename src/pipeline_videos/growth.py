@@ -9,6 +9,7 @@ from typing import Any
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
+from pipeline_videos.analytics import compact_metric_learning
 from pipeline_videos.imagegen_retry import (
     imagegen_retry_instructions,
     imagegen_retry_policy,
@@ -28,6 +29,7 @@ from pipeline_videos.models import (
     YouTubeMetadata,
     YouTubeThumbnailDesign,
 )
+from pipeline_videos.script import ensure_creative_contract
 from pipeline_videos.state import (
     complete_stage,
     invalidate,
@@ -44,8 +46,8 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-GROWTH_QUEUE_SCHEMA_VERSION = "1.10"
-GROWTH_ALGORITHM_VERSION = "1.10"
+GROWTH_QUEUE_SCHEMA_VERSION = "1.11"
+GROWTH_ALGORITHM_VERSION = "1.11"
 SHORT_TITLE_MAX_CHARACTERS = 70
 SHORT_DESCRIPTION_MAX_CHARACTERS = 600
 SHORT_DESCRIPTION_SEARCH_WINDOW = 240
@@ -98,7 +100,6 @@ def _growth_context_payload(layout: ProjectLayout) -> dict[str, Any]:
         "script": layout.script,
         "biblical_review": layout.biblical_review,
         "scenes": layout.scenes,
-        "experiments": layout.experiments,
     }
     missing = [str(path) for path in required.values() if not path.is_file()]
     if missing:
@@ -110,17 +111,61 @@ def _growth_context_payload(layout: ProjectLayout) -> dict[str, Any]:
         "remote_review",
     }
     script = read_model(layout.script, ScriptDocument)
+    contract = ensure_creative_contract(layout, script)
     sources = read_model(layout.sources, SourceLibrary)
     scenes = read_model(layout.scenes, SceneManifest)
     opening_scene = min(scenes.scenes, key=lambda item: item.order)
     style = read_json(layout.style_profile)
     palette = read_json(layout.palette)
-    experiments = read_json(layout.experiments)
-    compact_experiments = (
-        experiments.get("experiments", []) if isinstance(experiments, dict) else []
-    )
+    review = read_json(layout.biblical_review)
+    used_source_ids = set(contract.source_ids or script.source_ids)
+    compact_sources = [
+        {
+            "source_id": source.source_id,
+            "kind": source.kind,
+            "title": source.title,
+            "passage": source.passage,
+            "translation": source.translation,
+            "use_in_video": source.use_in_video,
+            "claim_scope": source.claim_scope,
+            "verified": source.verified,
+        }
+        for source in sources.entries
+        if not used_source_ids or source.source_id in used_source_ids
+    ]
+    open_findings = [
+        {
+            "severity": finding.get("severity"),
+            "category": finding.get("category"),
+            "statement": finding.get("statement"),
+            "evidence": finding.get("evidence"),
+            "recommendation": finding.get("recommendation"),
+        }
+        for finding in review.get("findings", [])
+        if isinstance(finding, dict) and not finding.get("resolved", False)
+    ]
+    compact_contract = {
+        "input_hash": contract.input_hash,
+        "format": contract.format,
+        "target_viewer": contract.target_viewer,
+        "content_promise": contract.content_promise,
+        "opening_hook": contract.opening_hook,
+        "payoff": contract.payoff,
+        "practical_application": contract.practical_application,
+        "main_passage": contract.main_passage,
+        "source_ids": contract.source_ids,
+        "claims_to_avoid": contract.claims_to_avoid,
+        "beats": [
+            {
+                "section_id": beat.section_id,
+                "functions": beat.functions,
+                "viewer_value": beat.viewer_value,
+            }
+            for beat in contract.beats
+        ],
+    }
     payload: dict[str, Any] = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "algorithm": GROWTH_ALGORITHM_VERSION,
         "project": {
             "project_id": project.project_id,
@@ -131,55 +176,48 @@ def _growth_context_payload(layout: ProjectLayout) -> dict[str, Any]:
             "production_mode": project.config.production.mode,
             "reasoning_effort": "low" if light_mode else "medium",
         },
-        "briefing": read_json(layout.briefing),
-        "sources": [
-            {
-                "source_id": source.source_id,
-                "kind": source.kind,
-                "title": source.title,
-                "passage": source.passage,
-                "translation": source.translation,
-                "excerpt": source.excerpt,
-                "use_in_video": source.use_in_video,
-                "claim_scope": source.claim_scope,
-                "verified": source.verified,
-            }
-            for source in sources.entries
-        ],
-        "script": {
+        "creative_contract": compact_contract,
+        "sources": compact_sources,
+        "script_outline": {
             "title": script.title,
             "sections": [
                 {
                     "section_id": section.section_id,
                     "role": section.role,
                     "title": section.title,
-                    "narration": section.narration,
                     "biblical_basis": section.biblical_basis,
-                    "retention_goal": section.retention_goal,
-                    "visual_direction": section.visual_direction,
                 }
                 for section in script.sections
             ],
         },
-        "biblical_review": read_json(layout.biblical_review),
+        "biblical_review": {
+            "summary": review.get("summary", ""),
+            "open_findings": open_findings,
+        },
         "opening_scene": {
             "scene_id": opening_scene.scene_id,
             "section_id": opening_scene.section_id,
-            "narration": opening_scene.narration,
             "narrative_function": opening_scene.narrative_function,
             "visual_subject": opening_scene.prompt.scene,
             "composition": opening_scene.prompt.composition,
             "emotion": opening_scene.prompt.emotion,
-            "assembled_prompt": opening_scene.prompt.assembled_prompt,
         },
         "visual_system": {
-            "style": style,
-            "palette": palette,
+            "style": {
+                key: style.get(key)
+                for key in (
+                    "style_id",
+                    "name",
+                    "medium",
+                    "principles",
+                    "negative_constraints",
+                    "visual_standard_id",
+                )
+            },
+            "palette": {key: palette.get(key) for key in ("palette_id", "name", "mood", "colors")},
         },
-        "experiments": compact_experiments[-12:],
+        "metric_learning": compact_metric_learning(layout),
     }
-    if project.video_format == "short" and layout.shorts_script_strategy.is_file():
-        payload["retention_strategy"] = read_json(layout.shorts_script_strategy)
     if (
         project.video_format != "short"
         and project.config.youtube_growth.reuse_scene_images_for_thumbnails
@@ -266,6 +304,10 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         "project_id": project.project_id,
         "job_id": job_id,
         "input_hash": input_hash,
+        "contract_guard": {
+            key: growth_context["creative_contract"][key]
+            for key in ("input_hash", "content_promise", "opening_hook")
+        },
         "status": StageStatus.WAITING_EXTERNAL.value,
         "role": config.specialist_role,
         "orchestration": {
@@ -352,8 +394,12 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         "official_guidelines": list(OFFICIAL_YOUTUBE_GUIDELINES),
         "instructions": [
             (
-                "Leia somente inputs.compact_context; ele já contém os fatos, passagens, roteiro, "
-                "revisão, abertura visual e experimentos necessários."
+                "Leia somente inputs.compact_context; o creative_contract é a autoridade para "
+                "promessa, gancho, payoff e função de cada trecho."
+            ),
+            (
+                "Copie creative_contract.content_promise e creative_contract.opening_hook "
+                "literalmente para os campos homônimos da strategy; não os reinterprete."
             ),
             "Preserve rigorosamente fatos, passagens e fontes do projeto.",
             f"Entregue {config.title_variants} combinações distintas de título para teste.",
@@ -363,8 +409,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
             "nas primeiras linhas.",
             "Trate SEO, CTR e alcance como hipóteses; nunca prometa viralização ou invente "
             "métricas.",
-            "Use dados reais de analytics/experiments.json quando existirem; nunca invente "
-            "volume de busca.",
+            "Use somente metric_learning quando houver dados; nunca invente volume de busca.",
             "Faça título e thumbnail se complementarem sem repetir mecanicamente a mesma frase.",
             "Associe título e thumbnail pelo mesmo índice: a primeira imagem acompanha o título "
             "principal.",
@@ -378,8 +423,8 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
             ),
             (
                 "A thumbnail precisa pertencer exatamente ao mesmo universo visual das cenas. "
-                "Use visual_standard.id, visual_system.style, visual_system.palette e o "
-                "assembled_prompt da opening_scene como contrato, preservando animação 3D "
+                "Use visual_standard.id, visual_system.style, visual_system.palette e a "
+                "opening_scene como contrato, preservando animação 3D "
                 "cinematográfica familiar premium, materiais estilizados, proporções, desenho "
                 "de personagem, paleta e iluminação de longa-metragem."
             ),
@@ -408,7 +453,9 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         ],
     }
     if config.title_standard == "passage_pipe_topic_v1":
-        main_passage = str(growth_context.get("briefing", {}).get("main_passage", "")).strip()
+        main_passage = str(
+            growth_context.get("creative_contract", {}).get("main_passage", "")
+        ).strip()
         payload["instructions"].extend(
             [
                 (
@@ -778,6 +825,17 @@ def _validate_package(
     if package.strategy.thumbnail_text and len(package.strategy.thumbnail_text.split()) > 5:
         raise ValueError("O texto sugerido para a thumbnail deve ter no máximo cinco palavras.")
     uses_design_contract = queue.get("schema_version") == GROWTH_QUEUE_SCHEMA_VERSION
+    if uses_design_contract:
+        contract_guard = queue.get("contract_guard", {})
+        if package.strategy.content_promise != contract_guard.get("content_promise"):
+            raise ValueError(
+                "A estratégia mudou a promessa do contrato criativo; copie content_promise "
+                "literalmente."
+            )
+        if package.strategy.opening_hook != contract_guard.get("opening_hook"):
+            raise ValueError(
+                "A estratégia mudou o gancho do contrato criativo; copie opening_hook literalmente."
+            )
     if uses_design_contract and len(package.strategy.thumbnail_designs) != expected_designs:
         raise ValueError("O pacote precisa de um thumbnail_design por candidata.")
     if uses_design_contract and any(

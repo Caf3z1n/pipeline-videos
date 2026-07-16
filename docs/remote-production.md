@@ -87,6 +87,30 @@ inclua nos logs. O token OAuth renovável já autorizado pode ser copiado para
 `~/.config/pipeline-videos/youtube/token.json`; não é necessário repetir o consentimento enquanto o
 refresh token continuar válido.
 
+## Registro compartilhado de conteúdo
+
+`shared/content-registry.git` é um repositório Git bare que guarda somente
+`content-registry.json`. O JSON tem schema versionado e relaciona ambiente, projeto, passagem,
+tema, personagens e estado `reserved`/`used`. Ele não contém roteiro, prompt, segredo ou mídia.
+
+Configure o mesmo remoto nos dois ambientes:
+
+```dotenv
+# Windows/local
+PIPELINE_VIDEOS_CONTENT_REGISTRY_MODE=git
+PIPELINE_VIDEOS_CONTENT_REGISTRY_REMOTE=hostinger-vps:/home/deploy/pipeline-videos/shared/content-registry.git
+PIPELINE_VIDEOS_CONTENT_REGISTRY_ENVIRONMENT=local-windows
+
+# VPS
+PIPELINE_VIDEOS_CONTENT_REGISTRY_MODE=git
+PIPELINE_VIDEOS_CONTENT_REGISTRY_REMOTE=/home/deploy/pipeline-videos/shared/content-registry.git
+PIPELINE_VIDEOS_CONTENT_REGISTRY_ENVIRONMENT=hostinger-vps
+```
+
+Uma reserva é commitada antes da criação automática. Passagens complementares escolhidas pelo
+editorial remoto são confirmadas por uma segunda transação antes do import. Push concorrente é
+recarregado e repetido; erro de rede ou permissão interrompe a fase para evitar duplicidade.
+
 ## Operação
 
 O timer systemd chama `pipeline-videos remote work-once` a cada minuto. Os comandos de leitura e

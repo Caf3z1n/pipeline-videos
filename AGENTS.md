@@ -19,7 +19,10 @@
 
 ## Segurança e custo
 
-- Não publique, envie, agende, compre, habilite pay-as-you-go ou altere faturamento.
+- Não publique, envie ou agende sem pedido explícito do usuário. Quando o pedido incluir upload
+  privado, use `render-review` e `youtube upload --automated-review`; esse caminho não exige nem
+  registra aprovação humana. Publicação pública ou agendada continua sendo uma ação separada, com
+  data/hora explícita e os guards do CLI. Nunca compre, habilite pay-as-you-go ou altere faturamento.
 - ElevenLabs exige pedido do usuário e `--allow-external`.
 - Nunca exiba, registre ou versione chaves e tokens.
 - Não substitua a geração embutida por API paga sem aprovação explícita.
@@ -35,7 +38,8 @@
 - Classifique afirmações como `biblical_text`, `verified_context`, `interpretation` ou
   `creative_elaboration`.
 - Preserve incertezas; finding `blocking` aberto impede aprovação.
-- Nunca registre aprovação humana em nome do usuário.
+- Nunca invente nem registre aprovação humana em nome do usuário. Para upload privado solicitado
+  explicitamente, use o candidato automatizado validado em vez de preencher aprovações.
 - A locução permanece integralmente em português: não narre `open loop`, `payoff`, `storytelling`,
   `call to action` ou outro jargão editorial em inglês.
 - Não diga “o texto fala/diz/registra”. Prefira “a Bíblia diz” ou “Em Livro, capítulo X,
@@ -60,8 +64,9 @@
 
 - Pedido simples de Short usa `new-short`, seguido de `status`, `run --dry-run` e one-shot; não peça
   novamente versículo, CTA, estilo ou fluxo já padronizados.
-- O seletor automático usa o catálogo local verificado, exclui qualquer passagem já presente nas
-  pastas de projetos e favorece variedade de livro, tema, personagem e testamento sob lock.
+- O seletor automático usa o catálogo local verificado, combina as pastas com o registro Git
+  compartilhado, reserva por compare-and-swap antes de criar o projeto e favorece variedade de
+  livro, tema, personagem e testamento. Falha do registro bloqueia a seleção; não use fallback local.
 - O briefing automático não equivale a aprovação humana.
 - No modo completo, prepare `script/shorts-queue.json` e crie exatamente um
   `shorts_script_specialist`, com raciocínio alto e staging exclusivo; o agente principal valida e
@@ -142,13 +147,14 @@
   desenho de personagem, paleta e iluminação das cenas. Em `remote_review`, use obrigatoriamente a
   imagem produzida para a cena de abertura como referência visual e interrompa a etapa se ela ainda
   não existir; nunca improvise fotografia, fotorrealismo ou live action.
-- `render-review` usa ativos ativos em qualidade final e nunca registra aprovação humana. Um
-  candidato assim pode ser enviado automaticamente somente como `private`, quando a política do
-  projeto permitir e a validação técnica estiver concluída.
+- `render-review` funciona em produções locais e remotas, usa os ativos ativos em qualidade final e
+  nunca registra aprovação humana. Um candidato assim pode ser enviado automaticamente somente como
+  `private`, quando a política do projeto permitir e a validação técnica estiver concluída.
 - Agendamento automático só é permitido quando o job original trouxer `publication_mode=scheduled`
   e `publish_at` explícito com fuso. Um job `private_review` termina após o upload privado.
-- O executor remoto, e não o Codex, faz upload/agendamento. O Codex nunca lê ou imprime `.env`, token
-  OAuth ou outros segredos e nunca publica diretamente durante a etapa de produção.
+- No modo remoto, o executor remoto faz upload/agendamento. No fluxo local, quando o usuário pedir
+  explicitamente, o Codex pode usar os comandos guardados do pipeline depois da validação. Nunca leia
+  ou imprima `.env`, token OAuth ou outros segredos.
 
 ## Padrão visual e render
 

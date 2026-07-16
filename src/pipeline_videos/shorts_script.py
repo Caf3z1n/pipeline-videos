@@ -1007,7 +1007,12 @@ def import_shorts_script_package(
         }
     )
 
-    save_script(layout, script, provider="shorts-script-specialist")
+    save_script(
+        layout,
+        script,
+        provider="shorts-script-specialist",
+        creative_strategy=final_package.strategy,
+    )
     save_biblical_review(layout, review, provider="shorts-script-specialist")
     write_json(layout.shorts_script_package, final_package)
     write_json(layout.shorts_script_strategy, final_package.strategy)
@@ -1030,6 +1035,7 @@ def import_shorts_script_package(
             relative_posix(layout.shorts_script_context, layout.root),
             relative_posix(layout.shorts_script_package, layout.root),
             relative_posix(layout.shorts_script_strategy, layout.root),
+            relative_posix(layout.creative_contract, layout.root),
         ],
         provider="shorts-script-specialist",
         usage={

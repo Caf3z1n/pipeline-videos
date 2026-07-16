@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -171,6 +172,7 @@ def _finish_images_stage(
     waiting_external: bool,
     waiting_note: str | None = None,
     extra_artifacts: list[str] | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> None:
     artifacts = _active_artifacts(layout, manifest)
     if artifacts is not None:
@@ -180,7 +182,7 @@ def _finish_images_stage(
             input_hash,
             artifacts,
             provider=provider,
-            usage={"images": len(manifest.items)},
+            usage={"images": len(manifest.items), **(usage or {})},
         )
         return
 
@@ -1135,9 +1137,10 @@ def import_staged_images(
     if not isinstance(queue, dict) or not isinstance(queue.get("items"), list):
         raise ValueError("Fila do Codex inválida: items ausente ou não é uma lista.")
 
+    project = layout.load_manifest()
     manifest = build_image_manifest(layout)
     items_by_scene = {item.scene_id: item for item in manifest.items}
-    staged: list[tuple[str, Path]] = []
+    staged: list[tuple[str, Path, str, dict[str, Any]]] = []
     seen: set[str] = set()
     for entry in queue["items"]:
         if not isinstance(entry, dict) or entry.get("status") == StageStatus.COMPLETED.value:
@@ -1167,12 +1170,33 @@ def import_staged_images(
         try:
             with Image.open(source) as opened:
                 opened.load()
+                separator = (
+                    _horizontal_separator_band(opened)
+                    if project.config.images.reject_panel_like_images
+                    else None
+                )
         except Exception as exc:
             raise ValueError(f"Arquivo de imagem inválido: {source}") from exc
-        staged.append((scene_id, source))
+        if separator is not None:
+            start, end = separator
+            raise ValueError(
+                "A imagem parece conter painéis separados por uma faixa horizontal clara "
+                f"({start:.0%}–{end:.0%} da altura). Gere uma única composição contínua."
+            )
+        staged.append((scene_id, source, sha256_file(source), entry))
 
     if not staged:
         if all(_active_version_is_current(layout, item) for item in manifest.items):
+            stage = layout.load_manifest().stages["images"]
+            if stage.status != StageStatus.COMPLETED:
+                _finish_images_stage(
+                    layout,
+                    manifest,
+                    stage.input_hash or sha256_value(_queue_core(queue)),
+                    provider="codex",
+                    waiting_external=False,
+                    usage={"batch_size": 0, "batch_import_ms": 0},
+                )
             return manifest
         raise FileNotFoundError("Nenhuma imagem pronta foi encontrada na pasta de staging.")
 
@@ -1181,37 +1205,119 @@ def import_staged_images(
     if stage.status == StageStatus.WAITING_EXTERNAL and stage.input_hash != queue_input_hash:
         raise RuntimeError("A fila de imagens não corresponde à execução ativa do projeto.")
 
-    imported: ImageManifest | None = None
-    for scene_id, source in staged:
-        imported = import_external_image(
-            layout,
-            scene_id,
-            source,
-            provider="codex",
-            force=force,
+    scenes = read_model(layout.scenes, SceneManifest)
+    scenes_by_id = {scene.scene_id: scene for scene in scenes.scenes}
+    imported_items: list[dict[str, Any]] = []
+    started_at = time.perf_counter()
+    start_stage(layout, "images", queue_input_hash, provider="codex")
+    try:
+        for scene_id, source, source_hash, queue_entry in staged:
+            item = items_by_scene[scene_id]
+            existing = next(
+                (
+                    version
+                    for version in item.versions
+                    if source_hash
+                    in {version.metadata.get("source_hash"), version.metadata.get("sha256")}
+                    and version.prompt_hash == item.prompt_hash
+                    and (layout.root / version.path).is_file()
+                ),
+                None,
+            )
+            if existing is None:
+                version = queue_entry.get("version")
+                expected_path = queue_entry.get("expected_path")
+                if not isinstance(version, int) or not isinstance(expected_path, str):
+                    raise ValueError(f"Reserva inválida na fila para {scene_id}.")
+                destination = (layout.root / expected_path).resolve()
+                try:
+                    destination.relative_to(layout.root.resolve())
+                except ValueError as exc:
+                    raise ValueError(f"Destino inseguro na fila do Codex: {expected_path}") from exc
+                claimed_versions = {candidate.version for candidate in item.versions}
+                if version in claimed_versions or (
+                    destination.is_file()
+                    and destination != source
+                    and sha256_file(destination) != source_hash
+                ):
+                    version, destination = _next_version(
+                        layout,
+                        item,
+                        project.config.images.extension,
+                    )
+                width, height = _save_imported_png(
+                    source,
+                    destination,
+                    reject_panel_like=False,
+                )
+                stored_path = relative_posix(destination, layout.root)
+                existing = ImageVersion(
+                    version=version,
+                    path=stored_path,
+                    provider="codex",
+                    prompt_hash=item.prompt_hash,
+                    created_at=utc_now(),
+                    metadata={
+                        "source_name": source.name,
+                        "source_hash": source_hash,
+                        "width": width,
+                        "height": height,
+                        "sha256": sha256_file(destination),
+                    },
+                )
+                item.versions.append(existing)
+
+            item.active_version = existing.version
+            item.status = StageStatus.COMPLETED
+            item.last_error = None
+            scenes_by_id[scene_id].generation_status = StageStatus.COMPLETED
+            queue_entry["status"] = StageStatus.COMPLETED.value
+            queue_entry["actual_path"] = existing.path
+            queue_entry["imported_at"] = utc_now()
+            imported_items.append(
+                {
+                    "scene_id": scene_id,
+                    "version": existing.version,
+                    "path": existing.path,
+                }
+            )
+
+        manifest.generated_at = utc_now()
+        queue["status"] = (
+            StageStatus.WAITING_EXTERNAL.value
+            if any(
+                isinstance(entry, dict)
+                and entry.get("status") == StageStatus.WAITING_EXTERNAL.value
+                for entry in queue["items"]
+            )
+            else StageStatus.COMPLETED.value
         )
-    assert imported is not None
-    current_queue = read_json(layout.image_queue)
-    pending = any(
-        isinstance(entry, dict) and entry.get("status") == StageStatus.WAITING_EXTERNAL.value
-        for entry in current_queue.get("items", [])
-    )
-    _finish_images_stage(
-        layout,
-        imported,
-        queue_input_hash,
-        provider="codex",
-        waiting_external=pending,
-    )
-    layout.append_event(
-        {
-            "event": "images_batch_imported",
-            "batch_id": queue.get("batch_id"),
-            "count": len(staged),
-            "scenes": [scene_id for scene_id, _ in staged],
-        }
-    )
-    return imported
+        write_json(layout.images, manifest)
+        write_json(layout.scenes, scenes)
+        write_json(layout.image_queue, queue)
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000)
+        pending = queue["status"] == StageStatus.WAITING_EXTERNAL.value
+        _finish_images_stage(
+            layout,
+            manifest,
+            queue_input_hash,
+            provider="codex",
+            waiting_external=pending,
+            usage={"batch_size": len(imported_items), "batch_import_ms": elapsed_ms},
+        )
+        layout.append_event(
+            {
+                "event": "images_batch_imported",
+                "batch_id": queue.get("batch_id"),
+                "count": len(imported_items),
+                "elapsed_ms": elapsed_ms,
+                "items": imported_items,
+            }
+        )
+        return manifest
+    except Exception as exc:
+        fail_stage(layout, "images", exc)
+        raise
 
 
 def import_manual_images(

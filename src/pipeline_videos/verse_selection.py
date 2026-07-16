@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import time
 import unicodedata
 from collections import Counter
@@ -12,6 +13,11 @@ from datetime import date
 from pathlib import Path
 from typing import Literal
 
+from pipeline_videos.git_registry import (
+    read_shared_registry,
+    shared_registry_enabled,
+    update_shared_registry,
+)
 from pipeline_videos.models import (
     Briefing,
     ProductionMode,
@@ -22,7 +28,7 @@ from pipeline_videos.models import (
     VerseUsageIndex,
     VerseUsageRecord,
 )
-from pipeline_videos.project import create_project
+from pipeline_videos.project import create_project, project_directory_name
 from pipeline_videos.state import complete_stage
 from pipeline_videos.storage import (
     DEFAULT_PROJECTS_DIR,
@@ -36,6 +42,7 @@ from pipeline_videos.utils import relative_posix, sha256_value, tokenize_words, 
 
 DEFAULT_VERSE_CATALOG = REPO_ROOT / "config" / "bible" / "shorts-verse-catalog.json"
 VERSE_USAGE_FILENAME = "verse-usage.json"
+REGISTRY_ENVIRONMENT_ENV = "PIPELINE_VIDEOS_CONTENT_REGISTRY_ENVIRONMENT"
 
 BOOK_ALIASES = {
     "genesis": "genesis",
@@ -79,6 +86,11 @@ REFERENCE_RE = re.compile(
 def _plain(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value)
     return normalized.encode("ascii", "ignore").decode("ascii").casefold().strip()
+
+
+def registry_environment() -> str:
+    configured = os.getenv(REGISTRY_ENVIRONMENT_ENV, "").strip()
+    return _plain(configured or socket.gethostname()) or "unknown"
 
 
 def reference_tokens(reference: str) -> set[str]:
@@ -172,6 +184,8 @@ def build_usage_index(
         ]
         records.append(
             VerseUsageRecord(
+                registry_id=f"{registry_environment()}:{manifest.project_id}",
+                environment=registry_environment(),
                 project_id=manifest.project_id,
                 project_path=manifest_path.parent.relative_to(root).as_posix(),
                 video_format=manifest.video_format,
@@ -179,7 +193,16 @@ def build_usage_index(
                 references=references,
                 normalized_references=tokens,
                 main_passage=briefing.main_passage or None,
-                themes=list(dict.fromkeys(theme for item in matched for theme in item.themes)),
+                topic=briefing.central_theme or manifest.title,
+                normalized_topic=_plain(briefing.central_theme or manifest.title),
+                themes=list(
+                    dict.fromkeys(
+                        [
+                            briefing.central_theme or manifest.title,
+                            *(theme for item in matched for theme in item.themes),
+                        ]
+                    )
+                ),
                 characters=list(
                     dict.fromkeys(name for item in matched for name in item.characters)
                 ),
@@ -189,14 +212,207 @@ def build_usage_index(
     return VerseUsageIndex(generated_at=utc_now(), records=records)
 
 
+def merge_usage_indexes(*indexes: VerseUsageIndex) -> VerseUsageIndex:
+    merged: dict[str, VerseUsageRecord] = {}
+    for index in indexes:
+        for record in index.records:
+            key = record.registry_id or f"legacy:{record.project_id}"
+            current = merged.get(key)
+            if current is None:
+                merged[key] = record
+                continue
+            references = list(dict.fromkeys([*current.references, *record.references]))
+            merged[key] = record.model_copy(
+                update={
+                    "status": "used" if "used" in {current.status, record.status} else "reserved",
+                    "references": references,
+                    "normalized_references": sorted(
+                        {token for reference in references for token in reference_tokens(reference)}
+                    ),
+                    "themes": list(dict.fromkeys([*current.themes, *record.themes])),
+                    "characters": list(dict.fromkeys([*current.characters, *record.characters])),
+                    "created_at": min(current.created_at, record.created_at),
+                    "updated_at": record.updated_at or current.updated_at,
+                }
+            )
+    return VerseUsageIndex(
+        generated_at=utc_now(),
+        records=sorted(merged.values(), key=lambda item: (item.created_at, item.project_id)),
+    )
+
+
+def combined_usage_index(
+    projects_dir: Path,
+    *,
+    catalog: VerseCatalog | None = None,
+) -> VerseUsageIndex:
+    local = build_usage_index(projects_dir, catalog=catalog)
+    if not shared_registry_enabled():
+        return local
+    shared = VerseUsageIndex.model_validate(read_shared_registry())
+    return merge_usage_indexes(shared, local)
+
+
+def sync_shared_usage(
+    projects_dir: Path,
+    *,
+    catalog: VerseCatalog | None = None,
+) -> VerseUsageIndex:
+    local = build_usage_index(projects_dir, catalog=catalog)
+    if not shared_registry_enabled():
+        write_json(projects_dir / VERSE_USAGE_FILENAME, local)
+        return local
+
+    def mutate(raw: dict[str, object]) -> tuple[dict[str, object], VerseUsageIndex]:
+        shared = VerseUsageIndex.model_validate(raw)
+        merged = merge_usage_indexes(shared, local)
+        if [item.model_dump(mode="json") for item in merged.records] == [
+            item.model_dump(mode="json") for item in shared.records
+        ]:
+            return raw, shared
+        return merged.model_dump(mode="json"), merged
+
+    merged = update_shared_registry(mutate, message="registry: sync project usage")
+    write_json(projects_dir / VERSE_USAGE_FILENAME, merged)
+    return merged
+
+
+def _reservation_record(
+    candidate: VerseCandidate,
+    *,
+    project_id: str,
+    video_format: Literal["landscape", "short"],
+) -> VerseUsageRecord:
+    category = "shorts" if video_format == "short" else "videos-longos"
+    now = utc_now()
+    references = list(dict.fromkeys([candidate.reference, candidate.context_reference]))
+    environment = registry_environment()
+    return VerseUsageRecord(
+        registry_id=f"{environment}:{project_id}",
+        environment=environment,
+        project_id=project_id,
+        project_path=f"{category}/{project_id}",
+        video_format=video_format,
+        status="reserved",
+        references=references,
+        normalized_references=sorted(
+            {token for reference in references for token in reference_tokens(reference)}
+        ),
+        main_passage=candidate.reference,
+        topic=candidate.central_theme,
+        normalized_topic=_plain(candidate.central_theme),
+        themes=list(dict.fromkeys([candidate.central_theme, *candidate.themes])),
+        characters=candidate.characters,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def reserve_project_candidates(
+    projects_dir: Path,
+    *,
+    project_id: str,
+    video_format: Literal["landscape", "short"],
+    candidates: list[VerseCandidate],
+    catalog: VerseCatalog | None = None,
+) -> VerseUsageIndex:
+    if not candidates:
+        raise ValueError("Informe ao menos uma passagem para reservar.")
+    root = projects_dir.expanduser().resolve()
+    local = build_usage_index(root, catalog=catalog)
+    environment = registry_environment()
+    registry_id = f"{environment}:{project_id}"
+
+    def reserve(usage: VerseUsageIndex) -> VerseUsageIndex:
+        other_references = [
+            reference
+            for record in usage.records
+            if record.registry_id != registry_id
+            for reference in record.references
+        ]
+        repeated = next(
+            (
+                candidate.reference
+                for candidate in candidates
+                if any(
+                    references_overlap(candidate.reference, reference)
+                    for reference in other_references
+                )
+            ),
+            None,
+        )
+        if repeated:
+            raise RuntimeError(
+                f"A passagem {repeated} foi reservada por outro projeto durante a seleção."
+            )
+        main = candidates[0]
+        reservation = _reservation_record(
+            main,
+            project_id=project_id,
+            video_format=video_format,
+        )
+        references = list(
+            dict.fromkeys(
+                reference
+                for candidate in candidates
+                for reference in (candidate.reference, candidate.context_reference)
+            )
+        )
+        reservation = reservation.model_copy(
+            update={
+                "references": references,
+                "normalized_references": sorted(
+                    {token for reference in references for token in reference_tokens(reference)}
+                ),
+                "themes": list(
+                    dict.fromkeys(
+                        theme
+                        for candidate in candidates
+                        for theme in (candidate.central_theme, *candidate.themes)
+                    )
+                ),
+                "characters": list(
+                    dict.fromkeys(name for candidate in candidates for name in candidate.characters)
+                ),
+            }
+        )
+        return merge_usage_indexes(
+            usage,
+            VerseUsageIndex(generated_at=utc_now(), records=[reservation]),
+        )
+
+    with _selection_lock(root):
+        if shared_registry_enabled():
+
+            def mutate(raw: dict[str, object]) -> tuple[dict[str, object], VerseUsageIndex]:
+                shared = VerseUsageIndex.model_validate(raw)
+                updated = reserve(merge_usage_indexes(shared, local))
+                return updated.model_dump(mode="json"), updated
+
+            merged = update_shared_registry(
+                mutate,
+                message=f"registry: reserve passages for {project_id}",
+            )
+        else:
+            merged = reserve(local)
+        write_json(root / VERSE_USAGE_FILENAME, merged)
+        return merged
+
+
 def select_unused_verse(
     catalog: VerseCatalog, usage: VerseUsageIndex
 ) -> tuple[VerseCandidate, float]:
     used_references = [reference for record in usage.records for reference in record.references]
+    used_topics = {
+        record.normalized_topic or _plain(record.topic or "")
+        for record in usage.records
+        if record.normalized_topic or record.topic
+    }
     available = [
         candidate
         for candidate in catalog.candidates
-        if not any(
+        if _plain(candidate.central_theme) not in used_topics
+        and not any(
             references_overlap(candidate.reference, reference) for reference in used_references
         )
     ]
@@ -275,8 +491,40 @@ def create_auto_video(
     root = (projects_dir or DEFAULT_PROJECTS_DIR).expanduser().resolve()
     catalog = load_verse_catalog(catalog_path)
     with _selection_lock(root):
-        before = build_usage_index(root, catalog=catalog)
-        candidate, score = select_unused_verse(catalog, before)
+        local = build_usage_index(root, catalog=catalog)
+
+        def select_and_reserve(
+            usage: VerseUsageIndex,
+        ) -> tuple[VerseUsageIndex, tuple[VerseCandidate, float, VerseUsageIndex]]:
+            candidate, score = select_unused_verse(catalog, usage)
+            predicted_id = project_directory_name(candidate.slug, project_date=project_date)
+            reservation = _reservation_record(
+                candidate,
+                project_id=predicted_id,
+                video_format=video_format,
+            )
+            updated = merge_usage_indexes(
+                usage,
+                VerseUsageIndex(generated_at=utc_now(), records=[reservation]),
+            )
+            return updated, (candidate, score, usage)
+
+        if shared_registry_enabled():
+
+            def mutate(
+                raw: dict[str, object],
+            ) -> tuple[dict[str, object], tuple[VerseCandidate, float, VerseUsageIndex]]:
+                shared = VerseUsageIndex.model_validate(raw)
+                updated, result = select_and_reserve(merge_usage_indexes(shared, local))
+                return updated.model_dump(mode="json"), result
+
+            candidate, score, before = update_shared_registry(
+                mutate,
+                message="registry: reserve automatic passage",
+            )
+        else:
+            reserved, (candidate, score, before) = select_and_reserve(local)
+            write_json(root / VERSE_USAGE_FILENAME, reserved)
         layout = create_project(
             candidate.slug,
             candidate.title,
@@ -367,7 +615,7 @@ def create_auto_video(
                 "development_modes": candidate.preferred_development_modes,
             }
         )
-        write_json(root / VERSE_USAGE_FILENAME, build_usage_index(root, catalog=catalog))
+        sync_shared_usage(root, catalog=catalog)
         return layout, candidate, score
 
 

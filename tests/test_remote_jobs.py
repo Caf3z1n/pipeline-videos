@@ -20,6 +20,7 @@ from pipeline_videos.remote_jobs import (
     _growth_phase_spec,
     _image_phase_specs,
     _import_editorial_source_selection,
+    _long_script_phase_spec,
     _normalize_shorts_script_payload,
     _recover_generated_image_outputs,
     _shorts_script_phase_spec,
@@ -103,6 +104,24 @@ def test_prepare_job_project_enables_single_variant_without_human_approval(tmp_p
     assert "uma fase isolada" in prompt
     assert "Não leia README, AGENTS.md" in prompt
     assert "não crie" in prompt.casefold()
+
+
+def test_long_script_phase_declares_one_functional_pacing_contract(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(video_format="long", duration_seconds=540))
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+
+    spec = _long_script_phase_spec(layout)
+    task = spec.payload["task"]
+
+    assert task["creative_contract"] == {
+        "content_promise_source": "briefing.central_theme",
+        "payoff_source": "briefing.practical_application",
+        "pacing_profile": "balanced_long_v1",
+        "required_reengagements": 2,
+    }
+    assert any("retention_goal em toda seção" in item for item in task["instructions"])
+    assert any("trechos de preenchimento" in item for item in task["instructions"])
 
 
 def test_codex_phase_command_is_ephemeral_compact_and_hooked(tmp_path) -> None:

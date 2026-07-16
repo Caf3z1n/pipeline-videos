@@ -8,6 +8,7 @@ import pytest
 from pipeline_videos.models import (
     BiblicalReview,
     Briefing,
+    CreativeContract,
     ScriptDocument,
     ScriptSection,
     ShortsCommentPrompt,
@@ -359,6 +360,11 @@ def test_shorts_specialist_queue_imports_script_review_and_retention_strategy(tm
     assert imported.script.word_count >= 60
     assert read_model(layout.script, ScriptDocument).version == 1
     assert layout.shorts_script_strategy.is_file()
+    contract = read_model(layout.creative_contract, CreativeContract)
+    assert contract.content_promise == imported.strategy.content_promise
+    assert contract.opening_hook == imported.strategy.hook
+    assert contract.payoff == imported.strategy.payoff
+    assert contract.pacing.profile_id == "short_v1"
     manifest = layout.load_manifest()
     assert manifest.stages["shorts_script"].status == StageStatus.COMPLETED
     assert manifest.stages["shorts_script"].usage["context_bytes"] > 0

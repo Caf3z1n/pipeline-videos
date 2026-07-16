@@ -2,7 +2,8 @@
 
 ## O que a integração faz
 
-O módulo `publication.py` consome somente artefatos finais aprovados e usa a YouTube Data API v3
+O módulo `publication.py` consome artefatos finais aprovados ou candidatos privados tecnicamente
+validados e usa a YouTube Data API v3
 para:
 
 - enviar `render/final.mp4` com título, descrição, capítulos, tags e classificação;
@@ -15,10 +16,11 @@ para:
 O pipeline normal nunca chama essa etapa. Upload e publicação exigem comandos separados, o guard
 `--allow-external` e confirmações literais.
 
-A exceção controlada é um job persistido em `remote_review`: depois de validação técnica, o executor
-pode enviar um candidato somente como privado com `--automated-review`. Isso não registra aprovação
-humana. Agendamento automático só é aceito quando o job original contém data/hora explícita e a
-política do projeto permite; consulte [Produção remota](remote-production.md).
+A exceção controlada também vale para produção local: depois de `render-review` e validação técnica,
+um pedido explícito do usuário pode enviar o candidato somente como privado com
+`--automated-review`. Isso não exige nem registra aprovação humana. Agendamento continua separado e
+só é aceito com data/hora explícita e os guards do pipeline; consulte também
+[Produção remota](remote-production.md).
 
 ## 1. Preparar o Google Cloud
 
@@ -58,7 +60,15 @@ gerenciar a faixa de legenda. Se os escopos forem alterados, refaça a autoriza�
 
 ## 3. Revisar sem acessar a API
 
-Antes do upload, aprove imagens, metadados e render final pelo fluxo normal. Depois execute:
+No fluxo aprovado, aprove imagens, metadados e render final. Para um pedido explícito de upload
+privado sem aprovação humana, gere antes o candidato validado:
+
+```powershell
+uv run pipeline-videos render-review salmo-121
+uv run pipeline-videos youtube preflight salmo-121 --privacy private --automated-review
+```
+
+No fluxo aprovado tradicional, execute:
 
 ```powershell
 uv run pipeline-videos youtube preflight salmo-121
@@ -69,7 +79,8 @@ O preflight bloqueia:
 - projeto demo, imagens ou thumbnail fixture;
 - render final, thumbnail ou SRT ausentes;
 - validação final incompleta;
-- metadados ou render final sem aprovação humana;
+- metadados ou render final sem aprovação humana, exceto no candidato privado produzido por
+  `render-review` com `--automated-review` e política habilitada;
 - título, descrição ou tags acima dos limites;
 - primeiro upload com visibilidade diferente de `private` ou `unlisted`.
 
@@ -97,6 +108,8 @@ Use o `project_id` exibido no preflight como confirmação literal:
 ```powershell
 uv run pipeline-videos youtube upload salmo-121 `
   --confirm-upload "14-07-2026_salmo-121" `
+  --privacy private `
+  --automated-review `
   --allow-external
 ```
 

@@ -48,6 +48,7 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     assert manifest.config.youtube_growth.description_standard == "scripture_timeline_v1"
     assert manifest.config.youtube_growth.thumbnail_standard == "direct_conflict_red_v1"
     assert manifest.config.youtube_growth.title_thumbnail_pairing_standard == "complementary_v1"
+    assert manifest.config.youtube_publication.allow_automated_private_review_upload is True
     assert manifest.config.editorial_policy.standard == "scripture_rich_ptbr_v1"
     assert manifest.config.editorial_policy.require_literal_scripture_citations is True
     assert manifest.config.editorial_policy.require_quoted_comment_response is True

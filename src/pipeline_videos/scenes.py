@@ -7,6 +7,7 @@ from pipeline_videos.models import (
     ApprovalStatus,
     Briefing,
     ContinuityBible,
+    CreativeContract,
     Palette,
     PromptBlocks,
     Scene,
@@ -16,6 +17,7 @@ from pipeline_videos.models import (
     StyleProfile,
 )
 from pipeline_videos.project import DEFAULT_STYLE, load_style
+from pipeline_videos.script import ensure_creative_contract
 from pipeline_videos.state import (
     complete_stage,
     fail_stage,
@@ -35,7 +37,7 @@ SHOTS = (
     "silhueta em contraluz com composição assimétrica",
 )
 
-SCENE_ALGORITHM_VERSION = "4.0"
+SCENE_ALGORITHM_VERSION = "5.0"
 LEGACY_ENFORCED_VISUAL_STANDARD_IDS = {"davi-poupa-saul-flat-v1"}
 
 
@@ -104,6 +106,27 @@ def _split_long_text(
     if current:
         chunks.append(" ".join(current))
     return chunks
+
+
+def _scene_seconds_for_section(
+    contract: CreativeContract,
+    section: ScriptSection,
+    *,
+    explicit_seconds: float | None,
+) -> float:
+    if explicit_seconds is not None:
+        return explicit_seconds
+    beat = next(item for item in contract.beats if item.section_id == section.section_id)
+    functions = set(beat.functions)
+    if "hook" in functions:
+        return contract.pacing.opening_scene_seconds
+    if "reengagement" in functions:
+        return contract.pacing.reengagement_scene_seconds
+    if "contemplation" in functions:
+        return contract.pacing.contemplative_scene_seconds
+    if functions.intersection({"payoff", "application", "cta"}):
+        return contract.pacing.payoff_scene_seconds
+    return contract.pacing.default_scene_seconds
 
 
 def _palette_description(palette: Palette) -> str:
@@ -328,7 +351,7 @@ def _scene_from_chunk(
 def build_scenes(
     layout: ProjectLayout,
     *,
-    target_scene_seconds: float = 8.0,
+    target_scene_seconds: float | None = None,
     force: bool = False,
     skip_approvals: bool = False,
 ) -> SceneManifest:
@@ -337,6 +360,7 @@ def build_scenes(
         require_approval(layout, "script")
         require_approval(layout, "biblical_review")
     script = read_model(layout.script, ScriptDocument)
+    contract = ensure_creative_contract(layout, script)
     briefing = read_model(layout.briefing, Briefing)
     style = _resolved_style(layout)
     palette = read_model(layout.palette, Palette)
@@ -351,6 +375,7 @@ def build_scenes(
             "style": style,
             "palette": palette,
             "continuity": continuity,
+            "creative_contract": contract,
             "target_scene_seconds": target_scene_seconds,
             "short_verse_visual_change_seconds": (
                 project.config.shorts_script.verse_visual_change_seconds
@@ -364,12 +389,16 @@ def build_scenes(
         return read_model(layout.scenes, SceneManifest)
     start_stage(layout, "scenes", input_hash, provider="deterministic-scene-builder")
     try:
-        target_words = max(8, round(145 / 60 * target_scene_seconds))
         recurring = _continuity_lines(continuity)
         scenes: list[Scene] = []
         for section_index, section in enumerate(script.sections):
             high_impact_opening = (
                 project.video_format == "short" and section_index == 0 and section.role == "opening"
+            )
+            section_seconds = _scene_seconds_for_section(
+                contract,
+                section,
+                explicit_seconds=target_scene_seconds,
             )
             section_target_words = (
                 max(
@@ -377,7 +406,7 @@ def build_scenes(
                     round(145 / 60 * project.config.shorts_script.verse_visual_change_seconds),
                 )
                 if high_impact_opening
-                else target_words
+                else max(8, round(145 / 60 * section_seconds))
             )
             chunks = _split_long_text(
                 section.narration,
@@ -423,7 +452,14 @@ def build_scenes(
             input_hash,
             [relative_posix(layout.scenes, layout.root)],
             provider="deterministic-scene-builder",
-            usage={"scene_count": len(scenes)},
+            usage={
+                "scene_count": len(scenes),
+                "pacing_profile": (
+                    "explicit_override"
+                    if target_scene_seconds is not None
+                    else contract.pacing.profile_id
+                ),
+            },
         )
         return manifest
     except Exception as exc:

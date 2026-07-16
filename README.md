@@ -176,11 +176,12 @@ uv run pipeline-videos remote retry <JOB_ID>
 Instalação, estados da fila, segurança dos segredos e serviço systemd estão em
 [Produção remota](docs/remote-production.md).
 
-Esse comando consulta o catálogo bíblico local em domínio público, varre todas as referências já
-usadas ou reservadas nos projetos, escolhe um versículo-base inédito com variedade de livro e tema,
+Esse comando consulta o catálogo bíblico local em domínio público, combina o histórico das pastas
+com o registro Git compartilhado, escolhe um versículo-base inédito com variedade de livro e tema,
 e preenche automaticamente `briefing.json` e `sources.json`. A varredura inclui passagem principal,
-referências complementares, fontes e bases bíblicas do roteiro. A reserva fica registrada em
-`projects/verse-usage.json` e é protegida contra duas criações simultâneas.
+referências complementares, fontes e bases bíblicas do roteiro. `projects/verse-usage.json` continua
+como cache legível; a autoridade de coordenação é `content-registry.json` no repositório Git bare
+descrito em [Produção remota](docs/remote-production.md). A reserva é commitada antes da criação.
 
 O projeto já nasce com o padrão `human_hook_to_bible`: gancho humano curto, entrada imediata na
 Bíblia, citação literal verificada, contexto ou conflito bíblico, verdade central, aplicação e
@@ -242,7 +243,9 @@ uv run pipeline-videos script shorts-import davi-e-golias
 
 O roteiro anterior é arquivado em `script/versions/`. O mapa de retenção fica em
 `script/retention-strategy.json`. Vídeos longos e fluxos manuais continuam aceitando importação
-direta.
+direta. Toda importação também deriva `script/creative-contract.json` sem chamada externa: promessa,
+gancho, payoff, função de cada seção, componentes críticos e perfil de ritmo passam a ser reutilizados
+por cenas, crescimento e validação, em vez de serem decididos novamente.
 
 Novos Shorts seguem o padrão editorial `human_hook_to_bible`: começam com uma dor, pergunta ou
 contraste reconhecível em até 2,5 segundos; entram imediatamente no contexto bíblico e citam ao menos
@@ -280,8 +283,14 @@ elaboração criativa.
 ### 3. Cenas e prompts modulares
 
 ```powershell
+uv run pipeline-videos build-scenes salmo-121
+# Override compatível para um ritmo uniforme explícito:
 uv run pipeline-videos build-scenes salmo-121 --target-seconds 8
 ```
+
+Sem override, Shorts preservam o corte rápido existente e longos usam o perfil
+`balanced_long_v1`: abertura e reengajamentos mais rápidos, progressão regular e planos mais longos
+somente em reflexão contemplativa com função declarada.
 
 O prompt de cada cena guarda separadamente perfil de estilo, paleta, continuidade, descrição,
 enquadramento, emoção e restrições negativas. Trocar a paleta não altera o estilo-base:
@@ -413,7 +422,18 @@ aparecer nos dois quando forem necessários para clareza.
 Nos Shorts, o título principal precisa conter a expressão de busca primária, pelo menos uma opção
 de título precisa ancorar a passagem bíblica e a descrição fica curta, sem capítulos. O especialista
 recebe um contexto compacto em `youtube/growth-context.json`, em vez de reler todos os manifestos e
-prompts completos.
+prompts completos. Esse contexto reutiliza o contrato criativo, omite a locução integral e os prompts
+montados, e inclui no máximo seis aprendizados observados de `analytics/experiments.json`, priorizando
+o mesmo formato. O importador rejeita promessa ou gancho que tenham sido reinterpretados.
+
+Métricas observadas podem ser registradas de forma idempotente sem executar nova geração:
+
+```powershell
+uv run pipeline-videos analytics import salmo-121 .\experimento.json
+```
+
+Percentuais conhecidos são validados entre 0 e 100; conclusões continuam sendo hipóteses, sem inferir
+causalidade a partir de poucos dados.
 
 O objetivo é aumentar relevância, clareza e probabilidade de clique sem clickbait enganoso. Não há
 garantia de viralização: o próprio YouTube considera relevância, satisfação, watch time, histórico do
@@ -548,6 +568,7 @@ projects/
 │   └── decisions.jsonl
 ├── script/
 │   ├── script.json
+│   ├── creative-contract.json
 │   ├── shorts-context.json
 │   ├── narration.txt
 │   └── versions/
@@ -616,12 +637,14 @@ Mais detalhes em [docs/elevenlabs.md](docs/elevenlabs.md).
 - cada etapa calcula hash de entrada e valida os artefatos antes de reutilizar;
 - `--force` é explícito e recursos aprovados permanecem versionados;
 - erros ficam em `project.json` e `logs/events.jsonl`;
-- upload e publicação só existem em comandos separados, com aprovações, `--allow-external` e
-  confirmações literais; não há publicação implícita, compra ou ativação de cobrança;
+- upload e publicação só existem em comandos separados, com `--allow-external` e confirmações
+  literais; um pedido explícito de upload privado pode usar `render-review` e
+  `--automated-review` sem aprovação humana, sem publicação implícita, compra ou cobrança;
 - chaves vêm apenas de `.env`/ambiente e nunca são gravadas nos manifestos;
-- a validação compara roteiro, cenas, imagens, áudio e legendas para detectar omissão, duplicação ou
-  reordenação;
-- a publicação futura deve começar como privada ou não listada e exigir aprovação humana.
+- a validação compara contrato criativo, roteiro, cenas, imagens, áudio e legendas para detectar
+  componentes críticos ausentes, omissão, duplicação ou reordenação;
+- a publicação futura começa como privada; o fluxo tradicional exige aprovação humana, enquanto o
+  candidato privado automatizado exige pedido explícito, política habilitada e validação técnica.
 
 ## Testes e qualidade
 

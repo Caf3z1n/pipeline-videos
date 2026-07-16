@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -252,6 +253,27 @@ def test_import_rejects_bright_horizontal_separator_between_panels(tmp_path: Pat
         import_external_image(layout, "scene-001", source)
 
 
+def test_batch_prevalidates_every_image_before_writing_any_asset(tmp_path: Path) -> None:
+    layout = _create_layout(tmp_path, scene_count=2)
+    queue = build_codex_queue(layout)
+    first = layout.root / queue["items"][0]["staging_path"]
+    second = layout.root / queue["items"][1]["staging_path"]
+    first.parent.mkdir(parents=True, exist_ok=True)
+    second.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (120, 200), "#17324D").save(first)
+    panel = Image.new("RGB", (120, 200), "#17324D")
+    for y in range(72, 112):
+        for x in range(panel.width):
+            panel.putpixel((x, y), (247, 244, 234))
+    panel.save(second)
+
+    with pytest.raises(ValueError, match="painéis separados"):
+        import_staged_images(layout)
+
+    assert not list(layout.image_assets.rglob("*.png"))
+    assert layout.load_manifest().stages["images"].status == StageStatus.WAITING_EXTERNAL
+
+
 def test_unknown_scene_is_rejected(tmp_path: Path) -> None:
     layout = _create_layout(tmp_path, scene_count=1)
     with pytest.raises(ValueError, match="Cena desconhecida"):
@@ -292,6 +314,7 @@ def test_subagents_write_only_staging_and_root_imports_the_batch(tmp_path: Path)
         Image.new("RGB", (96, 160), f"#{index:02x}4466").save(staging)
     assert all(path.read_bytes() == content for path, content in shared_before.items())
 
+    event_count = len(layout.events.read_text(encoding="utf-8").splitlines())
     imported = import_staged_images(layout)
     assert all(item.active_version == 1 for item in imported.items)
     assert all(item.approved_version is None for item in imported.items)
@@ -299,6 +322,31 @@ def test_subagents_write_only_staging_and_root_imports_the_batch(tmp_path: Path)
     completed_queue = read_json(layout.image_queue)
     assert completed_queue["status"] == StageStatus.COMPLETED.value
     assert all(item["status"] == StageStatus.COMPLETED.value for item in completed_queue["items"])
+    new_events = [
+        json.loads(line)
+        for line in layout.events.read_text(encoding="utf-8").splitlines()[event_count:]
+    ]
+    assert [event["event"] for event in new_events] == [
+        "stage_started",
+        "stage_completed",
+        "images_batch_imported",
+    ]
+    stage = layout.load_manifest().stages["images"]
+    assert stage.usage["batch_size"] == 3
+    assert stage.usage["batch_import_ms"] >= 0
+
+    state_before_retry = {
+        path: path.read_bytes()
+        for path in (layout.manifest, layout.scenes, layout.images, layout.image_queue)
+    }
+    assert import_staged_images(layout) == imported
+    assert all(path.read_bytes() == content for path, content in state_before_retry.items())
+
+    interrupted = layout.load_manifest()
+    interrupted.stages["images"].status = StageStatus.RUNNING
+    layout.save_manifest(interrupted)
+    assert import_staged_images(layout) == imported
+    assert layout.load_manifest().stages["images"].status == StageStatus.COMPLETED
 
 
 def test_light_manual_builds_dynamic_prompt_parts_and_imports_global_order(

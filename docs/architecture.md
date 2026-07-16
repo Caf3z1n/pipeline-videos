@@ -6,6 +6,12 @@ O núcleo usa Python 3.12, Pydantic, Typer e FFmpeg. Cada vídeo é uma unidade 
 banco de dados global. Essa escolha reduz infraestrutura, torna o estado legível e permite adicionar
 uma API/UI depois sem reescrever regras de negócio.
 
+A única coordenação global é `content-registry.json`, mantido em uma branch de um repositório Git
+bare compartilhado. Ele indexa reservas e usos de passagens/temas, mas não substitui as pastas dos
+projetos como fonte de verdade. Local e VPS fazem push fast-forward: em concorrência, o push
+rejeitado recarrega o JSON e repete a seleção antes de criar o projeto. Indisponibilidade bloqueia a
+seleção em vez de usar um cache local possivelmente divergente.
+
 ```mermaid
 flowchart LR
     B["Briefing e fontes"] --> S["Roteiro versionado"]
@@ -57,6 +63,8 @@ cache separado e não toca o render final. O modo `guided` mantém os checkpoint
 - `Briefing`: passagem, tema, aplicação, público, emoção, duração, tradução e limites.
 - `SourceLibrary`: tipo, escopo da afirmação, fonte, acesso, verificação e direitos.
 - `ScriptDocument`: seções narrativas, base bíblica e classificação das afirmações.
+- `CreativeContract`: promessa, gancho, payoff, valor de cada seção, componentes críticos e perfil
+  determinístico de ritmo, derivados sem chamada externa.
 - `BiblicalReview`: findings com severidade, evidência, resolução e aprovação.
 - `SceneManifest`: narração, tempo, emoção, ambiente, enquadramento, função e prompt modular.
 - `ImageManifest`: prompt/hash, versões, candidato ativo e versão aprovada.
@@ -98,7 +106,8 @@ Os especialistas recebem contextos derivados e compactos, mas a importação con
 pacote contra os modelos Pydantic completos e os arquivos-fonte do projeto:
 
 - `script/shorts-context.json` reúne briefing, fontes, decisões recentes e versões anteriores;
-- `youtube/growth-context.json` reúne roteiro, revisão, abertura visual e experimentos relevantes;
+- `youtube/growth-context.json` reúne contrato criativo, outline, revisão compacta, abertura visual e
+  no máximo seis experimentos relevantes, sem repetir locução ou prompt montado;
 - `images/jobs/image-worker-N.json` entrega a cada trabalhador somente seus próprios jobs e prompts;
 - os JSON Schemas enviados às filas removem somente metadados de apresentação, preservando tipos,
   enums, referências e campos obrigatórios;

@@ -76,6 +76,10 @@ class ProjectLayout:
         return self.root / "script" / "script.json"
 
     @property
+    def creative_contract(self) -> Path:
+        return self.root / "script" / "creative-contract.json"
+
+    @property
     def shorts_script_queue(self) -> Path:
         return self.root / "script" / "shorts-queue.json"
 

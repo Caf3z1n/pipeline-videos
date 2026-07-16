@@ -40,7 +40,7 @@ from pipeline_videos.storage import (
     resolve_project,
     write_json,
 )
-from pipeline_videos.verse_selection import create_auto_short
+from pipeline_videos.verse_selection import create_auto_short, sync_shared_usage
 
 load_dotenv()
 console = Console()
@@ -59,6 +59,7 @@ captions_app = typer.Typer(help="Geração das legendas visuais e do arquivo par
 metadata_app = typer.Typer(help="Rascunhos de metadados e thumbnail.")
 youtube_app = typer.Typer(help="OAuth, upload, status e publicação segura no YouTube.")
 remote_app = typer.Typer(help="Fila remota de produção, revisão privada e agendamento.")
+analytics_app = typer.Typer(help="Importa métricas observadas para aprendizado editorial.")
 app.add_typer(images_app, name="images")
 app.add_typer(script_app, name="script")
 app.add_typer(audio_app, name="audio")
@@ -67,6 +68,7 @@ app.add_typer(captions_app, name="captions")
 app.add_typer(metadata_app, name="metadata")
 app.add_typer(youtube_app, name="youtube")
 app.add_typer(remote_app, name="remote")
+app.add_typer(analytics_app, name="analytics")
 
 
 def _codex_image_generation_status() -> tuple[str, str]:
@@ -204,6 +206,14 @@ def _project(reference: str, projects_dir: Path | None = None) -> ProjectLayout:
     return resolve_project(reference, projects_dir)
 
 
+@analytics_app.command("import")
+def analytics_import(project: str, source: Path) -> None:
+    from pipeline_videos.analytics import import_experiment_file
+
+    memory = import_experiment_file(_project(project), source)
+    console.print(f"[green]{len(memory.experiments)} experimento(s) registrado(s).[/green]")
+
+
 def _save_provider(
     layout: ProjectLayout, *, audio: str | None = None, images: str | None = None
 ) -> None:
@@ -294,6 +304,7 @@ def new_project(
         palette_id=palette,
         video_format=video_format,
     )
+    sync_shared_usage(layout.root.parent.parent)
     console.print(f"[green]Projeto criado:[/green] {layout.root}")
     console.print(
         "Próximo passo: execute o comando resume-prompt e use o texto na conversa com o Codex."
@@ -705,7 +716,7 @@ def approve(
 @app.command("build-scenes")
 def build_scenes_command(
     project: str,
-    target_seconds: Annotated[float, typer.Option("--target-seconds")] = 8.0,
+    target_seconds: Annotated[float | None, typer.Option("--target-seconds")] = None,
     force: Annotated[bool, typer.Option("--force")] = False,
 ) -> None:
     result = build_scenes(_project(project), target_scene_seconds=target_seconds, force=force)
@@ -1285,7 +1296,7 @@ def render_review_command(
     validate_draft_preflight(layout)
     select_music(layout)
     result = render_review_candidate(layout, force=force)
-    console.print(f"[green]Candidato remoto:[/green] {result.final_video}")
+    console.print(f"[green]Candidato privado:[/green] {result.final_video}")
     console.print(f"[green]Prévia:[/green] {result.preview_video}")
 
 

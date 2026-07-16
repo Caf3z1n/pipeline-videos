@@ -11,6 +11,7 @@ from pipeline_videos.models import (
     AudioManifest,
     BiblicalReview,
     CaptionManifest,
+    CreativeContract,
     ImageManifest,
     MusicManifest,
     SceneManifest,
@@ -20,6 +21,7 @@ from pipeline_videos.models import (
     YouTubeGrowthStrategy,
     YouTubeMetadata,
 )
+from pipeline_videos.script import ensure_creative_contract
 from pipeline_videos.state import complete_stage, fail_stage, start_stage
 from pipeline_videos.storage import ProjectLayout, read_json, read_model, write_json, write_text
 from pipeline_videos.utils import (
@@ -35,7 +37,7 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-VALIDATION_ALGORITHM_VERSION = "4"
+VALIDATION_ALGORITHM_VERSION = "5"
 
 
 @dataclass
@@ -157,6 +159,8 @@ def _validate_short_cover_first_frame(
 
 def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> ValidationReport:
     manifest = layout.load_manifest()
+    if layout.script.is_file() and layout.briefing.is_file():
+        ensure_creative_contract(layout)
     report_path = layout.root / "validation" / "report.json"
     markdown_path = layout.root / "validation" / "report.md"
     input_hash = sha256_value(
@@ -173,6 +177,7 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                 name: path.stat().st_mtime_ns if path.exists() else None
                 for name, path in {
                     "script": layout.script,
+                    "creative_contract": layout.creative_contract,
                     "review": layout.biblical_review,
                     "scenes": layout.scenes,
                     "images": layout.images,
@@ -210,6 +215,7 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
     report = ValidationReport(project_id=manifest.project_id, generated_at=utc_now())
     try:
         script = read_model(layout.script, ScriptDocument)
+        contract = read_model(layout.creative_contract, CreativeContract)
         review = read_model(layout.biblical_review, BiblicalReview)
         scenes = read_model(layout.scenes, SceneManifest)
         images = read_model(layout.images, ImageManifest)
@@ -223,6 +229,22 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
             report.errors.append("A revisão bíblica ainda possui bloqueios abertos.")
         if not review.approved:
             report.warnings.append("A revisão bíblica existe, mas ainda não está aprovada.")
+
+        section_ids = [section.section_id for section in script.sections]
+        beat_section_ids = [beat.section_id for beat in contract.beats]
+        report.checks["creative_contract_profile"] = contract.pacing.profile_id
+        report.checks["creative_critical_components"] = len(contract.critical_component_ids)
+        if contract.section_ids != section_ids or beat_section_ids != section_ids:
+            report.errors.append(
+                "O contrato criativo não cobre exatamente as seções ativas do roteiro."
+            )
+        functions = {function for beat in contract.beats for function in beat.functions}
+        if "hook" not in functions or "payoff" not in functions:
+            report.errors.append("O contrato criativo precisa declarar gancho e payoff.")
+        reengagements = sum("reengagement" in beat.functions for beat in contract.beats)
+        report.checks["creative_reengagements"] = reengagements
+        if contract.format == "long_form" and len(contract.beats) >= 5 and reengagements < 2:
+            report.errors.append("O vídeo longo precisa de dois pontos de reengajamento.")
 
         script_words = _canonical_words(script.narration_text())
         scene_words = _canonical_words(" ".join(scene.narration for scene in scenes.scenes))
