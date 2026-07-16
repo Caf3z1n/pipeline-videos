@@ -266,9 +266,7 @@ def test_growth_queue_is_idempotent_and_imports_three_long_form_candidates(tmp_p
     assert queue["visual_standard"]["thumbnail_must_match_scene_images"] is True
     assert queue["visual_standard"]["reference_policy"] == "opening_scene_image_when_available"
     context = read_json(layout.growth_context)
-    assert context["visual_system"]["style"]["visual_standard_id"] == (
-        "cinematic-family-3d-v1"
-    )
+    assert context["visual_system"]["style"]["visual_standard_id"] == ("cinematic-family-3d-v1")
     assert context["opening_scene"]["assembled_prompt"] == "Davi diante de Golias"
     assert layout.growth_context.is_file()
     assert len(json.dumps(queue["schemas"]["package"])) < len(

@@ -291,9 +291,7 @@ def test_remote_growth_requires_opening_scene_as_visual_reference(tmp_path) -> N
             },
             "outputs": {
                 "package": "youtube/staging/youtube-growth-specialist/package.json",
-                "thumbnails": [
-                    "youtube/staging/youtube-growth-specialist/thumbnail-001.png"
-                ],
+                "thumbnails": ["youtube/staging/youtube-growth-specialist/thumbnail-001.png"],
             },
             "visual_standard": {
                 "id": "cinematic-family-3d-v1",

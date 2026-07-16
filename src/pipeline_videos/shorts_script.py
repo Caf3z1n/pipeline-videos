@@ -809,9 +809,7 @@ def _validate_engagement_contract(layout: ProjectLayout, package: ShortsScriptPa
         ]
         normalized_cue = " ".join(cue_words)
         significant_cue_words = [
-            word
-            for word in cue_words
-            if len(word) >= _MIN_COMMENT_CUE_SIGNIFICANT_CHARACTERS
+            word for word in cue_words if len(word) >= _MIN_COMMENT_CUE_SIGNIFICANT_CHARACTERS
         ]
         if (
             len(cue_words) == 1 and normalized_cue in _WEAK_SINGLE_WORD_COMMENT_CUES

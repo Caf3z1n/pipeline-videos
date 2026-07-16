@@ -296,9 +296,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 project.config.images.visual_standard_id,
                 "animação 3D cinematográfica familiar premium",
             ],
-            "forbidden_positive_style_markers": list(
-                _PHOTOGRAPHIC_THUMBNAIL_STYLE_MARKERS
-            ),
+            "forbidden_positive_style_markers": list(_PHOTOGRAPHIC_THUMBNAIL_STYLE_MARKERS),
         },
         "outputs": {
             "package": relative_posix(layout.growth_package_staging, layout.root),
