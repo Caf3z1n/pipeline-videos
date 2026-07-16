@@ -969,20 +969,64 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     thumbnails = tuple(
         _project_file(layout, str(value)) for value in queue["outputs"].get("thumbnails", [])
     )
+    reference_scene_id = str(
+        queue.get("inputs", {}).get("thumbnail_visual_reference_scene_id", "")
+    ).strip()
+    visual_reference: Path | None = None
+    if reference_scene_id and layout.image_queue.is_file():
+        image_queue = read_json(layout.image_queue)
+        for item in image_queue.get("items", []):
+            if str(item.get("scene_id")) != reference_scene_id:
+                continue
+            candidate = _project_file(layout, str(item.get("staging_path", "")))
+            if candidate.is_file():
+                visual_reference = candidate
+            break
+    if visual_reference is None and reference_scene_id and layout.images.is_file():
+        image_manifest = read_json(layout.images)
+        for item in image_manifest.get("items", []):
+            if str(item.get("scene_id")) != reference_scene_id:
+                continue
+            active_version = item.get("active_version")
+            for version in item.get("versions", []):
+                if version.get("version") == active_version:
+                    candidate = _project_file(layout, str(version.get("path", "")))
+                    if candidate.is_file():
+                        visual_reference = candidate
+                    break
+            break
+    reference_policy = queue.get("visual_standard", {}).get("reference_policy")
+    if reference_policy == "required_opening_scene_image" and visual_reference is None:
+        raise RuntimeError(
+            "A thumbnail remota exige a imagem da cena de abertura como referência visual."
+        )
+    allowed_inputs = [str(layout.growth_queue), str(context)]
+    if visual_reference is not None:
+        allowed_inputs.append(str(visual_reference))
     return CodexPhaseSpec(
         phase="youtube_growth",
         item_id=str(queue.get("job_id")),
         model=model,
         reasoning_effort=effort,
         payload={
-            "allowed_inputs": [str(layout.growth_queue), str(context)],
+            "allowed_inputs": allowed_inputs,
             "task": {
                 "kind": "produce_one_title_thumbnail_pair",
                 "tool": "$imagegen",
                 "queue_path": str(layout.growth_queue),
                 "compact_context_path": str(context),
+                "thumbnail_visual_reference_path": (
+                    str(visual_reference) if visual_reference is not None else None
+                ),
                 "instructions": [
                     "Siga integralmente instructions, schemas e generation_retry_policy da fila.",
+                    (
+                        "Use thumbnail_visual_reference_path como referência obrigatória do "
+                        "estilo, personagem, materiais, paleta e iluminação; não a converta em "
+                        "fotografia."
+                        if visual_reference is not None
+                        else "Siga integralmente o visual_standard textual da fila."
+                    ),
                     "Gere exatamente um título e uma thumbnail integrada no remote_review.",
                     "Escreva apenas outputs.package e outputs.thumbnails.",
                     "O executor importará o pacote; não altere metadados compartilhados.",

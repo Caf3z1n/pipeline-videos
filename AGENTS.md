@@ -138,6 +138,10 @@
   sequencialmente e importe cada lote uma única vez.
 - Gere exatamente um título e uma thumbnail integrada. Em Shorts, essa mesma arte ocupa exatamente
   o primeiro frame; em vídeos longos, ela é enviada pela API como thumbnail personalizada.
+- A thumbnail integrada deve usar exatamente o mesmo `visual_standard`, estilo 3D, materiais,
+  desenho de personagem, paleta e iluminação das cenas. Em `remote_review`, use obrigatoriamente a
+  imagem produzida para a cena de abertura como referência visual e interrompa a etapa se ela ainda
+  não existir; nunca improvise fotografia, fotorrealismo ou live action.
 - `render-review` usa ativos ativos em qualidade final e nunca registra aprovação humana. Um
   candidato assim pode ser enviado automaticamente somente como `private`, quando a política do
   projeto permitir e a validação técnica estiver concluída.
@@ -159,6 +163,11 @@
   e card ativo vermelho `#E5484D` com raio 24, sempre centralizadas.
 - A resposta pedida nos comentários fica entre aspas, sozinha na legenda, e permanece visível
   durante um segundo de silêncio antes da continuação.
+- Em Shorts, a resposta pedida nos comentários deve ser uma palavra-síntese expressiva e contextual,
+  com ao menos seis letras quando for uma única palavra. Prefira densidade semântica como REFÚGIO,
+  PERSISTÊNCIA, CONFIANÇA, FIDELIDADE, ESPERANÇA, PERSEVERANÇA, RECOMEÇO, DESCANSO ou CORAGEM,
+  derivada da resolução; nunca use isoladamente BEM, SIM, AMÉM, EU, AQUI, PERTO, FÉ, PAZ, FORÇA
+  ou FIEL.
 - Música é sorteada da biblioteca local, persistida, inicia em -12 dB e preserva a narração.
 
 ## Convenções técnicas

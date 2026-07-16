@@ -26,8 +26,25 @@ from pipeline_videos.utils import (
 )
 
 SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION = "2.0"
-SHORTS_SCRIPT_ALGORITHM_VERSION = "3.0"
+SHORTS_SCRIPT_ALGORITHM_VERSION = "3.1"
 LEGACY_SCRIPTURE_BOUNDARY_PHRASE = "Até aqui, o texto bíblico."
+
+_MIN_COMMENT_CUE_SIGNIFICANT_CHARACTERS = 6
+_WEAK_SINGLE_WORD_COMMENT_CUES = frozenset(
+    {
+        "aqui",
+        "amem",
+        "bem",
+        "eu",
+        "fe",
+        "fiel",
+        "forca",
+        "paz",
+        "perto",
+        "presente",
+        "sim",
+    }
+)
 
 _GENERIC_AI_PHRASES = (
     "a coragem nasce de",
@@ -455,6 +472,20 @@ def prepare_shorts_script_queue(
                 "comentário e mantenha-o natural."
             ),
             (
+                "Quando response_cue for uma palavra, escolha uma palavra-síntese expressiva, "
+                "específica e ligada à verdade central, ao payoff ou à aplicação. Ela deve ter "
+                f"ao menos {_MIN_COMMENT_CUE_SIGNIFICANT_CHARACTERS} letras. Boas referências "
+                "de densidade semântica são REFÚGIO, PERSISTÊNCIA, CONFIANÇA, FIDELIDADE, "
+                "ESPERANÇA, PERSEVERANÇA, RECOMEÇO, DESCANSO e CORAGEM; não copie a lista "
+                "automaticamente, derive a palavra da mensagem deste vídeo."
+            ),
+            (
+                "Nunca use como resposta isolada palavras vagas ou fracas como BEM, SIM, AMÉM, "
+                "EU, AQUI, PERTO, FÉ, PAZ, FORÇA ou FIEL. Em fit_reason, cite a palavra-síntese "
+                "escolhida e explique concretamente sua ligação com a resolução do roteiro; não "
+                "justifique apenas dizendo que é uma palavra simples."
+            ),
+            (
                 "O comentário nunca pode funcionar como condição para bênção, resposta de Deus, "
                 "cura, proteção, milagre ou prova de fé. Não use culpa, urgência artificial, "
                 "promessa de resultado nem frases como 'comente amém para receber'."
@@ -771,6 +802,30 @@ def _validate_engagement_contract(layout: ProjectLayout, package: ShortsScriptPa
             _normalized(forbidden) in normalized_prompt for forbidden in forbidden_engagement_bait
         ):
             raise ValueError("O convite para comentar usa pressão ou promessa espiritual indevida.")
+        cue_words = [
+            _normalized(word)
+            for word in tokenize_words(comment_prompt.response_cue)
+            if _normalized(word)
+        ]
+        normalized_cue = " ".join(cue_words)
+        significant_cue_words = [
+            word
+            for word in cue_words
+            if len(word) >= _MIN_COMMENT_CUE_SIGNIFICANT_CHARACTERS
+        ]
+        if (
+            len(cue_words) == 1 and normalized_cue in _WEAK_SINGLE_WORD_COMMENT_CUES
+        ) or not significant_cue_words:
+            raise ValueError(
+                "A resposta sugerida para o comentário é vaga demais; escolha uma "
+                "palavra-síntese expressiva e contextual."
+            )
+        normalized_fit_reason = _normalized(comment_prompt.fit_reason)
+        if not any(word in normalized_fit_reason for word in significant_cue_words):
+            raise ValueError(
+                "comment_prompt.fit_reason precisa ligar explicitamente a palavra-síntese "
+                "à resolução do vídeo."
+            )
         if layout.load_manifest().config.editorial_policy.require_quoted_comment_response:
             quoted_response = quoted_comment_response(comment_prompt.prompt_text)
             if not quoted_response or _normalized(quoted_response) != _normalized(

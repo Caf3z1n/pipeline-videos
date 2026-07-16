@@ -140,9 +140,17 @@ locução em cenas separadas.
 
 ## Comentário e CTA
 
-Escolha uma palavra ou frase curta que nasça da resolução. Não faça uma pergunta aberta e depois force
-uma resposta diferente. O comentário nunca é condição para bênção, cura, proteção, milagre ou prova
-de fé.
+Escolha uma palavra ou frase curta que nasça da resolução. Quando for uma palavra, ela funciona como
+uma palavra-síntese: expressiva, específica, com pelo menos seis letras e ligada diretamente à
+verdade central, ao payoff ou à aplicação. `REFÚGIO`, `PERSISTÊNCIA`, `CONFIANÇA`, `FIDELIDADE`,
+`ESPERANÇA`, `PERSEVERANÇA`, `RECOMEÇO`, `DESCANSO` e `CORAGEM` são referências de densidade
+semântica, não uma lista para escolha aleatória.
+
+Não use isoladamente respostas vagas como `BEM`, `SIM`, `AMÉM`, `EU`, `AQUI`, `PERTO`, `FÉ`, `PAZ`,
+`FORÇA` ou `FIEL`. O `fit_reason` precisa citar a palavra escolhida e explicar sua ligação concreta
+com a resolução do vídeo; dizer apenas que ela é simples não basta. Não faça uma pergunta aberta e
+depois force uma resposta diferente. O comentário nunca é condição para bênção, cura, proteção,
+milagre ou prova de fé.
 
 Modos aceitos:
 
@@ -184,7 +192,7 @@ Um roteiro está pronto quando:
 - o payoff resolve a pergunta inicial;
 - a aplicação é concreta;
 - a linguagem soa pastoral, cotidiana e natural;
-- o comentário usa uma palavra coerente com a mensagem;
+- o comentário usa uma palavra-síntese expressiva, contextual e justificada pela resolução;
 - o CTA pede curtir, inscrição e compartilhamento sem pressão;
 - cada direção visual representa somente uma cena;
 - a duração estimada cabe no alvo;

@@ -44,8 +44,8 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-GROWTH_QUEUE_SCHEMA_VERSION = "1.9"
-GROWTH_ALGORITHM_VERSION = "1.9"
+GROWTH_QUEUE_SCHEMA_VERSION = "1.10"
+GROWTH_ALGORITHM_VERSION = "1.10"
 SHORT_TITLE_MAX_CHARACTERS = 70
 SHORT_DESCRIPTION_MAX_CHARACTERS = 600
 SHORT_DESCRIPTION_SEARCH_WINDOW = 240
@@ -56,6 +56,17 @@ OFFICIAL_YOUTUBE_GUIDELINES = (
     "https://support.google.com/youtube/answer/16391400",
     "https://support.google.com/youtube/answer/72431",
     "https://support.google.com/youtube/answer/9229980",
+)
+
+_PHOTOGRAPHIC_THUMBNAIL_STYLE_MARKERS = (
+    "editorial photography",
+    "cinematic photography",
+    "realistic photography",
+    "photorealistic portrait",
+    "photo-realistic portrait",
+    "fotografia editorial",
+    "retrato fotorrealista",
+    "live-action",
 )
 
 
@@ -102,6 +113,8 @@ def _growth_context_payload(layout: ProjectLayout) -> dict[str, Any]:
     sources = read_model(layout.sources, SourceLibrary)
     scenes = read_model(layout.scenes, SceneManifest)
     opening_scene = min(scenes.scenes, key=lambda item: item.order)
+    style = read_json(layout.style_profile)
+    palette = read_json(layout.palette)
     experiments = read_json(layout.experiments)
     compact_experiments = (
         experiments.get("experiments", []) if isinstance(experiments, dict) else []
@@ -157,18 +170,21 @@ def _growth_context_payload(layout: ProjectLayout) -> dict[str, Any]:
             "visual_subject": opening_scene.prompt.scene,
             "composition": opening_scene.prompt.composition,
             "emotion": opening_scene.prompt.emotion,
+            "assembled_prompt": opening_scene.prompt.assembled_prompt,
+        },
+        "visual_system": {
+            "style": style,
+            "palette": palette,
         },
         "experiments": compact_experiments[-12:],
     }
     if project.video_format == "short" and layout.shorts_script_strategy.is_file():
         payload["retention_strategy"] = read_json(layout.shorts_script_strategy)
-    if project.video_format != "short":
-        payload["visual_system"] = {
-            "style": read_json(layout.style_profile),
-            "palette": read_json(layout.palette),
-        }
-        if project.config.youtube_growth.reuse_scene_images_for_thumbnails:
-            payload["thumbnail_scene_candidates"] = _thumbnail_scene_candidates(scenes)
+    if (
+        project.video_format != "short"
+        and project.config.youtube_growth.reuse_scene_images_for_thumbnails
+    ):
+        payload["thumbnail_scene_candidates"] = _thumbnail_scene_candidates(scenes)
     return payload
 
 
@@ -265,6 +281,24 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         },
         "inputs": {
             "compact_context": relative_posix(layout.growth_context, layout.root),
+            "thumbnail_visual_reference_scene_id": growth_context["opening_scene"]["scene_id"],
+        },
+        "visual_standard": {
+            "id": project.config.images.visual_standard_id,
+            "enforced": project.config.images.enforce_visual_standard,
+            "thumbnail_must_match_scene_images": True,
+            "reference_policy": (
+                "required_opening_scene_image"
+                if single_agent_mode and integrated_thumbnails
+                else "opening_scene_image_when_available"
+            ),
+            "required_prompt_markers": [
+                project.config.images.visual_standard_id,
+                "animação 3D cinematográfica familiar premium",
+            ],
+            "forbidden_positive_style_markers": list(
+                _PHOTOGRAPHIC_THUMBNAIL_STYLE_MARKERS
+            ),
         },
         "outputs": {
             "package": relative_posix(layout.growth_package_staging, layout.root),
@@ -343,6 +377,20 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 "Construa um conflito visual simples com escala dramática, um personagem ou "
                 "objeto dominante, emoção legível, luz direcional e área negativa planejada "
                 "para o texto."
+            ),
+            (
+                "A thumbnail precisa pertencer exatamente ao mesmo universo visual das cenas. "
+                "Use visual_standard.id, visual_system.style, visual_system.palette e o "
+                "assembled_prompt da opening_scene como contrato, preservando animação 3D "
+                "cinematográfica familiar premium, materiais estilizados, proporções, desenho "
+                "de personagem, paleta e iluminação de longa-metragem."
+            ),
+            (
+                "Comece metadata.thumbnail_prompt com 'Visual standard: "
+                f"{project.config.images.visual_standard_id}. Style/medium: animação 3D "
+                "cinematográfica familiar premium.' Não descreva o estilo positivo como "
+                "photography, realistic, photorealistic, live action, fotografia editorial ou "
+                "retrato fotorrealista."
             ),
             (
                 "Preencha thumbnail_designs com um design por candidata, no mesmo índice do "
@@ -561,6 +609,37 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
     return payload
 
 
+def _validate_thumbnail_visual_standard(
+    package: YouTubeGrowthPackage,
+    queue: dict[str, Any],
+) -> None:
+    outputs = queue.get("outputs", {})
+    if outputs.get("thumbnail_source_mode") != "generated_integrated_art":
+        return
+    contract = queue.get("visual_standard")
+    if not isinstance(contract, dict) or not contract.get("enforced"):
+        return
+    prompt = package.metadata.thumbnail_prompt.strip()
+    normalized_prompt = _normalized_search_text(prompt)
+    standard_id = str(contract.get("id", "")).strip()
+    if standard_id and _normalized_search_text(standard_id) not in normalized_prompt:
+        raise ValueError(
+            "O prompt da thumbnail não declara o visual_standard obrigatório das cenas."
+        )
+    photographic_markers = contract.get(
+        "forbidden_positive_style_markers",
+        _PHOTOGRAPHIC_THUMBNAIL_STYLE_MARKERS,
+    )
+    if any(
+        _normalized_search_text(str(marker)) in normalized_prompt
+        for marker in photographic_markers
+        if str(marker).strip()
+    ):
+        raise ValueError(
+            "O prompt da thumbnail tenta usar fotografia ou fotorrealismo em vez do padrão 3D."
+        )
+
+
 def _safe_staging_file(layout: ProjectLayout, relative_path: str) -> Path:
     path = (layout.root / relative_path).resolve()
     try:
@@ -643,6 +722,7 @@ def _validate_package(
 ) -> None:
     if package.job_id != queue.get("job_id") or package.input_hash != queue.get("input_hash"):
         raise RuntimeError("O pacote do especialista pertence a uma fila antiga.")
+    _validate_thumbnail_visual_standard(package, queue)
     project = layout.load_manifest()
     metadata = package.metadata
     titles = [metadata.title, *metadata.alternative_titles]

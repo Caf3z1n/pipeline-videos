@@ -171,7 +171,11 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
             topics=["Davi e Golias", "1 Samuel 17"],
             pinned_comment="Qual parte dessa história mais falou com você?",
             thumbnail_concept="Davi pequeno diante da sombra de Golias",
-            thumbnail_prompt="Contraste de escala, emoção clara e composição simples.",
+            thumbnail_prompt=(
+                "Visual standard: cinematic-family-3d-v1. Style/medium: animação 3D "
+                "cinematográfica familiar premium. Contraste de escala, emoção clara e "
+                "composição simples."
+            ),
             thumbnail_alternatives=["Pedra no ar", "Sombra do gigante"],
         ),
         strategy=YouTubeGrowthStrategy(
@@ -254,7 +258,18 @@ def test_growth_queue_is_idempotent_and_imports_three_long_form_candidates(tmp_p
     assert queue["orchestration"]["recommended_model"] == "gpt-5.6-terra"
     assert queue["orchestration"]["fork_turns"] == "none"
     assert queue["orchestration"]["context_policy"] == "compact_only"
-    assert queue["inputs"] == {"compact_context": "youtube/growth-context.json"}
+    assert queue["inputs"] == {
+        "compact_context": "youtube/growth-context.json",
+        "thumbnail_visual_reference_scene_id": "scene-001",
+    }
+    assert queue["visual_standard"]["id"] == "cinematic-family-3d-v1"
+    assert queue["visual_standard"]["thumbnail_must_match_scene_images"] is True
+    assert queue["visual_standard"]["reference_policy"] == "opening_scene_image_when_available"
+    context = read_json(layout.growth_context)
+    assert context["visual_system"]["style"]["visual_standard_id"] == (
+        "cinematic-family-3d-v1"
+    )
+    assert context["opening_scene"]["assembled_prompt"] == "Davi diante de Golias"
     assert layout.growth_context.is_file()
     assert len(json.dumps(queue["schemas"]["package"])) < len(
         json.dumps(YouTubeGrowthPackage.model_json_schema())
@@ -289,6 +304,8 @@ def test_growth_queue_is_idempotent_and_imports_three_long_form_candidates(tmp_p
     assert any("É proibido repetir" in item for item in queue["instructions"])
     assert any("DAVI VS GOLIAS" in item for item in queue["instructions"])
     assert any("accent_color=red" in item for item in queue["instructions"])
+    assert any("mesmo universo visual" in item for item in queue["instructions"])
+    assert any("Style/medium: animação 3D" in item for item in queue["instructions"])
     assert layout.load_manifest().stages["youtube_growth"].attempts == 1
 
     write_json(layout.growth_package_staging, _package(queue))
@@ -337,6 +354,7 @@ def test_remote_review_growth_queue_requests_one_integrated_title_thumbnail_pair
     assert queue["outputs"]["thumbnail_design_count"] == 1
     assert len(queue["outputs"]["thumbnails"]) == 1
     assert queue["generation_retry_policy"]["same_prompt_attempts"] == 2
+    assert queue["visual_standard"]["reference_policy"] == "required_opening_scene_image"
     assert "apparent_age" in queue["generation_retry_policy"]["immutable_on_alternative"]
     assert any("exatamente o mesmo prompt" in item for item in queue["instructions"])
     assert any("um par editorial completo" in item for item in queue["instructions"])
@@ -548,6 +566,27 @@ def test_short_growth_rejects_generic_title_without_primary_search_phrase(tmp_pa
 
     with pytest.raises(ValueError, match="conter primary_keyword"):
         _validate_package(layout, generic_package, queue)
+
+
+def test_growth_rejects_photographic_thumbnail_prompt(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(tmp_path, video_format="short")
+    queue = prepare_growth_queue(layout)
+    package = _package(queue, format_name="short")
+    photographic_metadata = package.metadata.model_copy(
+        update={
+            "thumbnail_prompt": (
+                "Visual standard: cinematic-family-3d-v1. Style/medium: premium cinematic "
+                "editorial photography, realistic."
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="fotografia ou fotorrealismo"):
+        _validate_package(
+            layout,
+            package.model_copy(update={"metadata": photographic_metadata}),
+            queue,
+        )
 
 
 def test_growth_rejects_title_that_repeats_the_paired_thumbnail_text(tmp_path) -> None:

@@ -547,6 +547,43 @@ def test_shorts_import_rejects_spiritual_engagement_bait(tmp_path) -> None:
         import_shorts_script_package(layout)
 
 
+def test_shorts_import_rejects_weak_comment_keyword(tmp_path) -> None:
+    layout = _short_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+    package = _package(queue)
+    weak_text = 'Escreve "BEM" nos comentários como lembrete desta mensagem.'
+    weak_prompt = package.strategy.comment_prompt.model_copy(
+        update={
+            "prompt_text": weak_text,
+            "response_cue": "BEM",
+            "fit_reason": "Bem é uma palavra simples ligada ao tema.",
+        }
+    )
+    altered_sections = list(package.script.sections)
+    altered_sections[-1] = altered_sections[-1].model_copy(
+        update={"narration": f"{weak_text} {package.strategy.cta}"}
+    )
+    altered_package = package.model_copy(
+        update={
+            "script": package.script.model_copy(update={"sections": altered_sections}),
+            "strategy": package.strategy.model_copy(update={"comment_prompt": weak_prompt}),
+        }
+    )
+    write_json(layout.shorts_script_package_staging, altered_package)
+
+    with pytest.raises(ValueError, match="palavra-síntese expressiva e contextual"):
+        import_shorts_script_package(layout)
+
+
+def test_shorts_queue_requests_contextual_comment_keyword(tmp_path) -> None:
+    layout = _short_project(tmp_path)
+
+    queue = prepare_shorts_script_queue(layout)
+
+    assert any("REFÚGIO, PERSISTÊNCIA, CONFIANÇA" in item for item in queue["instructions"])
+    assert any("Nunca use como resposta isolada" in item for item in queue["instructions"])
+
+
 def test_shorts_import_rejects_multiple_scenes_in_one_visual_direction(tmp_path) -> None:
     layout = _short_project(tmp_path)
     queue = prepare_shorts_script_queue(layout)

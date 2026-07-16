@@ -17,6 +17,7 @@ from pipeline_videos.remote_jobs import (
     _codex_phase_command,
     _editorial_sources_phase_spec,
     _failure_with_codex_context,
+    _growth_phase_spec,
     _image_phase_specs,
     _import_editorial_source_selection,
     _normalize_shorts_script_payload,
@@ -263,6 +264,65 @@ def test_image_phases_receive_one_item_and_previous_staging_only(tmp_path) -> No
     assert "PROMPT EXCLUSIVO DOIS" not in json.dumps(specs[0].payload, ensure_ascii=False)
     assert specs[0].payload["allowed_inputs"] == []
     assert specs[1].payload["allowed_inputs"] == [str(specs[0].expected_outputs[0])]
+
+
+def test_remote_growth_requires_opening_scene_as_visual_reference(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(topic="Confiança"))
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+    context = layout.root / "youtube" / "growth-context.json"
+    package = layout.root / "youtube" / "staging" / "youtube-growth-specialist" / "package.json"
+    thumbnail = package.parent / "thumbnail-001.png"
+    reference = layout.root / "images" / "staging" / "scene-001-v001.png"
+    write_json(context, {"opening_scene": {"scene_id": "scene-001"}})
+    reference.parent.mkdir(parents=True, exist_ok=True)
+    reference.write_bytes(b"reference image")
+    write_json(
+        layout.growth_queue,
+        {
+            "job_id": "youtube-growth-test",
+            "orchestration": {
+                "recommended_model": "gpt-5.6-terra",
+                "reasoning_effort": "low",
+            },
+            "inputs": {
+                "compact_context": "youtube/growth-context.json",
+                "thumbnail_visual_reference_scene_id": "scene-001",
+            },
+            "outputs": {
+                "package": "youtube/staging/youtube-growth-specialist/package.json",
+                "thumbnails": [
+                    "youtube/staging/youtube-growth-specialist/thumbnail-001.png"
+                ],
+            },
+            "visual_standard": {
+                "id": "cinematic-family-3d-v1",
+                "reference_policy": "required_opening_scene_image",
+            },
+        },
+    )
+    write_json(
+        layout.image_queue,
+        {
+            "items": [
+                {
+                    "scene_id": "scene-001",
+                    "staging_path": "images/staging/scene-001-v001.png",
+                }
+            ]
+        },
+    )
+
+    spec = _growth_phase_spec(layout)
+
+    assert spec.payload["allowed_inputs"] == [
+        str(layout.growth_queue),
+        str(context),
+        str(reference),
+    ]
+    assert spec.payload["task"]["thumbnail_visual_reference_path"] == str(reference)
+    assert "não a converta em fotografia" in spec.payload["task"]["instructions"][1]
+    assert spec.expected_outputs == (package, thumbnail)
 
 
 def test_specific_topic_uses_compact_catalog_selection_phase(tmp_path) -> None:
