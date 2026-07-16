@@ -22,6 +22,8 @@ from pipeline_videos.remote_jobs import (
     _import_editorial_source_selection,
     _normalize_shorts_script_payload,
     _recover_generated_image_outputs,
+    _shorts_script_phase_spec,
+    _shorts_script_repair_is_available,
     _shorts_script_repair_phase_spec,
     codex_phase_prompt,
     codex_usage_summary,
@@ -198,7 +200,37 @@ def test_shorts_narrative_spine_is_aligned_to_mapped_sections_without_codex() ->
     assert "strategy.narrative_spine.tension_question" in change
 
 
-def test_shorts_repair_is_single_compact_terra_phase(tmp_path) -> None:
+def test_remote_shorts_script_uses_sol_with_medium_reasoning_even_for_legacy_queue(
+    tmp_path,
+) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(topic="Esperança"))
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+    context = layout.root / "script" / "shorts-context.json"
+    write_json(context, {"project_id": job.job_id})
+    write_json(
+        layout.shorts_script_queue,
+        {
+            "job_id": "shorts-script-test",
+            "orchestration": {
+                "recommended_model": "gpt-5.6-terra",
+                "reasoning_effort": "low",
+            },
+            "inputs": {"compact_context": "script/shorts-context.json"},
+            "outputs": {
+                "package": "script/staging/shorts-script-specialist/package.json",
+            },
+        },
+    )
+
+    spec = _shorts_script_phase_spec(layout)
+
+    assert spec.phase == "shorts_script"
+    assert spec.model == "gpt-5.6-sol"
+    assert spec.reasoning_effort == "medium"
+
+
+def test_shorts_repair_is_single_compact_sol_phase(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Esperança"))
     layout = prepare_job_project(job, projects_root=tmp_path / "projects")
@@ -219,13 +251,32 @@ def test_shorts_repair_is_single_compact_terra_phase(tmp_path) -> None:
     )
 
     assert spec.phase == "shorts_script_repair"
-    assert spec.model == "gpt-5.6-terra"
-    assert spec.reasoning_effort == "low"
+    assert spec.model == "gpt-5.6-sol"
+    assert spec.reasoning_effort == "medium"
     assert spec.payload["allowed_inputs"] == [
         str(layout.shorts_script_queue),
         str(layout.shorts_script_package_staging),
     ]
     assert "strategy.hook_type inválido" in spec.payload["task"]["validation_error"]
+
+
+def test_shorts_repair_allows_one_run_per_remote_attempt(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(topic="Esperança"))
+    repair_run = RemoteCodexRun(
+        phase="shorts_script_repair",
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
+        started_at="2026-07-16T09:00:00Z",
+        finished_at="2026-07-16T09:01:00Z",
+        exit_code=0,
+    )
+
+    first_attempt = job.model_copy(update={"attempts": 1, "codex_runs": [repair_run]})
+    second_attempt = first_attempt.model_copy(update={"attempts": 2})
+
+    assert _shorts_script_repair_is_available(first_attempt) is False
+    assert _shorts_script_repair_is_available(second_attempt) is True
 
 
 def test_image_phases_receive_one_item_and_previous_staging_only(tmp_path) -> None:

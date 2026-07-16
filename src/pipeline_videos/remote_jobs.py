@@ -48,6 +48,7 @@ REMOTE_JOB_STATE_SCHEMA_VERSION = "1.1"
 DEFAULT_REMOTE_JOBS_DIR = REPO_ROOT / "remote-jobs"
 REMOTE_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 DEFAULT_REMOTE_CODEX_MODEL = "gpt-5.6-terra"
+DEFAULT_REMOTE_SHORT_SCRIPT_MODEL = "gpt-5.6-sol"
 JOB_ID_PATTERN = re.compile(r"^video-[0-9]{8}-[0-9]{6}-[a-f0-9]{8}$")
 CODEX_THREAD_ID_PATTERN = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -692,10 +693,9 @@ def _import_editorial_source_selection(
 
 def _shorts_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     queue = read_json(layout.shorts_script_queue)
-    model, effort = _phase_settings(
-        queue,
-        fallback_model=DEFAULT_REMOTE_CODEX_MODEL,
-        fallback_effort="low",
+    model = os.getenv(
+        "PIPELINE_VIDEOS_REMOTE_SHORT_SCRIPT_MODEL",
+        DEFAULT_REMOTE_SHORT_SCRIPT_MODEL,
     )
     context = _project_file(layout, queue["inputs"]["compact_context"])
     package = _project_file(layout, queue["outputs"]["package"])
@@ -703,7 +703,7 @@ def _shorts_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
         phase="shorts_script",
         item_id=str(queue.get("job_id")),
         model=model,
-        reasoning_effort=effort,
+        reasoning_effort="medium",
         payload={
             "allowed_inputs": [str(layout.shorts_script_queue), str(context)],
             "task": {
@@ -827,13 +827,13 @@ def _shorts_script_repair_phase_spec(
     package = _project_file(layout, queue["outputs"]["package"])
     model = os.getenv(
         "PIPELINE_VIDEOS_REMOTE_SCRIPT_REPAIR_MODEL",
-        DEFAULT_REMOTE_CODEX_MODEL,
+        DEFAULT_REMOTE_SHORT_SCRIPT_MODEL,
     )
     return CodexPhaseSpec(
         phase="shorts_script_repair",
         item_id=str(queue.get("job_id")),
         model=model,
-        reasoning_effort="low",
+        reasoning_effort="medium",
         payload={
             "allowed_inputs": [str(layout.shorts_script_queue), str(package)],
             "task": {
@@ -860,6 +860,11 @@ def _shorts_script_repair_phase_spec(
         },
         expected_outputs=(package,),
     )
+
+
+def _shorts_script_repair_is_available(job: RemoteVideoJob) -> bool:
+    repair_runs = sum(run.phase == "shorts_script_repair" for run in job.codex_runs)
+    return repair_runs < max(1, job.attempts)
 
 
 def _ensure_valid_shorts_script_staging(
@@ -899,7 +904,7 @@ def _ensure_valid_shorts_script_staging(
         return job
     except (ValueError, TypeError, KeyError) as exc:
         latest, _ = store.find(job.job_id)
-        if any(run.phase == "shorts_script_repair" for run in latest.codex_runs):
+        if not _shorts_script_repair_is_available(latest):
             raise RuntimeError(
                 "O pacote de roteiro continuou inválido após a única correção automática. "
                 f"Último erro: {exc}"
