@@ -11,6 +11,7 @@ from pipeline_videos.cli import app
 from pipeline_videos.remote_jobs import (
     RemoteJobStore,
     RemoteVideoRequest,
+    _failure_with_codex_context,
     codex_job_prompt,
     job_is_due,
     prepare_job_project,
@@ -85,6 +86,28 @@ def test_prepare_job_project_enables_single_variant_without_human_approval(tmp_p
     assert all(record.status.value == "pending" for record in manifest.approvals.values())
     assert "sem criar subagentes" in codex_job_prompt(job, layout)
     assert "exatamente um título e uma thumbnail" in codex_job_prompt(job, layout)
+    assert "repita exatamente o mesmo prompt" in codex_job_prompt(job, layout)
+    assert "Nunca substitua ou envelheça o personagem" in codex_job_prompt(job, layout)
+
+
+def test_remote_failure_keeps_moderation_as_root_cause(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request())
+    output = store.root / "logs" / f"{job.job_id}-last-message.txt"
+    output.write_text(
+        "A cena foi bloqueada por moderation_blocked.\n"
+        "O render foi interrompido e o estado foi preservado.\n",
+        encoding="utf-8",
+    )
+
+    message = _failure_with_codex_context(
+        job,
+        store,
+        FileNotFoundError("youtube/metadata.json ausente"),
+    )
+
+    assert message.startswith("A cena foi bloqueada por moderation_blocked.")
+    assert "Consequência técnica: youtube/metadata.json ausente" in message
 
 
 def test_work_once_dry_run_does_not_claim_or_execute_job(tmp_path) -> None:

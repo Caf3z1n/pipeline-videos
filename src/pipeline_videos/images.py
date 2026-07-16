@@ -6,6 +6,10 @@ from typing import Any, Literal
 
 from PIL import Image, ImageDraw, ImageFont, ImageStat
 
+from pipeline_videos.imagegen_retry import (
+    imagegen_retry_instructions,
+    imagegen_retry_policy,
+)
 from pipeline_videos.models import (
     ApprovalStatus,
     ImageItem,
@@ -29,7 +33,7 @@ from pipeline_videos.state import (
 from pipeline_videos.storage import ProjectLayout, read_json, read_model, write_json, write_text
 from pipeline_videos.utils import relative_posix, sha256_file, sha256_value, utc_now
 
-CODEX_QUEUE_SCHEMA_VERSION = "1.5"
+CODEX_QUEUE_SCHEMA_VERSION = "1.6"
 MANUAL_PROMPTS_SCHEMA_VERSION = "1.1"
 
 
@@ -325,9 +329,10 @@ def _write_worker_job_files(layout: ProjectLayout, queue: dict[str, Any]) -> lis
                 "fork_turns": "none",
                 "recommended_model": "gpt-5.6-luna",
                 "reasoning_effort": "low",
+                "generation_retry_policy": imagegen_retry_policy(),
                 "instructions": [
                     "Leia somente este arquivo; não leia o histórico da conversa ou manifestos.",
-                    "Faça exatamente uma chamada imagegen por job, preservando o prompt integral.",
+                    *imagegen_retry_instructions(asset_label="job de imagem"),
                     "Salve cada PNG somente no staging_path declarado.",
                     "Não importe, aprove ou modifique o estado compartilhado do projeto.",
                     "Processe o lote em uma única execução retomável sempre que possível.",
@@ -525,6 +530,7 @@ def build_codex_queue(
             "reference_note": style.reference_note,
             "enforced": project.config.images.enforce_visual_standard,
         },
+        "generation_retry_policy": imagegen_retry_policy(),
         "orchestration": {
             "mode": (
                 "manual_upload"
@@ -562,6 +568,7 @@ def build_codex_queue(
                 "Quando growth_worker_reserved for true, manter uma vaga para "
                 "youtube_growth_specialist.",
                 "Gerar uma imagem por item com a ferramenta imagegen embutida do Codex.",
+                *imagegen_retry_instructions(asset_label="item de imagem"),
                 (
                     "Preservar o visual_standard em todas as cenas: animação 3D cinematográfica "
                     "familiar premium, personagens expressivos, formas arredondadas, materiais "

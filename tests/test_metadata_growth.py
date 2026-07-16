@@ -336,6 +336,9 @@ def test_remote_review_growth_queue_requests_one_integrated_title_thumbnail_pair
     assert queue["outputs"]["thumbnail_count"] == 1
     assert queue["outputs"]["thumbnail_design_count"] == 1
     assert len(queue["outputs"]["thumbnails"]) == 1
+    assert queue["generation_retry_policy"]["same_prompt_attempts"] == 2
+    assert "apparent_age" in queue["generation_retry_policy"]["immutable_on_alternative"]
+    assert any("exatamente o mesmo prompt" in item for item in queue["instructions"])
     assert any("um par editorial completo" in item for item in queue["instructions"])
     assert not any("três pares editoriais completos" in item for item in queue["instructions"])
 

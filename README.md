@@ -45,6 +45,10 @@ importa cada lote uma única vez, compõe capas, renderiza e valida. Projetos ex
 perfil legado até uma migração explícita. O contrato completo está em
 [Produção otimizada](docs/optimized-production.md).
 
+Se uma cena ou thumbnail retornar `moderation_blocked`, o executor repete exatamente o mesmo prompt
+uma vez. Um segundo bloqueio libera apenas uma alternativa de ação ou enquadramento que preserve a
+identidade visual completa do personagem e do vídeo. Stagings válidos são reutilizados na retomada.
+
 ## Marco validado
 
 O comando abaixo gera uma demonstração de 52,5 segundos baseada em Salmo 23:1-4, sem citação
@@ -291,10 +295,12 @@ uv run pipeline-videos images prepare salmo-121 --provider codex
 uv run pipeline-videos images queue salmo-121
 ```
 
-Para cada item de `images/codex-queue.json`, o Codex deve fazer uma chamada de geração e copiar o PNG
-para o `staging_path`. O `worker_id` é a afinidade inicial; depois, o planejador recomenda o próximo
-job ordenado ao primeiro trabalhador livre. Os trabalhadores não compartilham um `staging_path` nem
-alteram manifestos. Quando o lote terminar, o agente principal faz uma única importação:
+Para cada item de `images/codex-queue.json`, o Codex faz uma chamada por tentativa e copia o PNG
+bem-sucedido para o `staging_path`. Em bloqueio de moderação, repete o mesmo prompt uma vez e só então
+pode usar uma alternativa visual que preserve integralmente a identidade. O `worker_id` é a afinidade
+inicial; depois, o planejador recomenda o próximo job ordenado ao primeiro trabalhador livre. Os
+trabalhadores não compartilham um `staging_path` nem alteram manifestos. Quando o lote terminar, o
+agente principal faz uma única importação:
 
 ```powershell
 uv run pipeline-videos images import-batch salmo-121

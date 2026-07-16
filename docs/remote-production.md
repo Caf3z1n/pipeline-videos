@@ -20,6 +20,19 @@ Cada pedido declara:
 `overnight` permite iniciar jobs somente entre 01:00 e 05:00 em `America/Sao_Paulo`. Um job iniciado
 nesse intervalo pode terminar depois das 05:00. A fila executa apenas um job por vez.
 
+## Bloqueios de geração de imagem
+
+Cada cena e thumbnail segue uma política limitada e retomável. A primeira geração usa o prompt
+declarado sem alterações. Se a saída retornar `moderation_blocked`, o executor repete exatamente o
+mesmo prompt uma vez para absorver falsos positivos. Somente após um segundo bloqueio ele tenta uma
+alternativa da mesma cena, mudando apenas ação, pose, câmera, enquadramento ou objetos não essenciais.
+
+A alternativa nunca troca ou envelhece o personagem. Identidade, idade aparente, rosto, cabelo,
+figurino, proporções, silhueta, padrão visual, paleta, continuidade do ambiente e sentido narrativo
+permanecem invariáveis. Quando existir, a imagem bem-sucedida mais próxima do personagem serve como
+referência visual. Após três bloqueios, o estado parcial é preservado e `moderation_blocked` continua
+como causa principal; arquivos ausentes são registrados apenas como consequência.
+
 ## Estados
 
 ```text

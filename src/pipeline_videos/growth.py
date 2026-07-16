@@ -9,6 +9,10 @@ from typing import Any
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
+from pipeline_videos.imagegen_retry import (
+    imagegen_retry_instructions,
+    imagegen_retry_policy,
+)
 from pipeline_videos.metadata import _build_chapters
 from pipeline_videos.models import (
     ApprovalStatus,
@@ -40,8 +44,8 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-GROWTH_QUEUE_SCHEMA_VERSION = "1.8"
-GROWTH_ALGORITHM_VERSION = "1.8"
+GROWTH_QUEUE_SCHEMA_VERSION = "1.9"
+GROWTH_ALGORITHM_VERSION = "1.9"
 SHORT_TITLE_MAX_CHARACTERS = 70
 SHORT_DESCRIPTION_MAX_CHARACTERS = 600
 SHORT_DESCRIPTION_SEARCH_WINDOW = 240
@@ -309,6 +313,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 ),
             },
         },
+        "generation_retry_policy": imagegen_retry_policy(),
         "schemas": {
             "package": compact_json_schema(YouTubeGrowthPackage.model_json_schema()),
         },
@@ -432,6 +437,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                     "Gere cada thumbnail final com uma chamada independente de imagegen e salve "
                     "o bitmap completo exatamente no caminho de staging do mesmo índice."
                 ),
+                *imagegen_retry_instructions(asset_label="thumbnail"),
                 (
                     "Inclua na própria geração o texto exato de thumbnail_design, sua palavra de "
                     "destaque vermelha e o elemento narrativo vermelho. Texto e símbolo precisam "

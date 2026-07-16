@@ -41,8 +41,9 @@ uv run pipeline-videos autopilot <projeto> --allow-external --wait-external
 ```
 
 O processo aguarda staging, importa cada lote uma única vez, compõe capas, renderiza a prévia e
-valida o projeto. Uma falha pode ser retomada com o mesmo comando; hashes evitam repetir artefatos
-válidos.
+valida o projeto. Uma falha pode ser retomada com o mesmo comando; hashes e stagings válidos evitam
+repetir artefatos. Bloqueios de moderação de saída admitem no máximo três tentativas por item:
+original, repetição idêntica e alternativa visual com continuidade rígida.
 
 ## Workers de imagem
 
@@ -52,7 +53,10 @@ Quando `images/codex-queue.json` estiver pendente:
 2. Crie cada worker sem histórico herdado (`fork_turns=none`).
 3. Entregue somente `images/jobs/image-worker-N.json`.
 4. O worker não deve ler o chat, `AGENTS.md`, `project.json` ou manifestos completos.
-5. Faça uma chamada `imagegen` por job, preservando o prompt integral.
+5. Faça uma chamada `imagegen` por tentativa, preservando o prompt integral na primeira chamada.
+   Em `moderation_blocked`, repita exatamente o mesmo prompt uma vez. Se a repetição bloquear,
+   permita uma única alternativa de ação/enquadramento, mantendo identidade e idade aparente do
+   personagem, rosto, cabelo, figurino, proporções, silhueta, estilo, paleta, ambiente e sentido.
 6. Salve exclusivamente no `staging_path` e nunca importe ou aprove ativos.
 7. Processe o lote em uma única execução retomável sempre que a ferramenta permitir.
 

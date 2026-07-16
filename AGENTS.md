@@ -49,7 +49,9 @@
 - Workers escrevem somente no staging declarado e recebem contexto compacto com
   `fork_turns=none`.
 - Use no máximo dois trabalhadores de imagem e um especialista do YouTube simultaneamente.
-- Imagens usam uma chamada `imagegen` por job e preservam integralmente o prompt.
+- Imagens usam uma chamada `imagegen` por tentativa. Em `moderation_blocked`, repita o mesmo prompt
+  uma vez; se bloquear novamente, tente uma única alternativa de cena preservando identidade, idade
+  aparente, rosto, cabelo, figurino, proporções, silhueta, estilo, paleta, ambiente e sentido.
 - Não faça inspeção semântica cena a cena no one-shot; entregue a prévia completa ao usuário.
 - Imagens ativas podem entrar no rascunho, mas permanecem não aprovadas.
 - Imports de imagem e crescimento acontecem uma única vez no join.
@@ -88,7 +90,8 @@
   pendente: raciocínio médio no completo e baixo no Light. Ele gera títulos, descrição, estratégia
   e designs, nunca publica nem promete CTR/alcance.
 - Em projetos novos de qualquer formato, inclusive Shorts, o especialista gera três thumbnails
-  finais com `imagegen`, uma chamada por candidata. A exceção aditiva é `remote_review`, que gera
+  finais com `imagegen`, sob a mesma política limitada de retry por candidata. A exceção aditiva é
+  `remote_review`, que gera
   exatamente uma combinação título+thumbnail para economizar uso. Texto, palavra vermelha e
   seta/X/sublinhado/pincel devem nascer incorporados ao bitmap, com grafia exata e integração à
   luz, profundidade e composição. O compositor local é somente fallback para projetos legados.
@@ -109,8 +112,10 @@
 
 ## Filas e retomada
 
-- Em `images/codex-queue.json`, processe somente itens pendentes e faça uma chamada `imagegen` por
-  cena/variante, preservando integralmente estilo, paleta, continuidade, composição e restrições.
+- Em `images/codex-queue.json`, processe somente itens pendentes ou sem staging válido. Faça a
+  primeira chamada com o prompt integral. Em `moderation_blocked`, repita exatamente o mesmo prompt
+  uma vez; somente após o segundo bloqueio use uma alternativa da mesma cena, mudando ação, pose,
+  câmera, enquadramento ou objetos não essenciais, sem trocar nem envelhecer o personagem.
 - Copie cada ativo ao `staging_path`; não o deixe apenas em `$CODEX_HOME`. O agente principal faz
   `images import-batch` uma vez. Em fluxo manual, use o comando de importação declarado.
 - Não regenere item importado/aprovado. Uma versão ativa pode entrar na prévia, mas segue sem

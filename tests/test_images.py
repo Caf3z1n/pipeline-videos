@@ -108,7 +108,12 @@ def test_manifest_and_codex_queue_are_idempotent_and_can_target_one_scene(
     assert queue["items"][0]["expected_path"] == "images/assets/scene-002/v001.png"
     assert queue["items"][0]["staging_path"] == "images/staging/scene-002-v001.png"
     assert queue["items"][0]["worker_id"] == "image-worker-1"
-    assert queue["schema_version"] == "1.5"
+    assert queue["schema_version"] == "1.6"
+    retry_policy = queue["generation_retry_policy"]
+    assert retry_policy["max_attempts_per_item"] == 3
+    assert retry_policy["same_prompt_attempts"] == 2
+    assert retry_policy["alternative_scene_attempts"] == 1
+    assert "apparent_age" in retry_policy["immutable_on_alternative"]
     assert queue["visual_standard"]["id"] == "cinematic-family-3d-v1"
     assert queue["visual_standard"]["enforced"] is True
     assert any(
@@ -131,6 +136,8 @@ def test_manifest_and_codex_queue_are_idempotent_and_can_target_one_scene(
     worker_job = read_json(worker_file)
     assert worker_job["context_policy"] == "compact_only"
     assert worker_job["fork_turns"] == "none"
+    assert worker_job["generation_retry_policy"] == retry_policy
+    assert any("exatamente o mesmo prompt" in item for item in worker_job["instructions"])
     assert [job["scene_id"] for job in worker_job["jobs"]] == ["scene-002"]
     assert layout.load_manifest().stages["images"].status == StageStatus.WAITING_EXTERNAL
 
