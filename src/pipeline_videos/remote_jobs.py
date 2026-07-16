@@ -726,24 +726,61 @@ _SHORTS_TECHNIQUE_ONLY_HOOK_TYPES = {
 
 
 def _normalize_shorts_script_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+    changes: list[str] = []
     strategy = payload.get("strategy")
     if not isinstance(strategy, dict):
         return payload, None
     hook_type = strategy.get("hook_type")
-    if hook_type in _SHORTS_HOOK_TYPES or hook_type not in _SHORTS_TECHNIQUE_ONLY_HOOK_TYPES:
-        return payload, None
-    techniques = strategy.get("hook_techniques")
-    technique_values = set(techniques) if isinstance(techniques, list) else set()
-    if "contrast" in technique_values:
-        replacement = "contrast"
-    elif technique_values.intersection({"curiosity_gap", "open_loop"}):
-        replacement = "curiosity_gap"
-    elif hook_type == "pattern_interrupt":
-        replacement = "surprising_detail"
-    else:
-        replacement = "direct_tension"
-    strategy["hook_type"] = replacement
-    return payload, f"strategy.hook_type: {hook_type} -> {replacement}"
+    if hook_type not in _SHORTS_HOOK_TYPES and hook_type in _SHORTS_TECHNIQUE_ONLY_HOOK_TYPES:
+        techniques = strategy.get("hook_techniques")
+        technique_values = set(techniques) if isinstance(techniques, list) else set()
+        if "contrast" in technique_values:
+            replacement = "contrast"
+        elif technique_values.intersection({"curiosity_gap", "open_loop"}):
+            replacement = "curiosity_gap"
+        elif hook_type == "pattern_interrupt":
+            replacement = "surprising_detail"
+        else:
+            replacement = "direct_tension"
+        strategy["hook_type"] = replacement
+        changes.append(f"strategy.hook_type: {hook_type} -> {replacement}")
+
+    spine = strategy.get("narrative_spine")
+    script = payload.get("script")
+    sections = script.get("sections") if isinstance(script, dict) else None
+    if isinstance(spine, dict) and isinstance(sections, list):
+        section_by_id = {
+            section.get("section_id"): section
+            for section in sections
+            if isinstance(section, dict) and isinstance(section.get("section_id"), str)
+        }
+        mapped_fields = (
+            ("tension_question", "tension_section_id"),
+            ("bridge_statement", "bridge_section_id"),
+            ("central_truth", "meaning_section_id"),
+            ("practical_response", "application_section_id"),
+        )
+        for field_name, section_field in mapped_fields:
+            section = section_by_id.get(spine.get(section_field))
+            narration = section.get("narration") if isinstance(section, dict) else None
+            current = spine.get(field_name)
+            if (
+                isinstance(narration, str)
+                and narration.strip()
+                and (
+                    not isinstance(current, str)
+                    or re.sub(r"\W+", " ", current.casefold()).strip()
+                    not in re.sub(r"\W+", " ", narration.casefold()).strip()
+                )
+            ):
+                spine[field_name] = narration.strip()
+                changes.append(f"strategy.narrative_spine.{field_name}: seção mapeada")
+        tension = spine.get("tension_question")
+        if isinstance(tension, str) and strategy.get("open_loop") != tension:
+            strategy["open_loop"] = tension
+            changes.append("strategy.open_loop: tensão central")
+
+    return payload, "; ".join(changes) or None
 
 
 def _shorts_script_repair_phase_spec(
@@ -752,10 +789,9 @@ def _shorts_script_repair_phase_spec(
 ) -> CodexPhaseSpec:
     queue = read_json(layout.shorts_script_queue)
     package = _project_file(layout, queue["outputs"]["package"])
-    model, _ = _phase_settings(
-        queue,
-        fallback_model=DEFAULT_REMOTE_CODEX_MODEL,
-        fallback_effort="low",
+    model = os.getenv(
+        "PIPELINE_VIDEOS_REMOTE_SCRIPT_REPAIR_MODEL",
+        DEFAULT_REMOTE_CODEX_MODEL,
     )
     return CodexPhaseSpec(
         phase="shorts_script_repair",

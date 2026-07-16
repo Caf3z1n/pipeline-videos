@@ -149,6 +149,44 @@ def test_shorts_hook_type_confusion_is_normalized_without_another_codex_run() ->
     assert change == "strategy.hook_type: emotional_mirroring -> direct_tension"
 
 
+def test_shorts_narrative_spine_is_aligned_to_mapped_sections_without_codex() -> None:
+    payload = {
+        "strategy": {
+            "hook_type": "direct_tension",
+            "hook_techniques": ["self_relevance"],
+            "open_loop": "Resumo que não aparece no roteiro",
+            "narrative_spine": {
+                "tension_section_id": "s1",
+                "bridge_section_id": "s3",
+                "meaning_section_id": "s4",
+                "application_section_id": "s5",
+                "tension_question": "Outra formulação",
+                "bridge_statement": "Outro resumo",
+                "central_truth": "Outra verdade",
+                "practical_response": "Outra aplicação",
+            },
+        },
+        "script": {
+            "sections": [
+                {"section_id": "s1", "narration": "Você sorri, mas está cansado de fingir."},
+                {"section_id": "s3", "narration": "A Bíblia não manda esconder a dor."},
+                {"section_id": "s4", "narration": "Isso não promete alívio imediato."},
+                {"section_id": "s5", "narration": "Converse hoje com uma pessoa segura."},
+            ]
+        },
+    }
+
+    normalized, change = _normalize_shorts_script_payload(payload)
+    spine = normalized["strategy"]["narrative_spine"]
+
+    assert spine["tension_question"] == "Você sorri, mas está cansado de fingir."
+    assert spine["bridge_statement"] == "A Bíblia não manda esconder a dor."
+    assert spine["central_truth"] == "Isso não promete alívio imediato."
+    assert spine["practical_response"] == "Converse hoje com uma pessoa segura."
+    assert normalized["strategy"]["open_loop"] == spine["tension_question"]
+    assert "strategy.narrative_spine.tension_question" in change
+
+
 def test_shorts_repair_is_single_compact_terra_phase(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Esperança"))

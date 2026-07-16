@@ -34,10 +34,11 @@ roteiro de Short, imagens, crescimento e seleção editorial usam raciocínio ba
 raciocínio alto; uma revisão longa isolada usa raciocínio médio.
 
 Antes de importar um roteiro de Short, o executor valida o staging. Confusões conhecidas entre
-`hook_type` e `hook_techniques` são normalizadas deterministicamente, sem nova chamada ao Codex. Se
-o pacote continuar inválido, ocorre no máximo uma fase curta `shorts_script_repair`, que lê somente
-a fila e o pacote inválido, preserva o conteúdo válido e corrige apenas o contrato. Uma segunda
-falha encerra o job para evitar consumo repetitivo.
+`hook_type` e `hook_techniques` e desalinhamentos entre a espinha narrativa e suas seções são
+normalizados deterministicamente, sem nova chamada ao Codex. Se o pacote continuar inválido, ocorre
+no máximo uma fase curta `shorts_script_repair`, que lê somente a fila e o pacote inválido, preserva
+o conteúdo válido e corrige apenas o contrato. Uma segunda falha encerra o job para evitar consumo
+repetitivo.
 
 ## Hooks
 
