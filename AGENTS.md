@@ -52,7 +52,9 @@
 - O agente principal é o único escritor de estado compartilhado.
 - Workers escrevem somente no staging declarado e recebem contexto compacto com
   `fork_turns=none`.
-- Use no máximo dois trabalhadores de imagem e um especialista do YouTube simultaneamente.
+- Use no máximo dois trabalhadores de imagem simultaneamente. Em projetos novos, inicie o
+  especialista do YouTube somente depois de importar a imagem ativa da abertura; o paralelismo
+  imagem+crescimento permanece apenas para filas legadas sem edição obrigatória do primeiro frame.
 - Imagens usam uma chamada `imagegen` por tentativa. Em `moderation_blocked`, repita o mesmo prompt
   uma vez; se bloquear novamente, tente uma única alternativa de cena preservando identidade, idade
   aparente, rosto, cabelo, figurino, proporções, silhueta, estilo, paleta, ambiente e sentido.
@@ -71,17 +73,11 @@
 - No modo completo, prepare `script/shorts-queue.json` e crie exatamente um
   `shorts_script_specialist`, com raciocínio alto e staging exclusivo; o agente principal valida e
   importa uma única vez com `script shorts-import`.
-- `new-short-light-manual` e `new-short-light-automatica` são modos aditivos e não alteram
-  `new-short`/`draft_one_shot`. Neles, o agente principal faz o roteiro com raciocínio baixo e cria
-  exatamente um especialista de crescimento com raciocínio baixo.
 - `new-short-audio-manual` mantém o fluxo completo, mas usa `audio.provider=local_manual`: mostre
   integralmente `script/narration.txt`, aguarde um único arquivo de voz do usuário e importe com
   `audio import-manual`. O alinhamento usa WhisperX isolado em CPU, sem ElevenLabs e sem
   `--allow-external`; a primeira execução pode baixar o pacote e o modelo português, depois usa o
   cache local.
-- Light manual prepara prompts em partes de até dez imagens e para até o usuário anexá-las; importe
-  tudo na ordem com `images import-manual`. Light automático usa até dois image workers e importa o
-  lote uma única vez.
 - Voz real usa ElevenLabs e exige `--allow-external`; `mock` é apenas para demonstrações e testes.
 - Voz anexada usa somente áudio limpo, sem música ou efeitos, e deve reproduzir exatamente a
   locução; divergência ou palavra sem timestamp bloqueia a importação em vez de simular tempos.
@@ -91,28 +87,28 @@
 - O roteirista de Shorts produz gancho humano imediato, curiosidade honesta, contexto rápido,
   citação bíblica, resolução, aplicação, palavra específica para comentar e CTA completo, conforme
   `docs/shorts-script-standard.md`.
-- Crie exatamente um `youtube_growth_specialist` quando `youtube/growth-queue.json` estiver
-  pendente: raciocínio médio no completo e baixo no Light. Ele gera títulos, descrição, estratégia
-  e designs, nunca publica nem promete CTR/alcance.
-- Em projetos novos de qualquer formato, inclusive Shorts, o especialista gera três thumbnails
-  finais com `imagegen`, sob a mesma política limitada de retry por candidata. A exceção aditiva é
-  `remote_review`, que gera
-  exatamente uma combinação título+thumbnail para economizar uso. Texto, palavra vermelha e
+- Crie exatamente um `youtube_growth_specialist` local quando `youtube/growth-queue.json` estiver
+  pendente, com raciocínio médio. Na VPS, o agente principal persistente executa a mesma fila sem
+  criar subagente. Nenhum dos dois publica nem promete CTR/alcance.
+- Em projetos novos de qualquer formato, inclusive Shorts, o especialista gera exatamente uma
+  combinação título+thumbnail com `imagegen`. Ele edita diretamente a imagem ativa da abertura,
+  declarada na fila como referência obrigatória. Texto, palavra vermelha e
   seta/X/sublinhado/pincel devem nascer incorporados ao bitmap, com grafia exata e integração à
-  luz, profundidade e composição. O compositor local é somente fallback para projetos legados.
+  luz, profundidade e composição. Não existe compositor local nem fallback de pacote legado.
 - Thumbnails usam conflito visual simples, emoção legível, assunto dominante, espaço negativo e de
   duas a cinco palavras; setas e marcações exigem alvo narrativo real.
 - Títulos novos seguem `Passagem principal | Tema principal`. A descrição abre com resumo curto e,
   em vídeos longos, traz timeline das citações iniciada exatamente por `00:00 - Abertura`.
-- O especialista cria a quantidade de pares título+thumbnail declarada na fila: três no fluxo
-  padrão e exatamente um em `remote_review`. O título carrega referência, tema e busca; a frase da
+- O especialista cria exatamente um par título+thumbnail. O título carrega referência, tema e busca; a frase da
   capa acrescenta tensão, decisão, contraste ou consequência. A capa nunca repete a frase temática
   situada depois de `|` no título, embora possa compartilhar nome próprio ou uma palavra-chave
   necessária.
 - Thumbnails novas usam conflito/personagem reconhecível, destaque vermelho e ao menos uma seta, X,
   sublinhado ou pincel com alvo real; evite frases abstratas quando o confronto for mais forte.
-- Nunca aceite texto ou símbolo flutuando sobre o personagem. Planeje espaço negativo real e não
-  cubra rosto, corpo, ação principal ou o alvo narrativo.
+- Planeje espaço negativo real e tente não cobrir rosto, corpo, ação principal ou o alvo narrativo.
+  Depois da primeira saída válida, aceite o bitmap sem repetir por qualidade, deriva visual ou texto
+  imperfeito; tentativas adicionais são permitidas somente quando `moderation_blocked` não gerar
+  arquivo.
 - Subagentes nunca importam, aprovam, publicam nem alteram `project.json`, filas ou manifestos.
 
 ## Filas e retomada
@@ -122,29 +118,31 @@
   uma vez; somente após o segundo bloqueio use uma alternativa da mesma cena, mudando ação, pose,
   câmera, enquadramento ou objetos não essenciais, sem trocar nem envelhecer o personagem.
 - Copie cada ativo ao `staging_path`; não o deixe apenas em `$CODEX_HOME`. O agente principal faz
-  `images import-batch` uma vez. Em fluxo manual, use o comando de importação declarado.
+  `images import-batch` uma vez.
 - Não regenere item importado/aprovado. Uma versão ativa pode entrar na prévia, mas segue sem
   aprovação humana.
 - O `worker_id` é afinidade inicial; ao liberar, o trabalhador pode assumir o próximo job pendente
   do plano sem compartilhar staging.
 - Consulte `run --dry-run` para diagnóstico e use `autopilot` para execução retomável. Lane local e
-  escrita de estado continuam serializadas mesmo quando geração e crescimento rodam em paralelo.
+  escrita de estado continuam serializadas; dentro da lane de imagens, workers podem gerar em
+  paralelo com staging separado.
 
 ## Produção remota econômica
 
-- O executor remoto divide o trabalho em `codex exec --ephemeral` isolados: seleção editorial,
-  roteiro, uma imagem por execução e crescimento. Cada fase lê somente seu JSON compacto e os
-  `allowed_inputs`; nunca peça que uma fase releia README, AGENTS, histórico ou o projeto inteiro.
+- O executor remoto inicia uma única sessão persistente do agente principal por job e a retoma em
+  seleção editorial, roteiro, imagens sequenciais e crescimento. Cada checkpoint lê somente seu
+  JSON compacto e os `allowed_inputs`.
 - Áudio, música, legendas, imports, render, validação, upload e agendamento são determinísticos e
   não devem ser entregues ao Codex. Hooks remotos apenas medem eventos/tamanhos e não escrevem em
   `stdout`.
-- `remote_review` é aditivo e processa roteiro, imagens e crescimento no agente principal, sem
-  criar subagentes. Respeite as filas e os mesmos staging paths, mas faça as chamadas de `imagegen`
-  sequencialmente e importe cada lote uma única vez.
-- Gere exatamente um título e uma thumbnail integrada. Em Shorts, essa mesma arte ocupa exatamente
+- O fluxo remoto usa obrigatoriamente `gpt-5.6-sol`, raciocínio médio e nenhum subagente. Respeite
+  as mesmas filas e staging paths do fluxo local, faça `imagegen` sequencialmente e importe cada
+  lote uma única vez.
+- Gere exatamente um título e uma thumbnail integrada. Edite a imagem ativa da abertura com
+  `imagegen`; não gere a composição a partir de texto apenas. Em Shorts, essa mesma arte ocupa exatamente
   o primeiro frame; em vídeos longos, ela é enviada pela API como thumbnail personalizada.
 - A thumbnail integrada deve usar exatamente o mesmo `visual_standard`, estilo 3D, materiais,
-  desenho de personagem, paleta e iluminação das cenas. Em `remote_review`, use obrigatoriamente a
+  desenho de personagem, paleta e iluminação das cenas. No remoto, use obrigatoriamente a
   imagem produzida para a cena de abertura como referência visual e interrompa a etapa se ela ainda
   não existir; nunca improvise fotografia, fotorrealismo ou live action.
 - `render-review` funciona em produções locais e remotas, usa os ativos ativos em qualidade final e
@@ -165,6 +163,8 @@
 - Final aprovado V4: resolução completa, H.264, CRF 12, preset `slow`, supersampling 3.
 - Movimento: `smooth_pendulum`, zoom 1,02×–1,105×, pan 0,32.
 - Transições: `cinematic_mix`, 0,38 s.
+- Blur funcional: abertura nítida; citação bíblica leve; reflexão moderada; payoff/aplicação mais
+  nítidos; faixa central atrás das legendas um pouco mais borrada; thumbnail/frame zero nítidos.
 - Legendas: Montserrat ExtraBold, caixa alta, escala 88%, largura 0,68, até três palavras por linha
   e card ativo vermelho `#E5484D` com raio 24, sempre centralizadas.
 - A resposta pedida nos comentários fica entre aspas, sozinha na legenda, e permanece visível

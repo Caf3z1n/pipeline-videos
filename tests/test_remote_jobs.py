@@ -4,6 +4,7 @@ import base64
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
@@ -14,8 +15,9 @@ from pipeline_videos.remote_jobs import (
     RemoteCodexRun,
     RemoteJobStore,
     RemoteVideoRequest,
-    _codex_phase_command,
+    _codex_agent_command,
     _editorial_sources_phase_spec,
+    _execute_agent_checkpoint,
     _failure_with_codex_context,
     _growth_phase_spec,
     _image_phase_specs,
@@ -23,10 +25,10 @@ from pipeline_videos.remote_jobs import (
     _long_script_phase_spec,
     _normalize_shorts_script_payload,
     _recover_generated_image_outputs,
+    _shorts_script_correction_checkpoint,
+    _shorts_script_correction_is_available,
     _shorts_script_phase_spec,
-    _shorts_script_repair_is_available,
-    _shorts_script_repair_phase_spec,
-    codex_phase_prompt,
+    codex_checkpoint_prompt,
     codex_usage_summary,
     job_is_due,
     prepare_job_project,
@@ -93,16 +95,18 @@ def test_prepare_job_project_enables_single_variant_without_human_approval(tmp_p
     layout = prepare_job_project(job, projects_root=tmp_path / "projects")
     manifest = layout.load_manifest()
 
-    assert manifest.config.production.mode == "remote_review"
+    assert manifest.config.production.mode == "draft_one_shot"
     assert manifest.config.production.use_subagents is False
-    assert manifest.config.production.optimization_profile == "remote_single_variant_v1"
+    assert manifest.config.production.optimization_profile == "token_optimized_v1"
+    assert manifest.config.shorts_script.use_specialist_subagent is False
+    assert manifest.config.youtube_growth.use_specialist_subagent is False
     assert manifest.config.youtube_growth.title_variants == 1
     assert manifest.config.youtube_growth.thumbnail_variants == 1
     assert manifest.config.youtube_publication.allow_automated_private_review_upload is True
     assert all(record.status.value == "pending" for record in manifest.approvals.values())
-    prompt = codex_phase_prompt(Path("/tmp/phase-request.json"))
-    assert "uma fase isolada" in prompt
-    assert "Não leia README, AGENTS.md" in prompt
+    prompt = codex_checkpoint_prompt(Path("/tmp/checkpoint.json"))
+    assert "mesma sessão" in prompt
+    assert "AGENTS.md" in prompt
     assert "não crie" in prompt.casefold()
 
 
@@ -124,33 +128,131 @@ def test_long_script_phase_declares_one_functional_pacing_contract(tmp_path) -> 
     assert any("trechos de preenchimento" in item for item in task["instructions"])
 
 
-def test_codex_phase_command_is_ephemeral_compact_and_hooked(tmp_path) -> None:
+def test_codex_agent_command_starts_persistent_sol_medium_session(tmp_path) -> None:
     spec = CodexPhaseSpec(
         phase="image",
         item_id="scene-001-v001",
-        model="gpt-5.6-terra",
-        reasoning_effort="low",
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
         payload={},
         expected_outputs=(tmp_path / "scene.png",),
     )
 
-    command = _codex_phase_command(
+    command = _codex_agent_command(
         codex_binary="codex",
         spec=spec,
-        context_dir=tmp_path / "context",
+        repo_root=tmp_path / "repo",
         output_message=tmp_path / "last-message.txt",
         hook_script=tmp_path / "remote_codex_hook.py",
+        session_id=None,
     )
 
-    assert "--ephemeral" in command
+    assert "--ephemeral" not in command
+    assert "resume" not in command
+    assert command[command.index("--cd") + 1] == str(tmp_path / "repo")
     assert "--ignore-user-config" in command
     assert "--ignore-rules" in command
     assert "multi_agent" in command
     assert 'web_search="disabled"' in command
-    assert 'model_reasoning_effort="low"' in command
+    assert 'model_reasoning_effort="medium"' in command
     assert any("hooks.PostToolUse" in value for value in command)
     assert any("hooks.PreCompact" in value for value in command)
     assert any("hooks.Stop" in value for value in command)
+
+
+def test_remote_checkpoint_rejects_model_or_reasoning_override(tmp_path) -> None:
+    with pytest.raises(ValueError, match="gpt-5.6-sol"):
+        CodexPhaseSpec(
+            phase="image",
+            item_id=None,
+            model="gpt-5.6-terra",
+            reasoning_effort="medium",
+            payload={},
+            expected_outputs=(tmp_path / "scene.png",),
+        )
+    with pytest.raises(ValueError, match="raciocínio medium"):
+        CodexPhaseSpec(
+            phase="image",
+            item_id=None,
+            model="gpt-5.6-sol",
+            reasoning_effort="low",
+            payload={},
+            expected_outputs=(tmp_path / "scene.png",),
+        )
+
+
+def test_codex_agent_command_resumes_the_job_session_without_ephemeral_mode(tmp_path) -> None:
+    session_id = "019f699a-9ff9-7092-983b-26e5e8937c16"
+    spec = CodexPhaseSpec(
+        phase="youtube_growth",
+        item_id=None,
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
+        payload={},
+        expected_outputs=(tmp_path / "package.json",),
+    )
+
+    command = _codex_agent_command(
+        codex_binary="codex",
+        spec=spec,
+        repo_root=tmp_path / "repo",
+        output_message=tmp_path / "last-message.txt",
+        hook_script=tmp_path / "remote_codex_hook.py",
+        session_id=session_id,
+    )
+
+    assert command[1:3] == ["exec", "resume"]
+    assert session_id in command
+    assert "--cd" not in command
+    assert "--ephemeral" not in command
+
+
+def test_agent_checkpoints_persist_and_resume_the_same_session(tmp_path, monkeypatch) -> None:
+    session_id = "019f699a-9ff9-7092-983b-26e5e8937c16"
+    repo_root = tmp_path / "repo"
+    hook = repo_root / "scripts" / "remote_codex_hook.py"
+    hook.parent.mkdir(parents=True)
+    hook.write_text("", encoding="utf-8")
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request())
+    outputs = [tmp_path / "first.json", tmp_path / "second.json"]
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        kwargs["stdout"].write(json.dumps({"type": "thread.started", "thread_id": session_id}))
+        kwargs["stdout"].write("\n")
+        outputs[len(calls) - 1].write_text("{}", encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("pipeline_videos.remote_jobs.shutil.which", lambda _: "codex")
+    monkeypatch.setattr("pipeline_videos.remote_jobs.subprocess.run", fake_run)
+    first = CodexPhaseSpec(
+        phase="editorial_sources",
+        item_id=None,
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
+        payload={},
+        expected_outputs=(outputs[0],),
+    )
+    second = CodexPhaseSpec(
+        phase="shorts_script",
+        item_id=None,
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
+        payload={},
+        expected_outputs=(outputs[1],),
+    )
+
+    job = _execute_agent_checkpoint(job, first, store, repo_root=repo_root, timeout_seconds=30)
+    job = _execute_agent_checkpoint(job, second, store, repo_root=repo_root, timeout_seconds=30)
+
+    assert job.codex_session_id == session_id
+    assert len(job.codex_runs) == 2
+    assert calls[0][1] == "exec"
+    assert "resume" not in calls[0]
+    assert calls[1][1:3] == ["exec", "resume"]
+    assert session_id in calls[1]
 
 
 def test_shorts_hook_type_confusion_is_normalized_without_another_codex_run() -> None:
@@ -232,7 +334,7 @@ def test_remote_shorts_script_uses_sol_with_medium_reasoning_even_for_legacy_que
         {
             "job_id": "shorts-script-test",
             "orchestration": {
-                "recommended_model": "gpt-5.6-terra",
+                "recommended_model": "gpt-5.6-sol",
                 "reasoning_effort": "low",
             },
             "inputs": {"compact_context": "script/shorts-context.json"},
@@ -249,7 +351,7 @@ def test_remote_shorts_script_uses_sol_with_medium_reasoning_even_for_legacy_que
     assert spec.reasoning_effort == "medium"
 
 
-def test_shorts_repair_is_single_compact_sol_phase(tmp_path) -> None:
+def test_shorts_correction_is_a_checkpoint_in_the_same_sol_session(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Esperança"))
     layout = prepare_job_project(job, projects_root=tmp_path / "projects")
@@ -264,12 +366,12 @@ def test_shorts_repair_is_single_compact_sol_phase(tmp_path) -> None:
         },
     )
 
-    spec = _shorts_script_repair_phase_spec(
+    spec = _shorts_script_correction_checkpoint(
         layout,
         ValueError("strategy.hook_type inválido"),
     )
 
-    assert spec.phase == "shorts_script_repair"
+    assert spec.phase == "shorts_script_correction"
     assert spec.model == "gpt-5.6-sol"
     assert spec.reasoning_effort == "medium"
     assert spec.payload["allowed_inputs"] == [
@@ -279,11 +381,11 @@ def test_shorts_repair_is_single_compact_sol_phase(tmp_path) -> None:
     assert "strategy.hook_type inválido" in spec.payload["task"]["validation_error"]
 
 
-def test_shorts_repair_allows_one_run_per_remote_attempt(tmp_path) -> None:
+def test_shorts_correction_allows_two_checkpoints_in_the_persistent_session(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Esperança"))
-    repair_run = RemoteCodexRun(
-        phase="shorts_script_repair",
+    correction_run = RemoteCodexRun(
+        phase="shorts_script_correction",
         model="gpt-5.6-sol",
         reasoning_effort="medium",
         started_at="2026-07-16T09:00:00Z",
@@ -291,11 +393,13 @@ def test_shorts_repair_allows_one_run_per_remote_attempt(tmp_path) -> None:
         exit_code=0,
     )
 
-    first_attempt = job.model_copy(update={"attempts": 1, "codex_runs": [repair_run]})
-    second_attempt = first_attempt.model_copy(update={"attempts": 2})
+    one_correction = job.model_copy(update={"codex_runs": [correction_run]})
+    two_corrections = one_correction.model_copy(
+        update={"codex_runs": [correction_run, correction_run]}
+    )
 
-    assert _shorts_script_repair_is_available(first_attempt) is False
-    assert _shorts_script_repair_is_available(second_attempt) is True
+    assert _shorts_script_correction_is_available(one_correction) is True
+    assert _shorts_script_correction_is_available(two_corrections) is False
 
 
 def test_image_phases_receive_one_item_and_previous_staging_only(tmp_path) -> None:
@@ -306,7 +410,7 @@ def test_image_phases_receive_one_item_and_previous_staging_only(tmp_path) -> No
         layout.image_queue,
         {
             "orchestration": {
-                "recommended_model": "gpt-5.6-terra",
+                "recommended_model": "gpt-5.6-sol",
                 "reasoning_effort": "low",
             },
             "visual_standard": {"id": "cinematic-family-3d-v1"},
@@ -331,6 +435,8 @@ def test_image_phases_receive_one_item_and_previous_staging_only(tmp_path) -> No
     specs = _image_phase_specs(layout)
 
     assert len(specs) == 2
+    assert {spec.model for spec in specs} == {"gpt-5.6-sol"}
+    assert {spec.reasoning_effort for spec in specs} == {"medium"}
     assert specs[0].payload["task"]["item"]["prompt"] == "PROMPT EXCLUSIVO UM"
     assert "PROMPT EXCLUSIVO DOIS" not in json.dumps(specs[0].payload, ensure_ascii=False)
     assert specs[0].payload["allowed_inputs"] == []
@@ -353,7 +459,7 @@ def test_remote_growth_requires_opening_scene_as_visual_reference(tmp_path) -> N
         {
             "job_id": "youtube-growth-test",
             "orchestration": {
-                "recommended_model": "gpt-5.6-terra",
+                "recommended_model": "gpt-5.6-sol",
                 "reasoning_effort": "low",
             },
             "inputs": {
@@ -407,8 +513,8 @@ def test_specific_topic_uses_compact_catalog_selection_phase(tmp_path) -> None:
     )
 
     assert spec.phase == "editorial_sources"
-    assert spec.model == "gpt-5.6-terra"
-    assert spec.reasoning_effort == "low"
+    assert spec.model == "gpt-5.6-sol"
+    assert spec.reasoning_effort == "medium"
     assert spec.payload["allowed_inputs"] == []
     assert spec.payload["task"]["desired_candidate_count"] == 1
     assert spec.payload["task"]["candidates"]
@@ -460,7 +566,7 @@ def test_codex_usage_summary_separates_cached_and_fresh_tokens(tmp_path) -> None
     run = {
         "phase": "image",
         "item_id": "scene-001-v001",
-        "model": "gpt-5.6-terra",
+        "model": "gpt-5.6-sol",
         "reasoning_effort": "low",
         "started_at": "2026-07-16T00:00:00Z",
         "finished_at": "2026-07-16T00:01:00Z",
@@ -479,7 +585,7 @@ def test_codex_usage_summary_separates_cached_and_fresh_tokens(tmp_path) -> None
     assert usage["fresh_plus_output_tokens"] == 300
 
 
-def test_remote_image_phase_recovers_png_from_ephemeral_codex_session(tmp_path) -> None:
+def test_remote_image_checkpoint_recovers_png_from_persistent_codex_session(tmp_path) -> None:
     thread_id = "019f699a-9ff9-7092-983b-26e5e8937c16"
     phase_log = tmp_path / "phase.jsonl"
     phase_log.write_text(
@@ -493,8 +599,8 @@ def test_remote_image_phase_recovers_png_from_ephemeral_codex_session(tmp_path) 
     spec = CodexPhaseSpec(
         phase="image",
         item_id="scene-001-v001",
-        model="gpt-5.6-terra",
-        reasoning_effort="low",
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
         payload={},
         expected_outputs=(destination,),
     )
@@ -523,8 +629,8 @@ def test_remote_image_recovery_rejects_non_png_cache_artifact(tmp_path) -> None:
     spec = CodexPhaseSpec(
         phase="image",
         item_id="scene-001-v001",
-        model="gpt-5.6-terra",
-        reasoning_effort="low",
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
         payload={},
         expected_outputs=(destination,),
     )

@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -44,11 +45,11 @@ from pipeline_videos.validation import validate_project
 from pipeline_videos.verse_selection import create_auto_video
 
 REMOTE_JOB_SCHEMA_VERSION = "1.0"
-REMOTE_JOB_STATE_SCHEMA_VERSION = "1.1"
+REMOTE_JOB_STATE_SCHEMA_VERSION = "1.2"
 DEFAULT_REMOTE_JOBS_DIR = REPO_ROOT / "remote-jobs"
 REMOTE_TIMEZONE = ZoneInfo("America/Sao_Paulo")
-DEFAULT_REMOTE_CODEX_MODEL = "gpt-5.6-terra"
-DEFAULT_REMOTE_SHORT_SCRIPT_MODEL = "gpt-5.6-sol"
+DEFAULT_REMOTE_CODEX_MODEL = "gpt-5.6-sol"
+DEFAULT_REMOTE_REASONING_EFFORT = "medium"
 JOB_ID_PATTERN = re.compile(r"^video-[0-9]{8}-[0-9]{6}-[a-f0-9]{8}$")
 CODEX_THREAD_ID_PATTERN = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -103,6 +104,14 @@ class CodexPhaseSpec:
     payload: dict[str, Any]
     expected_outputs: tuple[Path, ...]
 
+    def __post_init__(self) -> None:
+        if self.model != DEFAULT_REMOTE_CODEX_MODEL:
+            raise ValueError(f"O executor remoto exige {DEFAULT_REMOTE_CODEX_MODEL}.")
+        if self.reasoning_effort != DEFAULT_REMOTE_REASONING_EFFORT:
+            raise ValueError(
+                f"O executor remoto exige raciocínio {DEFAULT_REMOTE_REASONING_EFFORT}."
+            )
+
 
 class RemoteVideoRequest(PipelineModel):
     schema_version: Literal["1.0"] = REMOTE_JOB_SCHEMA_VERSION
@@ -141,7 +150,7 @@ class RemoteVideoRequest(PipelineModel):
 
 
 class RemoteVideoJob(PipelineModel):
-    schema_version: Literal["1.0", "1.1"] = REMOTE_JOB_STATE_SCHEMA_VERSION
+    schema_version: Literal["1.0", "1.1", "1.2"] = REMOTE_JOB_STATE_SCHEMA_VERSION
     job_id: str
     status: RemoteJobStatus
     request: RemoteVideoRequest
@@ -153,6 +162,7 @@ class RemoteVideoJob(PipelineModel):
     youtube_url: str | None = None
     publish_at: str | None = None
     current_phase: str | None = None
+    codex_session_id: str | None = None
     codex_runs: list[RemoteCodexRun] = Field(default_factory=list)
     codex_exit_code: int | None = None
     error: str | None = None
@@ -308,16 +318,20 @@ def prepare_job_project(
             projects_dir=root,
             target_duration_seconds=request.duration_seconds,
             video_format=video_format,
-            production_mode="remote_review",
+            production_mode="draft_one_shot",
         )
     else:
         layout, _, _ = create_auto_video(
             projects_dir=root,
             target_duration_seconds=request.duration_seconds,
             video_format=video_format,
-            production_mode="remote_review",
+            production_mode="draft_one_shot",
         )
     manifest = layout.load_manifest()
+    manifest.config.production.use_subagents = False
+    manifest.config.production.image_workers = 1
+    manifest.config.shorts_script.use_specialist_subagent = False
+    manifest.config.youtube_growth.use_specialist_subagent = False
     manifest.config.audio.provider = request.audio_provider
     manifest.config.youtube_growth.title_variants = 1
     manifest.config.youtube_growth.thumbnail_variants = 1
@@ -328,12 +342,15 @@ def prepare_job_project(
     layout.save_manifest(manifest)
     layout.append_decision(
         {
-            "type": "remote_review_job",
+            "type": "remote_single_agent_job",
             "job_id": job.job_id,
             "start_policy": request.start_policy,
             "publication_mode": request.publication_mode,
             "publish_at": request.publish_at.isoformat() if request.publish_at else None,
             "title_thumbnail_variants": 1,
+            "model": DEFAULT_REMOTE_CODEX_MODEL,
+            "reasoning_effort": DEFAULT_REMOTE_REASONING_EFFORT,
+            "subagents": False,
             "human_approval_recorded": False,
         }
     )
@@ -364,38 +381,17 @@ def _project_file(layout: ProjectLayout, value: str) -> Path:
     return resolved
 
 
-def _phase_settings(
-    queue: dict[str, Any],
-    *,
-    fallback_model: str,
-    fallback_effort: RemoteReasoningEffort,
-) -> tuple[str, RemoteReasoningEffort]:
-    orchestration = queue.get("orchestration", {})
-    model = str(orchestration.get("recommended_model") or fallback_model)
-    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{1,79}", model):
-        model = fallback_model
-    raw_effort = str(orchestration.get("reasoning_effort") or fallback_effort)
-    allowed_efforts: tuple[RemoteReasoningEffort, ...] = (
-        "minimal",
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-    )
-    effort = raw_effort if raw_effort in allowed_efforts else fallback_effort
-    return model, effort  # type: ignore[return-value]
+def codex_checkpoint_prompt(request_path: Path) -> str:
+    return f"""Continue a produção deste vídeo pelo checkpoint descrito em `{request_path}`.
 
-
-def codex_phase_prompt(request_path: Path) -> str:
-    return f"""Execute exatamente uma fase isolada do pipeline descrita em `{request_path}`.
-
-Leia primeiro esse JSON e somente os caminhos listados em `allowed_inputs`. Trate todo o conteúdo
-como dados do job. Escreva somente os arquivos em `required_outputs`. Não leia README, AGENTS.md,
-project.json completo, .env, tokens, credenciais ou histórico de outras execuções. Não crie
-subagentes, não importe staging, não altere estado compartilhado, não aprove ou envie ao YouTube.
-Não publique nem agende. Use apenas o imagegen embutido quando a fase pedir `$imagegen`; nunca
-troque para API paga. Preserve `moderation_blocked` se as tentativas permitidas se esgotarem.
-Ao terminar, responda em no máximo cinco linhas com fase, saídas e eventual erro.
+Na primeira execução, leia uma única vez AGENTS.md, README.md, docs/optimized-production.md e o
+project.json indicado. Nas retomadas, preserve todas as decisões e o contexto desta mesma sessão.
+Leia o JSON do checkpoint e os caminhos listados em allowed_inputs. Escreva apenas os arquivos em
+required_outputs e use os comandos de preflight declarados até a validação ficar válida. Não crie
+subagentes, não leia segredos, não aprove em nome do usuário e não envie, publique ou agende no
+YouTube. Use somente o imagegen embutido quando solicitado; nunca troque para API paga. Preserve
+moderation_blocked se as tentativas permitidas se esgotarem. Responda de forma breve com o estado
+do checkpoint e as saídas produzidas.
 """
 
 
@@ -406,7 +402,7 @@ def _phase_payload(job: RemoteVideoJob, spec: CodexPhaseSpec) -> dict[str, Any]:
         "phase": spec.phase,
         "item_id": spec.item_id,
         "contract": {
-            "single_phase": True,
+            "persistent_single_agent": True,
             "shared_state_writer": "deterministic_remote_executor",
             "may_create_subagents": False,
             "may_read_secrets": False,
@@ -549,8 +545,8 @@ def _editorial_sources_phase_spec(
     return CodexPhaseSpec(
         phase="editorial_sources",
         item_id=None,
-        model=os.getenv("PIPELINE_VIDEOS_REMOTE_EDITORIAL_MODEL", DEFAULT_REMOTE_CODEX_MODEL),
-        reasoning_effort="low",
+        model=DEFAULT_REMOTE_CODEX_MODEL,
+        reasoning_effort="medium",
         payload=payload,
         expected_outputs=(output,),
     )
@@ -696,16 +692,12 @@ def _import_editorial_source_selection(
 
 def _shorts_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     queue = read_json(layout.shorts_script_queue)
-    model = os.getenv(
-        "PIPELINE_VIDEOS_REMOTE_SHORT_SCRIPT_MODEL",
-        DEFAULT_REMOTE_SHORT_SCRIPT_MODEL,
-    )
     context = _project_file(layout, queue["inputs"]["compact_context"])
     package = _project_file(layout, queue["outputs"]["package"])
     return CodexPhaseSpec(
         phase="shorts_script",
         item_id=str(queue.get("job_id")),
-        model=model,
+        model=DEFAULT_REMOTE_CODEX_MODEL,
         reasoning_effort="medium",
         payload={
             "allowed_inputs": [str(layout.shorts_script_queue), str(context)],
@@ -822,25 +814,21 @@ def _normalize_shorts_script_payload(payload: dict[str, Any]) -> tuple[dict[str,
     return payload, "; ".join(changes) or None
 
 
-def _shorts_script_repair_phase_spec(
+def _shorts_script_correction_checkpoint(
     layout: ProjectLayout,
     validation_error: Exception,
 ) -> CodexPhaseSpec:
     queue = read_json(layout.shorts_script_queue)
     package = _project_file(layout, queue["outputs"]["package"])
-    model = os.getenv(
-        "PIPELINE_VIDEOS_REMOTE_SCRIPT_REPAIR_MODEL",
-        DEFAULT_REMOTE_SHORT_SCRIPT_MODEL,
-    )
     return CodexPhaseSpec(
-        phase="shorts_script_repair",
+        phase="shorts_script_correction",
         item_id=str(queue.get("job_id")),
-        model=model,
+        model=DEFAULT_REMOTE_CODEX_MODEL,
         reasoning_effort="medium",
         payload={
             "allowed_inputs": [str(layout.shorts_script_queue), str(package)],
             "task": {
-                "kind": "repair_shorts_script_package",
+                "kind": "correct_shorts_script_package",
                 "queue_path": str(layout.shorts_script_queue),
                 "package_path": str(package),
                 "validation_error": str(validation_error)[:4000],
@@ -855,8 +843,8 @@ def _shorts_script_repair_phase_spec(
                         "ou vínculo."
                     ),
                     (
-                        "Sobrescreva apenas package_path com JSON válido; o executor validará "
-                        "novamente."
+                        "Sobrescreva apenas package_path e execute o preflight da fila. Corrija "
+                        "todos os erros retornados até obter valid=true."
                     ),
                 ],
             },
@@ -865,9 +853,9 @@ def _shorts_script_repair_phase_spec(
     )
 
 
-def _shorts_script_repair_is_available(job: RemoteVideoJob) -> bool:
-    repair_runs = sum(run.phase == "shorts_script_repair" for run in job.codex_runs)
-    return repair_runs < max(1, job.attempts)
+def _shorts_script_correction_is_available(job: RemoteVideoJob) -> bool:
+    correction_runs = sum(run.phase == "shorts_script_correction" for run in job.codex_runs)
+    return correction_runs < 2
 
 
 def _ensure_valid_shorts_script_staging(
@@ -907,14 +895,14 @@ def _ensure_valid_shorts_script_staging(
         return job
     except (ValueError, TypeError, KeyError) as exc:
         latest, _ = store.find(job.job_id)
-        if not _shorts_script_repair_is_available(latest):
+        if not _shorts_script_correction_is_available(latest):
             raise RuntimeError(
-                "O pacote de roteiro continuou inválido após a única correção automática. "
+                "O pacote de roteiro continuou inválido após as correções da sessão principal. "
                 f"Último erro: {exc}"
             ) from exc
-        job = _execute_codex_phase(
+        job = _execute_agent_checkpoint(
             latest,
-            _shorts_script_repair_phase_spec(layout, exc),
+            _shorts_script_correction_checkpoint(layout, exc),
             store,
             repo_root=repo_root,
             timeout_seconds=timeout_seconds,
@@ -923,7 +911,7 @@ def _ensure_valid_shorts_script_staging(
             validate_shorts_script_package_staging(layout)
         except (ValueError, TypeError, KeyError) as repair_exc:
             raise RuntimeError(
-                "O pacote de roteiro continuou inválido após a única correção automática. "
+                "O pacote de roteiro continuou inválido após o checkpoint de correção. "
                 f"Último erro: {repair_exc}"
             ) from repair_exc
         return job
@@ -931,11 +919,6 @@ def _ensure_valid_shorts_script_staging(
 
 def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
     queue = read_json(layout.image_queue)
-    model, effort = _phase_settings(
-        queue,
-        fallback_model=DEFAULT_REMOTE_CODEX_MODEL,
-        fallback_effort="low",
-    )
     specs: list[CodexPhaseSpec] = []
     successful_reference: Path | None = None
     for item in queue.get("items", []):
@@ -950,8 +933,8 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
             CodexPhaseSpec(
                 phase="image",
                 item_id=str(item.get("job_id")),
-                model=model,
-                reasoning_effort=effort,
+                model=DEFAULT_REMOTE_CODEX_MODEL,
+                reasoning_effort=DEFAULT_REMOTE_REASONING_EFFORT,
                 payload={
                     "allowed_inputs": references,
                     "task": {
@@ -979,11 +962,6 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
 
 def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     queue = read_json(layout.growth_queue)
-    model, effort = _phase_settings(
-        queue,
-        fallback_model=DEFAULT_REMOTE_CODEX_MODEL,
-        fallback_effort="low",
-    )
     context = _project_file(layout, queue["inputs"]["compact_context"])
     package = _project_file(layout, queue["outputs"]["package"])
     thumbnails = tuple(
@@ -993,13 +971,20 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
         queue.get("inputs", {}).get("thumbnail_visual_reference_scene_id", "")
     ).strip()
     visual_reference: Path | None = None
+    declared_reference = str(
+        queue.get("inputs", {}).get("thumbnail_visual_reference_path") or ""
+    ).strip()
+    if declared_reference:
+        candidate = _project_file(layout, declared_reference)
+        if candidate.is_file():
+            visual_reference = candidate
     if reference_scene_id and layout.image_queue.is_file():
         image_queue = read_json(layout.image_queue)
         for item in image_queue.get("items", []):
             if str(item.get("scene_id")) != reference_scene_id:
                 continue
             candidate = _project_file(layout, str(item.get("staging_path", "")))
-            if candidate.is_file():
+            if visual_reference is None and candidate.is_file():
                 visual_reference = candidate
             break
     if visual_reference is None and reference_scene_id and layout.images.is_file():
@@ -1011,7 +996,7 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
             for version in item.get("versions", []):
                 if version.get("version") == active_version:
                     candidate = _project_file(layout, str(version.get("path", "")))
-                    if candidate.is_file():
+                    if visual_reference is None and candidate.is_file():
                         visual_reference = candidate
                     break
             break
@@ -1026,8 +1011,8 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     return CodexPhaseSpec(
         phase="youtube_growth",
         item_id=str(queue.get("job_id")),
-        model=model,
-        reasoning_effort=effort,
+        model=DEFAULT_REMOTE_CODEX_MODEL,
+        reasoning_effort=DEFAULT_REMOTE_REASONING_EFFORT,
         payload={
             "allowed_inputs": allowed_inputs,
             "task": {
@@ -1041,13 +1026,14 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 "instructions": [
                     "Siga integralmente instructions, schemas e generation_retry_policy da fila.",
                     (
-                        "Use thumbnail_visual_reference_path como referência obrigatória do "
-                        "estilo, personagem, materiais, paleta e iluminação; não a converta em "
-                        "fotografia."
+                        "Use thumbnail_visual_reference_path como edit obrigatório de imagegen: "
+                        "preserve a imagem, a cena e o personagem e acrescente a composição "
+                        "editorial, o texto e a marcação vermelha; não a converta em fotografia. "
+                        "Aceite a primeira saída válida sem repetir por qualidade ou deriva visual."
                         if visual_reference is not None
                         else "Siga integralmente o visual_standard textual da fila."
                     ),
-                    "Gere exatamente um título e uma thumbnail integrada no remote_review.",
+                    "Gere exatamente um título e uma thumbnail integrada nesta produção remota.",
                     "Escreva apenas outputs.package e outputs.thumbnails.",
                     "O executor importará o pacote; não altere metadados compartilhados.",
                 ],
@@ -1121,8 +1107,8 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     return CodexPhaseSpec(
         phase="long_script",
         item_id=None,
-        model=os.getenv("PIPELINE_VIDEOS_REMOTE_LONG_SCRIPT_MODEL", DEFAULT_REMOTE_CODEX_MODEL),
-        reasoning_effort="high",
+        model=DEFAULT_REMOTE_CODEX_MODEL,
+        reasoning_effort="medium",
         payload=payload,
         expected_outputs=(script_output, review_output),
     )
@@ -1164,49 +1150,60 @@ def _hook_config_arguments(hook_script: Path) -> list[str]:
     return ["-c", post_tool, "-c", pre_compact, "-c", stop]
 
 
-def _codex_phase_command(
+def _codex_agent_command(
     *,
     codex_binary: str,
     spec: CodexPhaseSpec,
-    context_dir: Path,
+    repo_root: Path,
     output_message: Path,
     hook_script: Path,
+    session_id: str | None,
 ) -> list[str]:
-    return [
+    command = [
         codex_binary,
         "exec",
-        "--ephemeral",
-        "--ignore-user-config",
-        "--ignore-rules",
-        "--strict-config",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "--dangerously-bypass-hook-trust",
-        "--skip-git-repo-check",
-        "--enable",
-        "image_generation",
-        "--enable",
-        "hooks",
-        *[value for feature in REMOTE_DISABLED_CODEX_FEATURES for value in ("--disable", feature)],
-        "--cd",
-        str(context_dir),
-        "--model",
-        spec.model,
-        "-c",
-        f'model_reasoning_effort="{spec.reasoning_effort}"',
-        "-c",
-        'model_reasoning_summary="none"',
-        "-c",
-        'model_verbosity="low"',
-        "-c",
-        'web_search="disabled"',
-        *_hook_config_arguments(hook_script),
-        "--json",
-        "--color",
-        "never",
-        "--output-last-message",
-        str(output_message),
-        "-",
     ]
+    if session_id is not None:
+        command.append("resume")
+    command.extend(
+        [
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--strict-config",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--dangerously-bypass-hook-trust",
+            "--skip-git-repo-check",
+            "--enable",
+            "image_generation",
+            "--enable",
+            "hooks",
+            *[
+                value
+                for feature in REMOTE_DISABLED_CODEX_FEATURES
+                for value in ("--disable", feature)
+            ],
+            "--model",
+            spec.model,
+            "-c",
+            f'model_reasoning_effort="{spec.reasoning_effort}"',
+            "-c",
+            'model_reasoning_summary="none"',
+            "-c",
+            'model_verbosity="low"',
+            "-c",
+            'web_search="disabled"',
+            *_hook_config_arguments(hook_script),
+            "--json",
+            "--output-last-message",
+            str(output_message),
+        ]
+    )
+    if session_id is None:
+        command.extend(["--cd", str(repo_root)])
+    else:
+        command.append(session_id)
+    command.append("-")
+    return command
 
 
 def _usage_from_codex_jsonl(path: Path) -> dict[str, int]:
@@ -1248,6 +1245,8 @@ def _recover_generated_image_outputs(
     phase_log: Path,
     *,
     codex_home: Path,
+    session_id: str | None = None,
+    generated_after_ns: int = 0,
 ) -> list[tuple[Path, Path]]:
     if spec.phase not in {"image", "youtube_growth"}:
         return []
@@ -1258,7 +1257,7 @@ def _recover_generated_image_outputs(
     ]
     if not missing_pngs:
         return []
-    thread_id = _codex_thread_id_from_jsonl(phase_log)
+    thread_id = _codex_thread_id_from_jsonl(phase_log) or session_id
     if thread_id is None:
         return []
     generated_root = (codex_home.expanduser().resolve() / "generated_images").resolve()
@@ -1270,7 +1269,11 @@ def _recover_generated_image_outputs(
     if not session_dir.is_dir():
         return []
     candidates = sorted(
-        (path for path in session_dir.glob("exec-*.png") if _is_png_file(path)),
+        (
+            path
+            for path in session_dir.glob("exec-*.png")
+            if _is_png_file(path) and path.stat().st_mtime_ns >= generated_after_ns
+        ),
         key=lambda path: (path.stat().st_mtime_ns, path.name),
     )
     if len(candidates) < len(missing_pngs):
@@ -1293,7 +1296,7 @@ def _phase_slug(spec: CodexPhaseSpec) -> str:
     return re.sub(r"[^a-z0-9._-]+", "-", value).strip("-")[:100]
 
 
-def _execute_codex_phase(
+def _execute_agent_checkpoint(
     job: RemoteVideoJob,
     spec: CodexPhaseSpec,
     store: RemoteJobStore,
@@ -1310,12 +1313,14 @@ def _execute_codex_phase(
     latest, _ = store.find(job.job_id)
     run_number = len(latest.codex_runs) + 1
     slug = _phase_slug(spec)
-    context_dir = store.root / "contexts" / job.job_id / f"run-{run_number:03d}-{slug}"
+    context_dir = store.root / "contexts" / job.job_id / "main-agent"
     context_dir.mkdir(parents=True, exist_ok=True)
     with suppress(OSError):
         context_dir.chmod(0o700)
-    request_path = context_dir / "phase-request.json"
-    output_message = context_dir / "last-message.txt"
+    requests_dir = context_dir / "checkpoints"
+    requests_dir.mkdir(parents=True, exist_ok=True)
+    request_path = requests_dir / f"run-{run_number:03d}-{slug}.json"
+    output_message = context_dir / f"run-{run_number:03d}-{slug}-last-message.txt"
     phase_log = store.root / "logs" / f"{job.job_id}-run-{run_number:03d}-{slug}.jsonl"
     hook_log = store.root / "logs" / f"{job.job_id}-run-{run_number:03d}-{slug}.hooks.jsonl"
     write_json(request_path, _phase_payload(latest, spec))
@@ -1326,21 +1331,24 @@ def _execute_codex_phase(
 
     phase_label = f"{spec.phase}:{spec.item_id}" if spec.item_id else spec.phase
     latest = store.transition(latest, "running", current_phase=phase_label)
-    command = _codex_phase_command(
+    command = _codex_agent_command(
         codex_binary=codex_binary,
         spec=spec,
-        context_dir=context_dir,
+        repo_root=repo_root.resolve(),
         output_message=output_message,
         hook_script=hook_script,
+        session_id=latest.codex_session_id,
     )
     env = os.environ.copy()
     env["PIPELINE_VIDEOS_CODEX_HOOK_LOG"] = str(hook_log)
     env["PIPELINE_VIDEOS_REMOTE_PHASE"] = phase_label
     started_at = utc_now()
+    generated_after_ns = time.time_ns()
     master_log = store.log_path(job.job_id)
     with master_log.open("a", encoding="utf-8") as log:
         log.write(
-            f"[{started_at}] codex_phase_start phase={phase_label} "
+            f"[{started_at}] codex_checkpoint_start phase={phase_label} "
+            f"session={latest.codex_session_id or 'new'} "
             f"model={spec.model} reasoning={spec.reasoning_effort}\n"
         )
     exit_code = 0
@@ -1349,11 +1357,11 @@ def _execute_codex_phase(
         with phase_log.open("w", encoding="utf-8") as log:
             completed = subprocess.run(
                 command,
-                input=codex_phase_prompt(request_path),
+                input=codex_checkpoint_prompt(request_path),
                 text=True,
                 stdout=log,
                 stderr=subprocess.STDOUT,
-                cwd=context_dir,
+                cwd=repo_root,
                 env=env,
                 timeout=timeout_seconds,
                 check=False,
@@ -1364,11 +1372,21 @@ def _execute_codex_phase(
         exit_code = 124
         error = f"Fase {phase_label} excedeu {timeout_seconds} segundos."
     recovered_outputs: list[tuple[Path, Path]] = []
+    observed_session_id = _codex_thread_id_from_jsonl(phase_log)
+    session_id = latest.codex_session_id or observed_session_id
+    if session_id is None:
+        exit_code = 2
+        error = "O Codex não informou o UUID da sessão persistente."
+    elif observed_session_id is not None and observed_session_id != session_id:
+        exit_code = 2
+        error = "A retomada do Codex respondeu com um UUID de sessão diferente do job."
     if exit_code == 0:
         recovered_outputs = _recover_generated_image_outputs(
             spec,
             phase_log,
             codex_home=Path(env.get("CODEX_HOME") or Path.home() / ".codex"),
+            session_id=session_id,
+            generated_after_ns=generated_after_ns,
         )
         if recovered_outputs and output_message.is_file():
             with output_message.open("a", encoding="utf-8") as message:
@@ -1406,12 +1424,14 @@ def _execute_codex_phase(
         current,
         "running",
         current_phase=None,
+        codex_session_id=session_id,
         codex_exit_code=exit_code,
         codex_runs=[*current.codex_runs, record],
     )
     with master_log.open("a", encoding="utf-8") as log:
         log.write(
-            f"[{finished_at}] codex_phase_exit phase={phase_label} code={exit_code} "
+            f"[{finished_at}] codex_checkpoint_exit phase={phase_label} code={exit_code} "
+            f"session={session_id or 'missing'} "
             f"input={record.input_tokens} cached={record.cached_input_tokens} "
             f"output={record.output_tokens}\n"
         )
@@ -1514,7 +1534,7 @@ def _ensure_editorial_context(
             return job
         except (ValueError, TypeError, KeyError):
             _archive_invalid_staging(spec.expected_outputs)
-    job = _execute_codex_phase(
+    job = _execute_agent_checkpoint(
         job,
         spec,
         store,
@@ -1559,7 +1579,7 @@ def _long_review_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     return CodexPhaseSpec(
         phase="long_biblical_review",
         item_id=None,
-        model=os.getenv("PIPELINE_VIDEOS_REMOTE_LONG_SCRIPT_MODEL", DEFAULT_REMOTE_CODEX_MODEL),
+        model=DEFAULT_REMOTE_CODEX_MODEL,
         reasoning_effort="medium",
         payload={
             "allowed_inputs": [],
@@ -1608,7 +1628,7 @@ def _ensure_long_script(
             except (ValueError, TypeError, KeyError):
                 _archive_invalid_staging(spec.expected_outputs)
         if not all(_is_nonempty_file(path) for path in spec.expected_outputs):
-            job = _execute_codex_phase(
+            job = _execute_agent_checkpoint(
                 job,
                 spec,
                 store,
@@ -1639,7 +1659,7 @@ def _ensure_long_script(
         if not valid_review:
             _archive_invalid_staging(review_spec.expected_outputs)
     if not valid_review:
-        job = _execute_codex_phase(
+        job = _execute_agent_checkpoint(
             job,
             review_spec,
             store,
@@ -1685,7 +1705,7 @@ def _produce_remote_candidate(
             repo_root=repo_root,
             timeout_seconds=timeout_seconds,
         )
-        result = run_autopilot_once(layout, allow_external=True)
+        result = run_autopilot_once(layout, allow_external=True, review_candidate=True)
         if result.status == "completed":
             if result.validation_ok is not True:
                 raise RuntimeError("A validação técnica do candidato remoto falhou.")
@@ -1696,7 +1716,7 @@ def _produce_remote_candidate(
                 continue
             kind = wait.get("kind")
             if kind == "shorts_script":
-                job = _execute_codex_phase(
+                job = _execute_agent_checkpoint(
                     job,
                     _shorts_script_phase_spec(layout),
                     store,
@@ -1709,7 +1729,7 @@ def _produce_remote_candidate(
                 if not specs:
                     raise RuntimeError("Fila de imagens pendente sem item executável.")
                 for spec in specs:
-                    job = _execute_codex_phase(
+                    job = _execute_agent_checkpoint(
                         job,
                         spec,
                         store,
@@ -1718,7 +1738,7 @@ def _produce_remote_candidate(
                     )
                 progressed = True
             elif kind == "youtube_growth":
-                job = _execute_codex_phase(
+                job = _execute_agent_checkpoint(
                     job,
                     _growth_phase_spec(layout),
                     store,
@@ -1727,10 +1747,10 @@ def _produce_remote_candidate(
                 )
                 progressed = True
             else:
-                raise RuntimeError(f"Dependência externa incompatível com remote_review: {kind}")
+                raise RuntimeError(f"Dependência externa incompatível com o agente remoto: {kind}")
         if not progressed:
-            raise RuntimeError("O remote_review não conseguiu avançar o estado determinístico.")
-    raise RuntimeError("O remote_review excedeu o limite de oito ciclos de retomada.")
+            raise RuntimeError("O agente remoto não conseguiu avançar o estado determinístico.")
+    raise RuntimeError("O agente remoto excedeu o limite de oito ciclos de retomada.")
 
 
 def _complete_private_upload(job: RemoteVideoJob, layout: ProjectLayout) -> tuple[str, str]:

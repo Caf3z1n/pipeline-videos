@@ -84,9 +84,7 @@ def collect_external_waits(layout: ProjectLayout) -> list[dict[str, Any]]:
         queue = read_json(layout.image_queue)
         waits.append(
             {
-                "kind": "manual_images"
-                if queue.get("provider") == "chatgpt-web-manual"
-                else "images",
+                "kind": "images",
                 "ready": _all_staged_images_ready(layout),
                 "pending": len(pending_images),
                 "worker_job_files": queue.get("orchestration", {}).get("worker_job_files", {}),
@@ -108,23 +106,13 @@ def collect_external_waits(layout: ProjectLayout) -> list[dict[str, Any]]:
 
     if (
         project.config.youtube_growth.enabled
-        and project.config.youtube_growth.use_specialist_subagent
         and project.stages["youtube_growth"].status != StageStatus.COMPLETED
+        and layout.growth_queue.is_file()
     ):
-        source_mode = None
-        if layout.growth_queue.is_file():
-            source_mode = (
-                read_json(layout.growth_queue).get("outputs", {}).get("thumbnail_source_mode")
-            )
-        blocked_on_images = (
-            source_mode == "selected_scene_images"
-            and project.stages["images"].status != StageStatus.COMPLETED
-        )
         waits.append(
             {
                 "kind": "youtube_growth",
-                "ready": _growth_outputs_ready(layout) and not blocked_on_images,
-                "blocked_on_images": blocked_on_images,
+                "ready": _growth_outputs_ready(layout),
                 "queue": relative_posix(layout.growth_queue, layout.root),
             }
         )
@@ -152,16 +140,10 @@ def run_autopilot_once(
     *,
     allow_external: bool = False,
     force: bool = False,
+    review_candidate: bool = False,
 ) -> AutopilotResult:
     project = layout.load_manifest()
-    production_mode = project.config.production.mode
-    light_mode = production_mode in {"light_manual", "light_automatic"}
-    draft_mode = production_mode in {
-        "draft_one_shot",
-        "light_manual",
-        "light_automatic",
-        "remote_review",
-    }
+    draft_mode = True
 
     if (
         project.video_format == "short"
@@ -187,16 +169,6 @@ def run_autopilot_once(
     if draft_mode:
         validate_draft_preflight(layout)
     build_scenes(layout, force=force, skip_approvals=draft_mode)
-
-    project = layout.load_manifest()
-    if (
-        not project.demo
-        and project.config.youtube_growth.enabled
-        and project.config.youtube_growth.use_specialist_subagent
-    ):
-        from pipeline_videos.growth import prepare_growth_queue
-
-        prepare_growth_queue(layout, force=force)
 
     from pipeline_videos.audio import generate_audio
     from pipeline_videos.captions import generate_captions
@@ -225,18 +197,23 @@ def run_autopilot_once(
     if (
         not project.demo
         and project.config.youtube_growth.enabled
-        and project.config.youtube_growth.use_specialist_subagent
+        and project.stages["youtube_growth"].status != StageStatus.COMPLETED
+        and project.stages["images"].status == StageStatus.COMPLETED
+    ):
+        from pipeline_videos.growth import prepare_growth_queue
+
+        prepare_growth_queue(layout, force=force)
+
+    project = layout.load_manifest()
+    if (
+        not project.demo
+        and project.config.youtube_growth.enabled
         and project.stages["youtube_growth"].status != StageStatus.COMPLETED
         and _growth_outputs_ready(layout)
     ):
-        source_mode = read_json(layout.growth_queue).get("outputs", {}).get("thumbnail_source_mode")
-        if (
-            source_mode != "selected_scene_images"
-            or project.stages["images"].status == StageStatus.COMPLETED
-        ):
-            from pipeline_videos.growth import import_growth_package
+        from pipeline_videos.growth import import_growth_package
 
-            import_growth_package(layout, force=force)
+        import_growth_package(layout, force=force)
 
     waits = [wait for wait in collect_external_waits(layout) if not wait.get("ready")]
     if waits:
@@ -251,11 +228,7 @@ def run_autopilot_once(
         queue_thumbnail_for_codex,
     )
 
-    if (
-        not project.demo
-        and project.config.youtube_growth.enabled
-        and project.config.youtube_growth.use_specialist_subagent
-    ):
+    if not project.demo and project.config.youtube_growth.enabled:
         if project.stages["metadata"].status != StageStatus.COMPLETED:
             from pipeline_videos.growth import refresh_growth_metadata
 
@@ -265,17 +238,13 @@ def run_autopilot_once(
 
     if project.demo or project.config.images.provider == "fixture":
         generate_fixture_thumbnail(layout, force=force)
-    elif light_mode:
-        from pipeline_videos.growth import compose_light_short_cover
-
-        compose_light_short_cover(layout, force=force)
     elif not project.config.youtube_growth.enabled and not layout.thumbnail.exists():
         queue_thumbnail_for_codex(layout)
 
     from pipeline_videos.render import render_draft_preview, render_project
     from pipeline_videos.validation import validate_project
 
-    if production_mode == "remote_review":
+    if review_candidate:
         from pipeline_videos.render import render_review_candidate
 
         render = render_review_candidate(layout, force=force)

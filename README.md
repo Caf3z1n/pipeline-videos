@@ -3,15 +3,16 @@
 Aplicação local, headless e orientada por arquivos para planejar, produzir, revisar e retomar
 vídeos bíblicos. O chat ajuda na criação; a pasta de cada vídeo é a fonte de verdade.
 
-O modo padrão é `draft_one_shot`: o Codex produz uma prévia completa e usa até três subagentes em
-paralelo. Quando há pacote do YouTube, duas vagas ficam com imagens e uma com o especialista de
-crescimento. O modo `guided` continua disponível
-quando forem desejadas aprovações por etapa.
+O modo único é `draft_one_shot`: o Codex produz uma prévia completa. Localmente, pode usar
+subagentes de roteiro, imagens e crescimento; na VPS, o mesmo fluxo roda em uma única sessão
+persistente do `gpt-5.6-sol`, com raciocínio médio e sem subagentes. Depois da importação das
+imagens, o crescimento edita a imagem ativa da abertura.
 
 O planejamento one-shot aparece em `run --dry-run` como cinco ondas. Depois do roteiro e das
-cenas, dois trabalhadores de imagem e o especialista do YouTube ocupam as três vagas externas,
-enquanto o agente principal produz áudio, música e legendas. O principal continua sendo o único
-escritor do estado e realiza as importações serialmente antes do ponto de junção do render.
+cenas, os trabalhadores de imagem rodam enquanto o agente principal produz áudio, música e
+legendas. Após o import das imagens, o especialista do YouTube recebe a abertura como referência.
+O principal continua sendo o único escritor do estado e realiza as importações serialmente antes do
+ponto de junção do render.
 
 O MVP já prova o fluxo vertical sem serviços pagos: briefing → roteirista especialista de Shorts →
 revisão bíblica → cenas → imagens fixture → áudio simulado → música local → alinhamento por palavra
@@ -22,8 +23,8 @@ adaptador protegido por confirmação explícita.
 Projetos reais novos usam o perfil `token_optimized_v1`. A prévia permanece em resolução completa,
 mas usa CRF 16, preset `fast` e supersampling 2; o render final aprovado preserva a qualidade V4 com
 CRF 12, preset `slow` e supersampling 3. Trabalhadores recebem arquivos compactos em `images/jobs/`
-sem herdar o histórico, e o gerador cria três capas finais com texto e símbolos incorporados. O
-modo aditivo `remote_review` usa um único agente e uma única combinação título+thumbnail.
+sem herdar o histórico, e o gerador cria uma capa final com texto e símbolos incorporados. Título
+e thumbnail formam uma única combinação complementar em todos os modos novos.
 
 O padrão editorial de projetos novos mantém toda a locução em português, exige citações bíblicas
 literais verificadas distribuídas na narrativa (de 0,8 a 1,2 por minuto), centraliza as legendas e
@@ -41,8 +42,7 @@ uv run pipeline-videos autopilot <projeto> --allow-external --wait-external
 ```
 
 O `autopilot` executa áudio, música e legendas enquanto os workers produzem staging; depois aguarda,
-importa cada lote uma única vez, compõe capas, renderiza e valida. Projetos existentes permanecem no
-perfil legado até uma migração explícita. O contrato completo está em
+importa cada lote uma única vez, renderiza e valida. O contrato completo está em
 [Produção otimizada](docs/optimized-production.md).
 
 Se uma cena ou thumbnail retornar `moderation_blocked`, o executor repete exatamente o mesmo prompt
@@ -98,36 +98,12 @@ Para um Short vertical 9:16, o fluxo recomendado agora não exige tema, título 
 uv run pipeline-videos new-short
 ```
 
-Há também duas versões rápidas e aditivas; o fluxo longo atual não é substituído:
+Para usar uma locução anexada sem ElevenLabs:
 
 ```powershell
-# Gera roteiro e prompts; depois aguarda as imagens anexadas pelo usuário
-uv run pipeline-videos new-short-light-manual
-
-# O próprio Codex gera as imagens e conclui a prévia
-uv run pipeline-videos new-short-light-automatica
-
 # O Codex entrega o roteiro e aguarda um único arquivo de voz anexado pelo usuário
 uv run pipeline-videos new-short-audio-manual
 ```
-
-Ambas escolhem um versículo ainda não usado, mantêm a revisão bíblica e produzem o roteiro Light no
-agente principal com raciocínio baixo. O modo manual cria `images/manual-prompts.md` com a quantidade
-de cenas necessária, dividida em partes de até 10 imagens separadas. Cada item repete o padrão 3D
-completo para que o ChatGPT Web preserve estilo, paleta, personagens e continuidade. Depois de
-anexar os arquivos na ordem indicada, a importação é feita de uma vez:
-
-```powershell
-uv run pipeline-videos images import-manual <projeto> imagem-01.png imagem-02.png imagem-03.png
-uv run pipeline-videos run <projeto>
-```
-
-No modo automático, `images/codex-queue.json` distribui uma imagem por job para até dois trabalhadores
-quando o especialista de crescimento está ativo. Os modos Light eliminam somente o subagente de
-roteiro: mantêm um `youtube_growth_specialist` com `reasoning_effort=low`, usam render local mais
-rápido, narração ElevenLabs e usam a primeira thumbnail integrada no frame zero. A chamada de voz
-exige `--allow-external`, inclusive no modo Light.
-O render final V4 permanece inalterado; somente a prévia de projetos novos usa o perfil rápido.
 
 `new-short-audio-manual` mantém o roteiro completo, imagens e especialista de crescimento, mas troca
 somente a origem da voz. Quando as cenas estiverem prontas, o pipeline expõe
@@ -148,16 +124,13 @@ eles são reutilizados. Consulte [Áudio manual local](docs/local-manual-audio.m
 
 ### Produção remota sob demanda
 
-Na VPS, `remote_review` mantém a qualidade final e reduz o uso do Codex: o agente principal produz
-os pacotes compactos, processa as imagens sequencialmente e gera exatamente um título e uma
-thumbnail integrada. Em Shorts, essa arte ocupa o primeiro frame; em vídeos longos, ela é enviada
-como thumbnail personalizada.
+Na VPS, o mesmo pipeline local roda com um único agente principal persistente. O executor inicia
+`codex exec` uma vez e usa `codex exec resume` para seleção editorial, roteiro, imagens sequenciais
+e título+thumbnail. O modelo é fixo em `gpt-5.6-sol`, com raciocínio médio e multi-agent desativado.
 
-O worker remoto divide a produção em sessões efêmeras: seleção de fontes quando necessária,
-roteiro, uma sessão por imagem e uma sessão para título+thumbnail. Cada uma recebe somente um JSON
-compacto; memória, apps, subagentes e busca ficam desativados. Áudio, música, legendas, imports,
-render, validação e upload rodam diretamente no Python. O status soma input, cache e output por fase,
-e hooks registram apenas métricas de tamanho, sem adicionar conteúdo ao contexto.
+Cada checkpoint recebe um JSON compacto. Áudio, música, legendas, imports, render, validação e upload
+rodam diretamente no Python. O status soma o uso por checkpoint e registra também o identificador
+da sessão persistente.
 
 Pedidos ficam em uma fila persistente e podem começar imediatamente ou somente entre 01:00 e 05:00
 no fuso `America/Sao_Paulo`. Todo upload automatizado começa como privado. `private_review` termina
@@ -238,8 +211,14 @@ CTA e revisão bíblica antes de promover a nova versão:
 ```powershell
 uv run pipeline-videos script shorts-prepare davi-e-golias
 # O subagente escreve apenas em script/staging/shorts-script-specialist/package.json
+uv run pipeline-videos script shorts-check-staging davi-e-golias
 uv run pipeline-videos script shorts-import davi-e-golias
 ```
+
+O `shorts-check-staging` é somente leitura e devolve, de uma vez, todos os erros detectáveis do
+pacote. O especialista deve corrigir o lote completo antes do único import. O import também
+sincroniza deterministicamente `strategy.open_loop` com a pergunta de tensão da espinha narrativa,
+eliminando uma divergência redundante sem reescrever o staging.
 
 O roteiro anterior é arquivado em `script/versions/`. O mapa de retenção fica em
 `script/retention-strategy.json`. Vídeos longos e fluxos manuais continuam aceitando importação
@@ -390,8 +369,8 @@ entrada e saída de 2 e 3 segundos, preservando a narração como faixa principa
 
 ### 7. Especialista de título, descrição, SEO e thumbnail
 
-Projetos reais usam um subagente `youtube_growth_specialist`. A fila pode ser preparada junto das
-imagens e processada em paralelo:
+Projetos reais usam um subagente `youtube_growth_specialist`. Nos projetos novos, a fila é preparada
+depois da importação das imagens, pois a capa edita diretamente a imagem ativa da abertura:
 
 ```powershell
 uv run pipeline-videos metadata growth-prepare salmo-121
@@ -399,21 +378,19 @@ uv run pipeline-videos metadata growth-prepare salmo-121
 uv run pipeline-videos metadata growth-import salmo-121
 ```
 
-O especialista entrega três combinações distintas de título e thumbnail no fluxo padrão, uma
+O especialista entrega uma combinação de título e thumbnail, uma
 descrição única, palavras-chave, intenção de busca, hipótese de CTR e justificativas registradas em
 `youtube/seo-strategy.json`. O agente principal valida e importa o pacote; o subagente não altera
 `project.json`, aprovações ou ativos em uso.
 
-Em `remote_review`, a fila declara exatamente uma combinação e é processada pelo agente principal,
-sem subagente de crescimento. O contrato visual e a complementaridade entre título e capa permanecem
-iguais; somente as alternativas de A/B test são eliminadas.
+Na VPS, a mesma combinação é processada pelo agente principal persistente, sem subagente de
+crescimento. O contrato visual e a complementaridade entre título e capa permanecem iguais.
 
 Nos projetos novos, todas as opções de título começam pela passagem principal, uma barra vertical e
 o tema reconhecível do vídeo. A descrição abre com resumo curto e, em vídeos longos, recebe uma
 timeline das citações no ponto em que entram na narrativa.
 
-As três opções são produzidas como pares editoriais pelo mesmo índice: título principal com a
-primeira thumbnail e títulos alternativos com as candidatas seguintes. O título concentra
+O par editorial distribui funções entre os dois elementos. O título concentra
 referência, tema e intenção de busca; a frase curta da capa acrescenta tensão, decisão, contraste ou
 consequência. O importador rejeita repetições literais, trechos completos e paráfrases quase iguais
 entre o tema depois de `|` e o texto da thumbnail. Nomes próprios e palavras-chave isoladas podem
@@ -438,13 +415,13 @@ causalidade a partir de poucos dados.
 O objetivo é aumentar relevância, clareza e probabilidade de clique sem clickbait enganoso. Não há
 garantia de viralização: o próprio YouTube considera relevância, satisfação, watch time, histórico do
 público, concorrência e sazonalidade. Em projetos novos, o especialista faz uma chamada de imagegen
-por candidata e entrega o bitmap final já com texto, palavra de destaque vermelha e elemento
+para editar a imagem ativa da abertura e entrega o bitmap final já com texto, palavra de destaque vermelha e elemento
 narrativo incorporados. Tipografia e símbolos participam da luz, profundidade, perspectiva e
 composição; não podem parecer uma camada solta nem cobrir rostos, corpos ou a ação principal. O
-importador apenas normaliza dimensões e formato, sem aplicar texto com Pillow. Projetos legados
-continuam compatíveis com reutilização de cenas e composição local. Em vídeos longos, as três
-combinações ficam pareadas para A/B test. Em Shorts, a primeira candidata ocupa exatamente o frame
-zero e as demais permanecem versionadas como alternativas.
+importador apenas normaliza dimensões e formato, sem aplicar texto com Pillow. A primeira saída
+válida é mantida mesmo se houver deriva visual ou imperfeição; nova tentativa automática ocorre
+somente quando `moderation_blocked` não produz imagem. Projetos legados continuam compatíveis com
+reutilização de cenas e composição local. Em Shorts, a capa ocupa exatamente o frame zero.
 
 As regras seguem as orientações oficiais de [títulos e thumbnails](https://support.google.com/youtube/answer/12340300),
 [descrições](https://support.google.com/youtube/answer/12948449),
@@ -540,8 +517,13 @@ e o cache individual. Bases visuais equivalentes de rascunho/final são comparti
 atômica. Quando a configuração da prévia é idêntica à do final, o arquivo é copiado sem uma segunda
 recodificação completa.
 
-Nos Shorts do fluxo padrão, o gerador cria três capas finais e a primeira ocupa o frame zero. Em
-`remote_review`, cria apenas uma capa e ela ocupa esse mesmo frame. Em versículos longos, o construtor
+Projetos novos usam blur funcional no fundo: abertura nítida, citação bíblica com blur leve,
+reflexão com blur moderado e payoff/aplicação novamente mais nítidos. A faixa central atrás das
+legendas recebe um pouco mais de blur. A thumbnail sobreposta no frame zero permanece totalmente
+nítida.
+
+Nos Shorts novos, o gerador cria uma capa final e ela ocupa o frame zero. Em versículos longos, o
+construtor
 cria mudanças visuais aproximadamente a cada 5,5 segundos, preferindo pontuação e limites de oração;
 isso pode aumentar o número de imagens para dar mais ritmo à abertura. As filas continuam usando
 schemas compactados e arquivos de contexto dedicados, e os validadores locais completos permanecem

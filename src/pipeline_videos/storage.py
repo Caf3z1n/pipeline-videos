@@ -136,14 +136,6 @@ class ProjectLayout:
         return self.root / "images" / "codex-queue.json"
 
     @property
-    def manual_image_prompts(self) -> Path:
-        return self.root / "images" / "manual-prompts.json"
-
-    @property
-    def manual_image_prompts_markdown(self) -> Path:
-        return self.root / "images" / "manual-prompts.md"
-
-    @property
     def image_assets(self) -> Path:
         return self.root / "images" / "assets"
 

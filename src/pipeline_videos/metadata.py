@@ -113,7 +113,6 @@ def build_metadata(layout: ProjectLayout, *, force: bool = False) -> YouTubeMeta
     style = read_model(layout.style_profile, StyleProfile)
     palette = read_model(layout.palette, Palette)
     project = layout.load_manifest()
-    light_mode = project.config.production.mode in {"light_manual", "light_automatic"}
     script = read_model(layout.script, ScriptDocument) if layout.script.is_file() else None
     audio = read_model(layout.audio, AudioManifest) if layout.audio.exists() else None
     input_hash = sha256_value(
@@ -171,16 +170,6 @@ def build_metadata(layout: ProjectLayout, *, force: bool = False) -> YouTubeMeta
         )
         if part
     )
-    if light_mode:
-        description = "\n\n".join(
-            part
-            for part in (
-                f"Uma reflexão curta sobre {briefing.main_passage}: {subject}.",
-                briefing.practical_application,
-                "#Bíblia #Fé #Shorts",
-            )
-            if part
-        )[:600]
     colors = ", ".join(f"{item.name} {item.hex}" for item in palette.colors)
     render_config = project.config.render
     aspect = aspect_ratio_label(render_config.width, render_config.height)
@@ -207,17 +196,13 @@ def build_metadata(layout: ProjectLayout, *, force: bool = False) -> YouTubeMeta
         title=title,
         alternative_titles=alternatives,
         description=description,
-        chapters=(
-            []
-            if light_mode
-            else _build_chapters(
-                scenes,
-                audio,
-                script,
-                scripture_timeline=(
-                    project.config.youtube_growth.description_standard == "scripture_timeline_v1"
-                ),
-            )
+        chapters=_build_chapters(
+            scenes,
+            audio,
+            script,
+            scripture_timeline=(
+                project.config.youtube_growth.description_standard == "scripture_timeline_v1"
+            ),
         ),
         topics=[briefing.main_passage, subject, "reflexão bíblica", "fé", "esperança"],
         pinned_comment=(

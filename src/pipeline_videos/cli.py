@@ -359,53 +359,6 @@ def new_short_audio_manual(
     console.print(f'Próximo passo: uv run pipeline-videos run "{layout.root}" --dry-run')
 
 
-def _new_light_short(*, automatic: bool, duration: int, projects_dir: Path | None) -> None:
-    mode = "light_automatic" if automatic else "light_manual"
-    layout, candidate, score = create_auto_short(
-        projects_dir=projects_dir,
-        target_duration_seconds=duration,
-        production_mode=mode,
-    )
-    label = "light-automática" if automatic else "light-manual"
-    console.print(f"[green]Short {label} criado:[/green] {layout.root}")
-    console.print(f"[bold]Versículo reservado:[/bold] {candidate.reference}")
-    console.print(candidate.verse_text, markup=False)
-    console.print(f"Seleção editorial: {candidate.title} (pontuação {score:g})")
-    if automatic:
-        console.print(
-            "O Codex fará o roteiro leve, gerará as imagens e concluirá a edição; "
-            "a aprovação final continua sendo do usuário."
-        )
-    else:
-        console.print(
-            "O fluxo produzirá prompts em partes de até 10 imagens e aguardará os arquivos "
-            "gerados fora do Codex."
-        )
-    console.print(f'Próximo passo: uv run pipeline-videos run "{layout.root}" --dry-run')
-
-
-@app.command("new-short-light-manual")
-def new_short_light_manual(
-    duration: Annotated[
-        int, typer.Option("--duration", help="Duração-alvo em segundos.", min=30, max=180)
-    ] = 50,
-    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
-) -> None:
-    """Cria um Short Light que aguarda imagens geradas externamente."""
-    _new_light_short(automatic=False, duration=duration, projects_dir=projects_dir)
-
-
-@app.command("new-short-light-automatica")
-def new_short_light_automatic(
-    duration: Annotated[
-        int, typer.Option("--duration", help="Duração-alvo em segundos.", min=30, max=180)
-    ] = 50,
-    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
-) -> None:
-    """Cria um Short Light concluído com imagens geradas pelo próprio Codex."""
-    _new_light_short(automatic=True, duration=duration, projects_dir=projects_dir)
-
-
 @app.command("status")
 def status(
     project: str,
@@ -441,18 +394,16 @@ def resume_prompt(
 ) -> None:
     layout = _project(project, projects_dir)
     config = layout.load_manifest().config
-    production = config.production
     manual_audio = config.audio.provider == "local_manual"
-    if production.optimization_profile == "token_optimized_v1":
-        audio_instruction = (
-            "Quando a etapa de áudio ficar pendente, mostre ao usuário todo o conteúdo de "
-            "`script/narration.txt` e aguarde um único arquivo de voz anexado. Salve o anexo no "
-            "projeto e importe com `audio import-manual`; o alinhamento é local e não usa "
-            "ElevenLabs nem `--allow-external`. "
-            if manual_audio
-            else ""
-        )
-        prompt = f"""Retome o projeto em `{layout.root}`. Leia `AGENTS.md`,
+    audio_instruction = (
+        "Quando a etapa de áudio ficar pendente, mostre ao usuário todo o conteúdo de "
+        "`script/narration.txt` e aguarde um único arquivo de voz anexado. Salve o anexo no "
+        "projeto e importe com `audio import-manual`; o alinhamento é local e não usa "
+        "ElevenLabs nem `--allow-external`. "
+        if manual_audio
+        else ""
+    )
+    prompt = f"""Retome o projeto em `{layout.root}`. Leia `AGENTS.md`,
 `docs/optimized-production.md` e depois `project.json`. Execute
 `uv run pipeline-videos status "{project}"` e retome com
 `uv run pipeline-videos autopilot "{project}"`
@@ -465,148 +416,7 @@ somente `script/shorts-queue.json`. Não releia manifestos grandes, não importe
 estado fora do agente principal. Depois de iniciar os workers, execute autopilot com
 `--wait-external` para importar, renderizar e validar automaticamente. Não publique nem registre
 aprovação humana."""
-        console.print(Panel(prompt, title="Cole esta mensagem em uma conversa com o Codex"))
-        return
-    if production.mode == "light_manual":
-        prompt = f"""Retome o projeto Short light-manual em `{layout.root}`. Leia `project.json`,
-execute `uv run pipeline-videos status "{project}"` e consulte
-`uv run pipeline-videos run "{project}" --dry-run`. Produza diretamente, com raciocínio baixo e
-sem subagente roteirista, o pacote declarado em `script/shorts-queue.json`; valide e importe uma
-única vez com `script shorts-import`. Construa as cenas e prepare `images/manual-prompts.md`, com a
-quantidade dinâmica de imagens necessária e partes de no máximo 10, repetindo o padrão 3D
-completo em cada imagem. Mostre os prompts ao usuário e pare para ele gerar e anexar as imagens.
-Quando os anexos chegarem, salve-os e importe todos de uma vez, na ordem global declarada, com
-`images import-manual`. Em paralelo, crie exatamente um `youtube_growth_specialist` com raciocínio
-baixo para a fila `youtube/growth-queue.json`; ele escreve somente em staging e o agente principal
-importa uma vez com `metadata growth-import`. Depois retome `run` até a prévia final. A capa deve
-reutilizar a imagem da primeira cena e ser incorporada ao frame zero. Não publique nem aprove pelo
-usuário."""
-    elif production.mode == "light_automatic":
-        prompt = f"""Retome o projeto Short light-automática em `{layout.root}`. Leia
-`project.json`, execute `uv run pipeline-videos status "{project}"` e consulte
-`uv run pipeline-videos run "{project}" --dry-run`. Produza diretamente, com raciocínio baixo e
-sem subagente roteirista, o pacote declarado em `script/shorts-queue.json`; valide e importe uma
-única vez com `script shorts-import`. Depois construa as cenas e gere uma imagem por job de
-`images/codex-queue.json` usando o imagegen embutido. Quando as filas estiverem pendentes, inicie
-até dois `image_worker` e exatamente um `youtube_growth_specialist` com raciocínio baixo. O
-especialista escreve somente em staging; o agente principal importa o lote de imagens e o pacote
-de crescimento
-uma única vez e conclui áudio, música, legendas, metadados, capa e render. A capa deve reutilizar a
-imagem da primeira cena e ser incorporada ao frame zero. Não publique nem aprove pelo usuário."""
-    elif production.mode == "draft_one_shot":
-        short_instructions = ""
-        if layout.load_manifest().video_format == "short":
-            short_instructions = """Antes das outras lanes, prepare `script/shorts-queue.json` e
-crie exatamente um `shorts_script_specialist`. Ele deve usar o versículo e a fonte já reservados,
-abrir literalmente com o versículo, escrever em português falado natural, escolher a ponte bíblica
-mais adequada, usar somente um dos cinco convites comunitários para comentar e terminar com o CTA
-fixo configurado. O especialista escreve somente no staging; valide e importe uma única vez com
-`script shorts-import`. """
-        prompt = f"""Retome o projeto de vídeo em `{layout.root}` no modo draft one-shot. Leia
-`project.json` e os manifestos existentes, execute `uv run pipeline-videos status "{project}"` e
-continue do primeiro estágio incompleto sem regenerar artefatos atuais. Use até
-três subagentes no total e consulte
-`uv run pipeline-videos run "{project}" --dry-run` para seguir as cinco ondas.
-{short_instructions}Quando as duas filas estiverem pendentes, inicie dois
-`image_worker` e um
-`youtube_growth_specialist` antes de esperar; sem a fila de crescimento, use até
-{production.image_workers} trabalhadores de imagem. `worker_id` é a afinidade inicial: entregue o
-próximo job ordenado ao primeiro trabalhador livre. Eles salvam somente em staging_path; apenas o
-agente principal pode importar em lote ou modificar JSONs compartilhados. Enquanto as lanes externas
-trabalham, o principal executa áudio, música e legendas. Não faça revisão artística
-intermediária nem peça aprovações por cena. Quando `youtube/growth-queue.json` estiver pendente,
-use também um subagente `youtube_growth_specialist`; ele escreve somente no staging indicado e o
-agente principal importa o pacote. Gere áudio, legendas, metadados e a prévia completa,
-mantendo verificações técnicas e bloqueios bíblicos. Pare somente diante de bloqueio real ou antes
-de consumir um serviço externo sem autorização. Não publique e não aprove o resultado pelo
-usuário."""
-    else:
-        prompt = f"""Abra o projeto de vídeo em `{layout.root}`. Leia primeiro `project.json`,
-depois briefing, fontes, decisões e manifestos existentes. Retome sem regenerar nada e preserve as
-aprovações por etapa. Não faça chamadas pagas nem publique sem aprovação explícita."""
     console.print(Panel(prompt, title="Cole esta mensagem em uma conversa com o Codex"))
-
-
-@app.command("production-mode")
-def production_mode(
-    project: str,
-    mode: Annotated[
-        str,
-        typer.Argument(
-            help="draft_one_shot, guided, light_manual, light_automatic ou remote_review"
-        ),
-    ],
-    image_workers: Annotated[int, typer.Option("--image-workers", min=1, max=8)] = 3,
-) -> None:
-    mode = mode.replace("-", "_")
-    if mode not in {
-        "draft_one_shot",
-        "guided",
-        "light_manual",
-        "light_automatic",
-        "remote_review",
-    }:
-        raise typer.BadParameter(
-            "Use draft_one_shot, guided, light_manual, light_automatic ou remote_review."
-        )
-    layout = _project(project)
-    manifest = layout.load_manifest()
-    previous_mode = manifest.config.production.mode
-    if mode in {"light_manual", "light_automatic"} and manifest.video_format != "short":
-        raise typer.BadParameter("Os modos Light estão disponíveis somente para Shorts.")
-    manifest.config.production.mode = mode  # type: ignore[assignment]
-    light_mode = mode in {"light_manual", "light_automatic"}
-    manifest.config.production.use_subagents = mode in {
-        "draft_one_shot",
-        "light_manual",
-        "light_automatic",
-    }
-    manifest.config.production.image_workers = 1 if mode == "light_manual" else image_workers
-    manifest.config.production.approval_policy = (  # type: ignore[assignment]
-        "final_only" if mode != "guided" else "stage_gates"
-    )
-    manifest.config.shorts_script.use_specialist_subagent = not light_mode
-    manifest.config.youtube_growth.enabled = True
-    manifest.config.youtube_growth.use_specialist_subagent = True
-    if mode == "remote_review":
-        manifest.config.production.use_subagents = False
-        manifest.config.production.image_workers = 1
-        manifest.config.production.optimization_profile = "remote_single_variant_v1"
-        manifest.config.production.worker_context_policy = "compact_only"
-        manifest.config.shorts_script.use_specialist_subagent = False
-        manifest.config.youtube_growth.title_variants = 1
-        manifest.config.youtube_growth.thumbnail_variants = 1
-        manifest.config.youtube_publication.allow_automated_private_review_upload = True
-        manifest.config.youtube_publication.allow_automated_scheduled_release = True
-    if light_mode:
-        manifest.config.render.final_crf = 16
-        manifest.config.render.preview_crf = 16
-        manifest.config.render.final_preset = "fast"
-        manifest.config.render.preview_preset = "fast"
-        manifest.config.render.motion_supersample = 2
-        if manifest.stages["youtube_growth"].status == StageStatus.SKIPPED:
-            manifest.stages["youtube_growth"] = manifest.stages["youtube_growth"].model_copy(
-                update={"status": StageStatus.PENDING, "note": None}
-            )
-    elif previous_mode in {"light_manual", "light_automatic"}:
-        manifest.config.render.final_crf = 12
-        manifest.config.render.preview_crf = 12
-        manifest.config.render.final_preset = "slow"
-        manifest.config.render.preview_preset = "slow"
-        manifest.config.render.motion_supersample = 3
-        manifest.stages["youtube_growth"] = manifest.stages["youtube_growth"].model_copy(
-            update={"status": StageStatus.PENDING, "note": None}
-        )
-    layout.save_manifest(manifest)
-    layout.append_decision(
-        {
-            "type": "production_mode",
-            "mode": mode,
-            "use_subagents": manifest.config.production.use_subagents,
-            "image_workers": manifest.config.production.image_workers,
-        }
-    )
-    console.print(f"[green]Modo de produção atualizado:[/green] {mode}.")
 
 
 @app.command("import-script")
@@ -650,6 +460,18 @@ def shorts_script_import(
         f"[green]Roteiro especialista importado:[/green] v{result.script.version}, "
         f"{result.script.word_count} palavras e {len(result.strategy.retention_beats)} beats."
     )
+
+
+@script_app.command("shorts-check-staging")
+def shorts_script_check_staging(project: str) -> None:
+    """Valida o staging do roteirista sem importar nem alterar o projeto."""
+
+    from pipeline_videos.shorts_script import check_shorts_script_package_staging
+
+    result = check_shorts_script_package_staging(_project(project))
+    console.print_json(json.dumps(result.as_dict(), ensure_ascii=False))
+    if not result.valid:
+        raise typer.Exit(code=1)
 
 
 @app.command("import-review")
@@ -738,19 +560,10 @@ def images_prepare(
     result = prepare_images(layout, scene_id=scene, force=force)
     if isinstance(result, dict):
         pending = len(result.get("items", []))
-        if result.get("provider") == "chatgpt-web-manual":
-            console.print(
-                f"[yellow]Prompts manuais criados para {pending} imagem(ns):[/yellow] "
-                f"{layout.manual_image_prompts_markdown}"
-            )
-            console.print("Anexe os arquivos na ordem indicada e use images import-manual.")
-        else:
-            console.print(
-                f"[yellow]Fila Codex criada com {pending} item(ns):[/yellow] {layout.image_queue}"
-            )
-            console.print(
-                "Gere uma imagem por item na conversa e use images import para cada arquivo."
-            )
+        console.print(
+            f"[yellow]Fila Codex criada com {pending} item(ns):[/yellow] {layout.image_queue}"
+        )
+        console.print("Gere uma imagem por item na conversa e use images import para cada arquivo.")
     else:
         console.print(
             f"[green]Imagens fixture geradas:[/green] {len(result.items)} itens no manifesto."
@@ -794,22 +607,6 @@ def images_import_batch(
     manifest = import_staged_images(_project(project), force=force)
     imported = sum(item.active_version is not None for item in manifest.items)
     console.print(f"[green]Importação em lote concluída:[/green] {imported} cena(s) ativas.")
-
-
-@images_app.command("import-manual")
-def images_import_manual(
-    project: str,
-    files: Annotated[
-        list[Path],
-        typer.Argument(help="Arquivos na ordem global indicada em images/manual-prompts.md."),
-    ],
-    force: Annotated[bool, typer.Option("--force")] = False,
-) -> None:
-    from pipeline_videos.images import import_manual_images
-
-    manifest = import_manual_images(_project(project), files, force=force)
-    imported = sum(item.active_version is not None for item in manifest.items)
-    console.print(f"[green]Lote manual importado em ordem:[/green] {imported} cena(s) ativas.")
 
 
 @images_app.command("approve")
@@ -1001,16 +798,6 @@ def metadata_growth_import(
 
     result = import_growth_package(_project(project), force=force)
     console.print(f"[green]Pacote do especialista importado:[/green] {result.metadata.title}")
-
-
-@metadata_app.command("retouch")
-def metadata_retouch(project: str, spec: Path) -> None:
-    """Corrige título, descrição e candidatas existentes sem regenerar o vídeo."""
-
-    from pipeline_videos.growth import retouch_youtube_package
-
-    result = retouch_youtube_package(_project(project), spec)
-    console.print(f"[green]Pacote editorial retocado:[/green] {result.title}")
 
 
 @metadata_app.command("integrated-thumbnails-import")
@@ -1260,10 +1047,7 @@ def render_command(
 
     select_music(layout)
     manifest = layout.load_manifest()
-    draft_mode = draft or (
-        manifest.config.production.mode in {"draft_one_shot", "light_manual", "light_automatic"}
-        and not final
-    )
+    draft_mode = draft or not final
     if draft_mode:
         validate_draft_preflight(layout)
         from pipeline_videos.render import render_draft_preview
@@ -1326,15 +1110,8 @@ def run_pipeline(
 ) -> None:
     layout = _project(project)
     manifest = layout.load_manifest()
-    production_mode = manifest.config.production.mode
-    light_mode = production_mode in {"light_manual", "light_automatic"}
-    main_agent_script_mode = light_mode or production_mode == "remote_review"
-    draft_mode = production_mode in {
-        "draft_one_shot",
-        "light_manual",
-        "light_automatic",
-        "remote_review",
-    }
+    main_agent_script_mode = not manifest.config.shorts_script.use_specialist_subagent
+    draft_mode = True
     if dry_run:
         console.print("[bold]Plano de execução sem mutações[/bold]")
         for row in stage_summary(layout):
@@ -1379,7 +1156,7 @@ def run_pipeline(
     if (
         not manifest.demo
         and manifest.config.youtube_growth.enabled
-        and manifest.config.youtube_growth.use_specialist_subagent
+        and manifest.stages["images"].status == StageStatus.COMPLETED
     ):
         from pipeline_videos.growth import prepare_growth_queue
 
@@ -1388,19 +1165,7 @@ def run_pipeline(
 
     image_result = prepare_images(layout, force=force)
     if isinstance(image_result, dict) and image_result.get("items"):
-        if production_mode == "light_manual":
-            console.print(
-                f"[yellow]Pipeline aguardando as imagens do usuário:[/yellow] "
-                f"{layout.manual_image_prompts_markdown}"
-            )
-            console.print(
-                "Envie os arquivos no chat na ordem global; depois eles serão importados com "
-                "images import-manual."
-            )
-        else:
-            console.print(
-                f"[yellow]Pipeline pausado na fila de imagens:[/yellow] {layout.image_queue}"
-            )
+        console.print(f"[yellow]Pipeline pausado na fila de imagens:[/yellow] {layout.image_queue}")
         if growth_queue and growth_queue.get("status") == "waiting_external":
             console.print(
                 f"[yellow]Fila paralela do especialista YouTube:[/yellow] {layout.growth_queue}"
@@ -1447,11 +1212,7 @@ def run_pipeline(
         generate_audio(layout, force=force, allow_external=allow_external)
     select_music(layout, force=force)
     generate_captions(layout, force=force)
-    if (
-        not manifest.demo
-        and manifest.config.youtube_growth.enabled
-        and manifest.config.youtube_growth.use_specialist_subagent
-    ):
+    if not manifest.demo and manifest.config.youtube_growth.enabled:
         current = layout.load_manifest()
         if current.stages["youtube_growth"].status != StageStatus.COMPLETED:
             console.print(
@@ -1471,19 +1232,9 @@ def run_pipeline(
         build_metadata(layout, force=force)
     if manifest.demo or manifest.config.images.provider == "fixture":
         generate_fixture_thumbnail(layout, force=force)
-    elif light_mode:
-        from pipeline_videos.growth import compose_light_short_cover
-
-        compose_light_short_cover(layout, force=force)
     elif not manifest.config.youtube_growth.enabled and not layout.thumbnail.exists():
         queue_thumbnail_for_codex(layout)
-    if production_mode == "remote_review":
-        from pipeline_videos.render import render_review_candidate
-
-        render_result = render_review_candidate(layout, force=force)
-        report = validate_project(layout, require_render=True)
-        console.print(f"[green]Candidato remoto:[/green] {render_result.final_video}")
-    elif draft_mode:
+    if draft_mode:
         draft_result = render_draft_preview(layout, force=force)
         report = validate_project(layout, require_render=False)
         console.print(f"[green]Prévia one-shot:[/green] {draft_result.preview_video}")

@@ -217,6 +217,83 @@ def test_smooth_pendulum_filter_uses_supersampling_and_eased_zoom(tmp_path) -> N
     assert "pzoom" not in filter_graph
 
 
+def test_functional_blur_profile_varies_by_narrative_role_and_caption_zone(tmp_path) -> None:
+    config = RenderConfig(
+        width=1080,
+        height=1920,
+        fps=30,
+        background_blur_profile="functional_caption_focus_v1",
+    )
+    opening = render.SceneRenderPlan(
+        scene_id="opening",
+        order=1,
+        image_path=tmp_path / "opening.png",
+        frame_count=30,
+        blur_role="opening",
+    )
+    reflection = render.SceneRenderPlan(
+        scene_id="reflection",
+        order=2,
+        image_path=tmp_path / "reflection.png",
+        frame_count=30,
+        blur_role="reflection",
+    )
+    payoff = render.SceneRenderPlan(
+        scene_id="payoff",
+        order=3,
+        image_path=tmp_path / "payoff.png",
+        frame_count=30,
+        blur_role="payoff",
+    )
+
+    opening_filter = render._visual_filter(opening, config)
+    reflection_filter = render._visual_filter(reflection, config)
+    payoff_filter = render._visual_filter(payoff, config)
+
+    assert "[blur_background]null[blurred_background]" in opening_filter
+    assert "gblur=sigma=1.000:steps=1[blurred_caption_focus]" in opening_filter
+    assert "gblur=sigma=3.200:steps=1[blurred_background]" in reflection_filter
+    assert "gblur=sigma=4.200:steps=1[blurred_caption_focus]" in reflection_filter
+    assert "crop=1080:845:0:538" in reflection_filter
+    assert "gblur=sigma=1.300:steps=1[blurred_background]" in payoff_filter
+    assert "gblur=sigma=2.300:steps=1[blurred_caption_focus]" in payoff_filter
+    assert "split=2" not in render._visual_filter(
+        reflection,
+        config.model_copy(update={"background_blur_profile": "none"}),
+    )
+
+
+def test_functional_blur_filter_renders_with_ffmpeg(tmp_path) -> None:
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg não está disponível")
+    layout = ProjectLayout(tmp_path / "project")
+    layout.ensure_directories()
+    image_path = layout.root / "source.png"
+    Image.new("RGB", (320, 180), "#6C5848").save(image_path)
+    plan = render.SceneRenderPlan(
+        scene_id="scene-001",
+        order=2,
+        image_path=image_path,
+        frame_count=3,
+        blur_role="reflection",
+    )
+    config = RenderConfig(
+        width=320,
+        height=180,
+        fps=30,
+        final_preset="ultrafast",
+        motion_style="legacy",
+        transition_style="cinematic_mix",
+        background_blur_profile="functional_caption_focus_v1",
+    )
+    output = layout.render_work / "blur-smoke.mp4"
+
+    render._render_segment(layout, plan, config, output)
+
+    assert output.is_file()
+    assert output.stat().st_size > 0
+
+
 def test_cinematic_mix_uses_motivated_crossfades_without_black_fades(tmp_path) -> None:
     plans = [
         render.SceneRenderPlan(

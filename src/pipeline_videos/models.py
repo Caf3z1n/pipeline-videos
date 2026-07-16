@@ -10,13 +10,7 @@ class PipelineModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
 
-type ProductionMode = Literal[
-    "guided",
-    "draft_one_shot",
-    "light_manual",
-    "light_automatic",
-    "remote_review",
-]
+type ProductionMode = Literal["draft_one_shot"]
 
 
 class StageStatus(StrEnum):
@@ -95,11 +89,22 @@ class RenderConfig(PipelineModel):
     short_cover_enabled: bool = True
     short_cover_duration_seconds: float = Field(default=1 / 30, ge=1 / 30, le=3.0)
     short_cover_transition_seconds: float = Field(default=0.0, ge=0.0, le=1.0)
+    background_blur_profile: Literal["none", "functional_caption_focus_v1"] = "none"
+    background_blur_opening_sigma: float = Field(default=0.0, ge=0.0, le=12.0)
+    background_blur_scripture_sigma: float = Field(default=1.4, ge=0.0, le=12.0)
+    background_blur_reflection_sigma: float = Field(default=3.2, ge=0.0, le=12.0)
+    background_blur_payoff_sigma: float = Field(default=1.3, ge=0.0, le=12.0)
+    background_blur_closing_sigma: float = Field(default=1.8, ge=0.0, le=12.0)
+    caption_focus_blur_extra_sigma: float = Field(default=1.0, ge=0.0, le=6.0)
+    caption_focus_top_ratio: float = Field(default=0.28, ge=0.0, le=0.8)
+    caption_focus_height_ratio: float = Field(default=0.44, gt=0.0, le=1.0)
 
     @model_validator(mode="after")
     def validate_motion_zoom(self) -> RenderConfig:
         if self.motion_zoom_max < self.motion_zoom_min:
             raise ValueError("motion_zoom_max deve ser maior ou igual a motion_zoom_min")
+        if self.caption_focus_top_ratio + self.caption_focus_height_ratio > 1.0:
+            raise ValueError("A faixa de foco da legenda precisa caber no quadro.")
         return self
 
 
@@ -177,20 +182,18 @@ class YouTubeGrowthConfig(PipelineModel):
     enabled: bool = True
     use_specialist_subagent: bool = True
     specialist_role: Literal["youtube_growth_specialist"] = "youtube_growth_specialist"
-    title_variants: int = Field(default=3, ge=1, le=3)
-    thumbnail_variants: int = Field(default=3, ge=1, le=3)
-    reuse_scene_images_for_thumbnails: bool = False
-    thumbnail_generation_mode: Literal["legacy_overlay", "integrated_imagegen_v1"] = (
-        "legacy_overlay"
-    )
-    title_standard: Literal["legacy", "passage_pipe_topic_v1"] = "legacy"
-    description_standard: Literal["legacy", "scripture_timeline_v1"] = "legacy"
-    thumbnail_standard: Literal["legacy", "direct_conflict_red_v1"] = "legacy"
-    title_thumbnail_pairing_standard: Literal["legacy", "complementary_v1"] = "legacy"
+    title_variants: int = Field(default=1, ge=1, le=3)
+    thumbnail_variants: int = Field(default=1, ge=1, le=3)
+    thumbnail_generation_mode: Literal["integrated_imagegen_v1"] = "integrated_imagegen_v1"
+    thumbnail_reference_mode: Literal["opening_scene_edit_v1"] = "opening_scene_edit_v1"
+    title_standard: Literal["passage_pipe_topic_v1"] = "passage_pipe_topic_v1"
+    description_standard: Literal["scripture_timeline_v1"] = "scripture_timeline_v1"
+    thumbnail_standard: Literal["direct_conflict_red_v1"] = "direct_conflict_red_v1"
+    title_thumbnail_pairing_standard: Literal["complementary_v1"] = "complementary_v1"
 
 
 class EditorialPolicyConfig(PipelineModel):
-    standard: Literal["legacy", "scripture_rich_ptbr_v1"] = "legacy"
+    standard: Literal["scripture_rich_ptbr_v1"] = "scripture_rich_ptbr_v1"
     forbid_english_editorial_jargon: bool = False
     forbid_generic_text_reference: bool = False
     require_literal_scripture_citations: bool = False
@@ -263,14 +266,9 @@ class ProductionConfig(PipelineModel):
     mode: ProductionMode = "draft_one_shot"
     use_subagents: bool = True
     image_workers: int = Field(default=3, ge=1, le=8)
-    manual_image_batch_size: int = Field(default=10, ge=1, le=10)
-    approval_policy: Literal["stage_gates", "final_only"] = "final_only"
-    optimization_profile: Literal[
-        "legacy_v4",
-        "token_optimized_v1",
-        "remote_single_variant_v1",
-    ] = "legacy_v4"
-    worker_context_policy: Literal["inherit", "compact_only"] = "inherit"
+    approval_policy: Literal["final_only"] = "final_only"
+    optimization_profile: Literal["token_optimized_v1"] = "token_optimized_v1"
+    worker_context_policy: Literal["compact_only"] = "compact_only"
 
 
 class ProjectConfig(PipelineModel):
@@ -782,7 +780,6 @@ class YouTubePublicationRecord(PipelineModel):
 
 
 class YouTubeThumbnailDesign(PipelineModel):
-    source_scene_id: str | None = None
     text: str
     accent_word: str
     text_lines: list[str] = Field(default_factory=list, max_length=3)
@@ -851,12 +848,6 @@ class YouTubeGrowthStrategy(PipelineModel):
     title_thumbnail_complement: str
     source_ids: list[str] = Field(default_factory=list)
     section_ids: list[str] = Field(default_factory=list)
-    thumbnail_text: str | None = None
-    thumbnail_accent_word: str | None = None
-    thumbnail_text_position: Literal["top", "center", "bottom"] = "top"
-    thumbnail_overlay_style: Literal["high_contrast_editorial", "high_impact_editorial"] = (
-        "high_contrast_editorial"
-    )
     thumbnail_designs: list[YouTubeThumbnailDesign] = Field(default_factory=list, max_length=3)
     short_cover_timestamp_seconds: float | None = Field(default=None, ge=0.0)
     experiment_plan: list[str] = Field(default_factory=list)

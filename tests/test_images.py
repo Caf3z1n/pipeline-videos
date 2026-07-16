@@ -8,10 +8,8 @@ from pipeline_videos.images import (
     approve_image,
     build_codex_queue,
     build_image_manifest,
-    build_manual_image_queue,
     generate_fixture_images,
     import_external_image,
-    import_manual_images,
     import_staged_images,
 )
 from pipeline_videos.models import (
@@ -24,7 +22,6 @@ from pipeline_videos.models import (
 )
 from pipeline_videos.project import create_project
 from pipeline_videos.storage import ProjectLayout, read_json, read_model, write_json
-from pipeline_videos.utils import sha256_file
 
 
 def _create_layout(tmp_path: Path, *, scene_count: int = 2, demo: bool = False) -> ProjectLayout:
@@ -349,63 +346,11 @@ def test_subagents_write_only_staging_and_root_imports_the_batch(tmp_path: Path)
     assert layout.load_manifest().stages["images"].status == StageStatus.COMPLETED
 
 
-def test_light_manual_builds_dynamic_prompt_parts_and_imports_global_order(
-    tmp_path: Path,
-) -> None:
-    layout = _create_layout(tmp_path, scene_count=12)
-    project = layout.load_manifest()
-    project.config.production.mode = "light_manual"
-    project.config.production.use_subagents = False
-    project.config.youtube_growth.enabled = False
-    project.config.youtube_growth.use_specialist_subagent = False
-    layout.save_manifest(project)
-
-    queue = build_manual_image_queue(layout)
-    bundle = read_json(layout.manual_image_prompts)
-
-    assert queue["provider"] == "chatgpt-web-manual"
-    assert queue["orchestration"]["mode"] == "manual_upload"
-    assert queue["orchestration"]["worker_count"] == 0
-    assert [part["image_count"] for part in bundle["parts"]] == [10, 2]
-    assert bundle["total_images"] == 12
-    assert bundle["max_images_per_part"] == 10
-    assert bundle["upload_order"] == [f"scene-{index:03d}" for index in range(1, 13)]
-    assert "IMAGEM 11 DE 12" in bundle["parts"][1]["prompt"]
-    assert "não reinicie a sequência" in bundle["parts"][1]["prompt"]
-    assert (
-        sum(
-            part["prompt"].count("Visual standard: cinematic-family-3d-v1")
-            for part in bundle["parts"]
-        )
-        == 12
-    )
-    assert layout.manual_image_prompts_markdown.is_file()
-
-    sources: list[Path] = []
-    for index in range(1, 13):
-        source = tmp_path / f"manual-{index:03d}.png"
-        Image.new("RGB", (96, 160), (index, index * 2, index * 3)).save(source)
-        sources.append(source)
-    imported = import_manual_images(layout, sources)
-
-    assert [item.scene_id for item in imported.items] == [
-        f"scene-{index:03d}" for index in range(1, 13)
-    ]
-    assert [item.versions[0].metadata["source_hash"] for item in imported.items] == [
-        sha256_file(source) for source in sources
-    ]
-    assert layout.load_manifest().stages["images"].status == StageStatus.COMPLETED
-    completed_queue = read_json(layout.image_queue)
-    assert completed_queue["status"] == StageStatus.COMPLETED.value
-    assert all(item["status"] == StageStatus.COMPLETED.value for item in completed_queue["items"])
-
-
-def test_light_automatic_reserves_one_slot_for_growth_specialist(
+def test_local_subagents_reserve_one_slot_for_growth_specialist(
     tmp_path: Path,
 ) -> None:
     layout = _create_layout(tmp_path, scene_count=4)
     project = layout.load_manifest()
-    project.config.production.mode = "light_automatic"
     project.config.production.use_subagents = True
     project.config.production.image_workers = 3
     project.config.youtube_growth.enabled = True

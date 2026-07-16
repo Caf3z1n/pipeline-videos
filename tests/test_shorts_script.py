@@ -24,6 +24,8 @@ from pipeline_videos.models import (
 from pipeline_videos.project import create_project
 from pipeline_videos.shorts_script import (
     LEGACY_SCRIPTURE_BOUNDARY_PHRASE,
+    ShortsScriptPackageValidationError,
+    check_shorts_script_package_staging,
     import_shorts_script_package,
     prepare_shorts_script_queue,
     spoken_biblical_reference,
@@ -308,6 +310,14 @@ def test_shorts_specialist_queue_imports_script_review_and_retention_strategy(tm
     assert queue["orchestration"]["fork_turns"] == "none"
     assert queue["orchestration"]["recommended_model"] == "gpt-5.6-terra"
     assert queue["orchestration"]["reasoning_effort"] == "high"
+    assert queue["preflight"] == {
+        "read_only": True,
+        "command": (
+            'uv run pipeline-videos script shorts-check-staging "14-07-2026_davi-golias-short"'
+        ),
+        "success_condition": "valid=true",
+        "returns_all_detectable_errors": True,
+    }
     assert queue["inputs"] == {"compact_context": "script/shorts-context.json"}
     assert layout.shorts_script_context.is_file()
     context = read_json(layout.shorts_script_context)
@@ -351,6 +361,8 @@ def test_shorts_specialist_queue_imports_script_review_and_retention_strategy(tm
     assert any("um único momento" in instruction for instruction in queue["instructions"])
     assert any("imagem-âncora" in instruction for instruction in queue["instructions"])
     assert any("curta o vídeo" in instruction for instruction in queue["instructions"])
+    assert any("biblical_basis" in instruction for instruction in queue["instructions"])
+    assert any("preflight.command" in instruction for instruction in queue["instructions"])
 
     write_json(layout.shorts_script_package_staging, _package(queue))
     imported = import_shorts_script_package(layout)
@@ -374,10 +386,59 @@ def test_shorts_specialist_queue_imports_script_review_and_retention_strategy(tm
     assert manifest.approvals["script"].status.value == "pending"
 
 
-def test_light_script_queue_is_owned_by_main_agent_with_low_reasoning(tmp_path) -> None:
+def test_shorts_staging_preflight_aggregates_errors_and_is_read_only(tmp_path) -> None:
+    layout = _short_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+    payload = _package(queue).model_dump(mode="json")
+    payload["strategy"]["narrative_spine"]["tension_question"] = "Pergunta ausente."
+    payload["strategy"]["narrative_spine"]["bridge_statement"] = "Ponte ausente."
+    payload["strategy"]["open_loop"] = "Formulação concorrente."
+    payload["script"]["sections"][0]["biblical_basis"] = []
+    payload["script"]["sections"][1]["claim_classification"] = []
+    write_json(layout.shorts_script_package_staging, payload)
+    before = layout.shorts_script_package_staging.read_bytes()
+
+    result = check_shorts_script_package_staging(layout)
+
+    assert result.valid is False
+    assert result.normalizations == (
+        "strategy.open_loop sincronizado com narrative_spine.tension_question.",
+    )
+    assert "narrative_spine.tension_question precisa aparecer na seção mapeada." in result.errors
+    assert "narrative_spine.bridge_statement precisa aparecer na seção mapeada." in result.errors
+    assert "A seção section-001 não registra base bíblica." in result.errors
+    assert "A seção section-002 não classifica suas afirmações." in result.errors
+    assert layout.shorts_script_package_staging.read_bytes() == before
+
+    with pytest.raises(ShortsScriptPackageValidationError) as exc_info:
+        import_shorts_script_package(layout)
+    assert set(result.errors).issubset(exc_info.value.errors)
+
+
+def test_shorts_staging_normalizes_redundant_open_loop_without_writing_staging(
+    tmp_path,
+) -> None:
+    layout = _short_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+    payload = _package(queue).model_dump(mode="json")
+    payload["strategy"]["open_loop"] = "Uma formulação que seria rejeitada antes."
+    write_json(layout.shorts_script_package_staging, payload)
+    before = layout.shorts_script_package_staging.read_bytes()
+
+    result = check_shorts_script_package_staging(layout)
+    imported = import_shorts_script_package(layout)
+
+    assert result.valid is True
+    assert result.normalizations == (
+        "strategy.open_loop sincronizado com narrative_spine.tension_question.",
+    )
+    assert imported.strategy.open_loop == imported.strategy.narrative_spine.tension_question
+    assert layout.shorts_script_package_staging.read_bytes() == before
+
+
+def test_single_agent_script_queue_uses_sol_medium(tmp_path) -> None:
     layout = _short_project(tmp_path)
     project = layout.load_manifest()
-    project.config.production.mode = "light_manual"
     project.config.production.use_subagents = False
     project.config.shorts_script.use_specialist_subagent = False
     project.config.youtube_growth.enabled = False
@@ -388,7 +449,8 @@ def test_light_script_queue_is_owned_by_main_agent_with_low_reasoning(tmp_path) 
 
     assert queue["orchestration"]["mode"] == "main_agent"
     assert queue["orchestration"]["worker_id"] == "main"
-    assert queue["orchestration"]["reasoning_effort"] == "low"
+    assert queue["orchestration"]["reasoning_effort"] == "medium"
+    assert queue["orchestration"]["recommended_model"] == "gpt-5.6-sol"
     assert any("agente principal" in instruction for instruction in queue["instructions"])
 
 

@@ -42,8 +42,10 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     assert manifest.config.render.preview_motion_supersample == 2
     assert manifest.config.production.optimization_profile == "token_optimized_v1"
     assert manifest.config.production.worker_context_policy == "compact_only"
-    assert manifest.config.youtube_growth.reuse_scene_images_for_thumbnails is False
     assert manifest.config.youtube_growth.thumbnail_generation_mode == "integrated_imagegen_v1"
+    assert manifest.config.youtube_growth.thumbnail_reference_mode == "opening_scene_edit_v1"
+    assert manifest.config.youtube_growth.title_variants == 1
+    assert manifest.config.youtube_growth.thumbnail_variants == 1
     assert manifest.config.youtube_growth.title_standard == "passage_pipe_topic_v1"
     assert manifest.config.youtube_growth.description_standard == "scripture_timeline_v1"
     assert manifest.config.youtube_growth.thumbnail_standard == "direct_conflict_red_v1"
@@ -58,6 +60,7 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     assert manifest.config.audio.comment_response_silence_seconds == 1.0
     assert manifest.config.render.transition_style == "cinematic_mix"
     assert manifest.config.render.motion_style == "smooth_pendulum"
+    assert manifest.config.render.background_blur_profile == "functional_caption_focus_v1"
     assert manifest.config.render.background_music_path is None
     assert manifest.config.music.enabled is True
     assert manifest.config.music.selection_mode == "random"
@@ -120,6 +123,10 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.render.background_music_gain_db == -12.0
     assert manifest.config.render.short_cover_enabled is True
     assert manifest.config.render.short_cover_duration_seconds == pytest.approx(1 / 30)
+    assert manifest.config.render.background_blur_profile == "functional_caption_focus_v1"
+    assert manifest.config.youtube_growth.title_variants == 1
+    assert manifest.config.youtube_growth.thumbnail_variants == 1
+    assert manifest.config.youtube_growth.thumbnail_reference_mode == "opening_scene_edit_v1"
     assert manifest.config.images.height > manifest.config.images.width
     assert manifest.config.images.visual_standard_id == "cinematic-family-3d-v1"
     assert manifest.config.images.enforce_visual_standard is True
@@ -156,89 +163,3 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     legacy_manifest["config"]["captions"].pop("vertical_position")
     write_json(layout.manifest, legacy_manifest)
     assert layout.load_manifest().config.captions.vertical_position == "center"
-
-
-def test_legacy_project_keeps_expensive_v4_preview_until_explicitly_migrated(tmp_path) -> None:
-    layout = create_project(
-        "legacy-video",
-        "Legacy",
-        projects_dir=tmp_path,
-        target_duration_seconds=60,
-        project_date=date(2026, 7, 14),
-    )
-    raw = read_json(layout.manifest)
-    raw["config"]["render"]["preview_crf"] = 12
-    raw["config"]["render"]["preview_preset"] = "slow"
-    raw["config"]["render"].pop("preview_motion_supersample")
-    raw["config"]["production"].pop("optimization_profile")
-    raw["config"]["production"].pop("worker_context_policy")
-    raw["config"]["youtube_growth"].pop("reuse_scene_images_for_thumbnails")
-    raw["config"]["youtube_growth"].pop("thumbnail_generation_mode")
-    raw["config"]["youtube_growth"].pop("title_standard")
-    raw["config"]["youtube_growth"].pop("description_standard")
-    raw["config"]["youtube_growth"].pop("thumbnail_standard")
-    raw["config"]["youtube_growth"].pop("title_thumbnail_pairing_standard")
-    raw["config"]["captions"].pop("isolate_quoted_comment_response")
-    raw["config"]["captions"].pop("comment_response_hold_seconds")
-    raw["config"]["audio"].pop("comment_response_silence_seconds")
-    raw["config"].pop("editorial_policy")
-    write_json(layout.manifest, raw)
-
-    legacy = layout.load_manifest()
-
-    assert legacy.config.render.preview_crf == 12
-    assert legacy.config.render.preview_preset == "slow"
-    assert legacy.config.render.preview_motion_supersample == 3
-    assert legacy.config.production.optimization_profile == "legacy_v4"
-    assert legacy.config.production.worker_context_policy == "inherit"
-    assert legacy.config.youtube_growth.reuse_scene_images_for_thumbnails is False
-    assert legacy.config.youtube_growth.thumbnail_generation_mode == "legacy_overlay"
-    assert legacy.config.youtube_growth.title_standard == "legacy"
-    assert legacy.config.youtube_growth.description_standard == "legacy"
-    assert legacy.config.youtube_growth.thumbnail_standard == "legacy"
-    assert legacy.config.youtube_growth.title_thumbnail_pairing_standard == "legacy"
-    assert legacy.config.editorial_policy.standard == "legacy"
-    assert legacy.config.captions.isolate_quoted_comment_response is False
-    assert legacy.config.audio.comment_response_silence_seconds == 0.0
-
-
-@pytest.mark.parametrize(
-    ("mode", "use_subagents", "image_workers"),
-    [
-        ("light_manual", True, 1),
-        ("light_automatic", True, 3),
-    ],
-)
-def test_new_light_short_is_additive_and_uses_fast_local_render(
-    tmp_path,
-    mode: str,
-    use_subagents: bool,
-    image_workers: int,
-) -> None:
-    layout = create_project(
-        f"short-{mode}",
-        "Short Light",
-        projects_dir=tmp_path,
-        target_duration_seconds=50,
-        video_format="short",
-        production_mode=mode,  # type: ignore[arg-type]
-    )
-    manifest = layout.load_manifest()
-
-    assert manifest.config.production.mode == mode
-    assert manifest.config.production.use_subagents is use_subagents
-    assert manifest.config.production.image_workers == image_workers
-    assert manifest.config.production.manual_image_batch_size == 10
-    assert manifest.config.production.approval_policy == "final_only"
-    assert manifest.config.render.final_crf == 16
-    assert manifest.config.render.preview_crf == 16
-    assert manifest.config.render.final_preset == "fast"
-    assert manifest.config.render.preview_preset == "fast"
-    assert manifest.config.render.motion_supersample == 2
-    assert manifest.config.render.short_cover_enabled is True
-    assert manifest.config.audio.provider == "elevenlabs"
-    assert manifest.config.shorts_script.enabled is True
-    assert manifest.config.shorts_script.use_specialist_subagent is False
-    assert manifest.config.youtube_growth.enabled is True
-    assert manifest.config.youtube_growth.use_specialist_subagent is True
-    assert manifest.stages["youtube_growth"].status == StageStatus.PENDING

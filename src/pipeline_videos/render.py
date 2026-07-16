@@ -17,6 +17,7 @@ from pipeline_videos.models import (
     RenderConfig,
     Scene,
     SceneManifest,
+    ScriptDocument,
 )
 from pipeline_videos.state import (
     complete_stage,
@@ -36,7 +37,7 @@ from pipeline_videos.utils import (
     sha256_value,
 )
 
-RENDER_ALGORITHM_VERSION = "4"
+RENDER_ALGORITHM_VERSION = "5"
 MAX_SEGMENT_RENDER_WORKERS = 2
 OUTPUT_PIXEL_FORMAT = "yuv420p"
 OUTPUT_AUDIO_CODEC = "aac"
@@ -62,6 +63,7 @@ class SceneRenderPlan:
     order: int
     image_path: Path
     frame_count: int
+    blur_role: str = "closing"
 
 
 @dataclass(frozen=True)
@@ -196,15 +198,70 @@ def _scene_plans(
         images_manifest,
         approved_only=approved_only,
     )
+    section_roles: dict[str, str] = {}
+    if layout.script.is_file():
+        script = read_model(layout.script, ScriptDocument)
+        section_roles = {section.section_id: section.role for section in script.sections}
     return [
         SceneRenderPlan(
             scene_id=scene.scene_id,
             order=scene.order,
             image_path=selected_images[scene.scene_id],
             frame_count=frames[scene.scene_id],
+            blur_role=_scene_blur_role(scene, section_roles),
         )
         for scene in scenes
     ]
+
+
+def _scene_blur_role(scene: Scene, section_roles: dict[str, str]) -> str:
+    if scene.order == 1:
+        return "opening"
+    role = section_roles.get(scene.section_id, "").strip().casefold()
+    function = scene.narrative_function.strip().casefold()
+    if role == "opening":
+        return "opening"
+    if role == "biblical_narrative":
+        return "scripture"
+    if role == "application" or any(
+        marker in function for marker in ("aplica", "resolver", "resolu", "payoff")
+    ):
+        return "payoff"
+    if role == "reflection":
+        return "reflection"
+    return "closing"
+
+
+def _blur_sigma(plan: SceneRenderPlan, config: RenderConfig) -> float:
+    if config.background_blur_profile != "functional_caption_focus_v1":
+        return 0.0
+    return {
+        "opening": config.background_blur_opening_sigma,
+        "scripture": config.background_blur_scripture_sigma,
+        "reflection": config.background_blur_reflection_sigma,
+        "payoff": config.background_blur_payoff_sigma,
+        "closing": config.background_blur_closing_sigma,
+    }.get(plan.blur_role, config.background_blur_closing_sigma)
+
+
+def _functional_blur_filter(plan: SceneRenderPlan, config: RenderConfig) -> str | None:
+    if config.background_blur_profile != "functional_caption_focus_v1":
+        return None
+    scale = min(config.width, config.height) / 1080
+    base_sigma = _blur_sigma(plan, config) * scale
+    focus_sigma = base_sigma + config.caption_focus_blur_extra_sigma * scale
+    top = round(config.height * config.caption_focus_top_ratio)
+    height = max(2, round(config.height * config.caption_focus_height_ratio))
+    height = min(height, config.height - top)
+    background_filter = f"gblur=sigma={base_sigma:.3f}:steps=1" if base_sigma > 0 else "null"
+    focus_filter = f"gblur=sigma={focus_sigma:.3f}:steps=1"
+    return (
+        "split=2[blur_background][caption_focus];"
+        f"[blur_background]{background_filter}[blurred_background];"
+        f"[caption_focus]crop={config.width}:{height}:0:{top},"
+        f"{focus_filter}[blurred_caption_focus];"
+        f"[blurred_background][blurred_caption_focus]overlay=0:{top}"
+    )
 
 
 def _codec_args(codec: str, *, preset: str, crf: int) -> list[str]:
@@ -263,15 +320,19 @@ def _visual_filter(plan: SceneRenderPlan, config: RenderConfig) -> str:
             ),
             "setsar=1",
         ]
+    finish_filters: list[str] = []
     if fade > 0 and config.transition_style == "fade_black":
-        filters.extend(
+        finish_filters.extend(
             [
                 f"fade=t=in:st=0:d={fade:.6f}",
                 f"fade=t=out:st={fade_out_start:.6f}:d={fade:.6f}",
             ]
         )
-    filters.append("format=yuv420p")
-    return ",".join(filters)
+    finish_filters.append("format=yuv420p")
+    functional_blur = _functional_blur_filter(plan, config)
+    if functional_blur is None:
+        return ",".join([*filters, *finish_filters])
+    return ",".join(filters) + "," + functional_blur + "," + ",".join(finish_filters)
 
 
 def _cache_hash(path: Path) -> str | None:
@@ -506,6 +567,7 @@ def _base_input_hash(plans: Sequence[SceneRenderPlan], config: RenderConfig) -> 
                     "order": plan.order,
                     "image_hash": sha256_file(plan.image_path),
                     "frames": plan.frame_count,
+                    "blur_role": plan.blur_role,
                 }
                 for plan in plans
             ],
@@ -524,6 +586,15 @@ def _base_input_hash(plans: Sequence[SceneRenderPlan], config: RenderConfig) -> 
                 "motion_zoom_max": config.motion_zoom_max,
                 "motion_pan_strength": config.motion_pan_strength,
                 "motion_supersample": config.motion_supersample,
+                "background_blur_profile": config.background_blur_profile,
+                "background_blur_opening_sigma": config.background_blur_opening_sigma,
+                "background_blur_scripture_sigma": config.background_blur_scripture_sigma,
+                "background_blur_reflection_sigma": config.background_blur_reflection_sigma,
+                "background_blur_payoff_sigma": config.background_blur_payoff_sigma,
+                "background_blur_closing_sigma": config.background_blur_closing_sigma,
+                "caption_focus_blur_extra_sigma": config.caption_focus_blur_extra_sigma,
+                "caption_focus_top_ratio": config.caption_focus_top_ratio,
+                "caption_focus_height_ratio": config.caption_focus_height_ratio,
             },
         }
     )
@@ -594,6 +665,7 @@ def _build_visual_base(
                 order=plan.order,
                 image_path=plan.image_path,
                 frame_count=plan.frame_count + transition_frames,
+                blur_role=plan.blur_role,
             )
         segment = segment_dir / f"scene-{sequence:03d}.mp4"
         cache = segment.with_suffix(".json")

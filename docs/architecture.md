@@ -54,9 +54,9 @@ Os checkpoints atuais são briefing, roteiro, revisão bíblica, imagens, metada
 O roteiro só é aprovado após uma revisão correspondente à mesma versão e sem bloqueio aberto. O
 render real exige roteiro, revisão e imagens aprovados.
 
-Em `draft_one_shot`, os mesmos bloqueios de consistência bíblica continuam valendo, mas as aprovações
+Em `draft_one_shot`, os bloqueios de consistência bíblica continuam valendo, mas as aprovações
 humanas intermediárias não impedem `render/draft-preview.mp4`. A prévia usa versões ativas, fica em
-cache separado e não toca o render final. O modo `guided` mantém os checkpoints tradicionais.
+cache separado e não toca o render final.
 
 ## Contratos de conteúdo
 
@@ -112,10 +112,11 @@ pacote contra os modelos Pydantic completos e os arquivos-fonte do projeto:
 - os JSON Schemas enviados às filas removem somente metadados de apresentação, preservando tipos,
   enums, referências e campos obrigatórios;
 - os subagentes partem com `fork_turns=none`, evitando herdar o histórico inteiro da conversa;
-- em projetos novos, inclusive Shorts, a fila declara três bitmaps finais de thumbnail; o
-  especialista incorpora texto e símbolos com imagegen e o importador não cria overlays locais;
+- em projetos novos, inclusive Shorts, a fila declara um bitmap final de thumbnail; o especialista
+  edita a imagem ativa da abertura, incorpora texto e símbolos com imagegen e o importador não cria
+  overlays locais;
 - reutilização de cena e composição Pillow permanecem apenas como compatibilidade para projetos
-  legados. Em Shorts, a primeira candidata integrada é usada no frame zero.
+  legados. Em Shorts, a candidata integrada é usada no frame zero.
 
 ## Autopilot retomável
 

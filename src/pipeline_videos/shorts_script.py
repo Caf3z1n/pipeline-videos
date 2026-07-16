@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from pydantic import ValidationError
 
 from pipeline_videos.editorial import quoted_comment_response
 from pipeline_videos.models import (
@@ -28,6 +32,30 @@ from pipeline_videos.utils import (
 SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION = "2.0"
 SHORTS_SCRIPT_ALGORITHM_VERSION = "3.1"
 LEGACY_SCRIPTURE_BOUNDARY_PHRASE = "Até aqui, o texto bíblico."
+
+
+class ShortsScriptPackageValidationError(ValueError):
+    """All independently detectable staging violations from one validation pass."""
+
+    def __init__(self, errors: list[str] | tuple[str, ...]) -> None:
+        self.errors = tuple(dict.fromkeys(errors))
+        details = "\n".join(f"- {error}" for error in self.errors)
+        super().__init__(f"O pacote do roteirista possui {len(self.errors)} erro(s):\n{details}")
+
+
+@dataclass(frozen=True)
+class ShortsScriptStagingCheck:
+    valid: bool
+    errors: tuple[str, ...]
+    normalizations: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "valid": self.valid,
+            "errors": list(self.errors),
+            "normalizations": list(self.normalizations),
+        }
+
 
 _MIN_COMMENT_CUE_SIGNIFICANT_CHARACTERS = 6
 _WEAK_SINGLE_WORD_COMMENT_CUES = frozenset(
@@ -205,13 +233,9 @@ def prepare_shorts_script_queue(
 ) -> dict[str, Any]:
     project = layout.load_manifest()
     config = project.config.shorts_script
-    main_agent_mode = project.config.production.mode in {
-        "light_manual",
-        "light_automatic",
-        "remote_review",
-    }
-    if not config.enabled or (not config.use_specialist_subagent and not main_agent_mode):
-        raise RuntimeError("O subagente especialista de roteiro está desativado neste projeto.")
+    main_agent_mode = not config.use_specialist_subagent
+    if not config.enabled:
+        raise RuntimeError("A etapa especializada de roteiro está desativada neste projeto.")
     literal_candidates = (
         _require_literal_opening_source(layout)
         if config.require_verified_scripture or config.require_literal_verse_opening
@@ -262,8 +286,8 @@ def prepare_shorts_script_queue(
             "single_writer": True,
             "may_modify_project_state": False,
             "may_publish": False,
-            "reasoning_effort": "low" if main_agent_mode else "high",
-            "recommended_model": "gpt-5.6-terra",
+            "reasoning_effort": "medium" if main_agent_mode else "high",
+            "recommended_model": "gpt-5.6-sol" if main_agent_mode else "gpt-5.6-terra",
             "context_policy": "compact_only",
             "fork_turns": "none" if not main_agent_mode else None,
         },
@@ -273,6 +297,14 @@ def prepare_shorts_script_queue(
         },
         "schemas": {
             "package": compact_json_schema(ShortsScriptPackage.model_json_schema()),
+        },
+        "preflight": {
+            "read_only": True,
+            "command": (
+                f'uv run pipeline-videos script shorts-check-staging "{project.project_id}"'
+            ),
+            "success_condition": "valid=true",
+            "returns_all_detectable_errors": True,
         },
         "scripture_candidates": [source.source_id for source in literal_candidates],
         "verse_opening_candidates": [source.source_id for source in literal_candidates],
@@ -407,6 +439,17 @@ def prepare_shorts_script_queue(
                 "ou prometa benefício espiritual para manipular retenção."
             ),
             (
+                "Copie literalmente tension_question, bridge_statement, central_truth e "
+                "practical_response para a narration das seções apontadas pelos respectivos "
+                "section_id. O pipeline normaliza open_loop deterministicamente para repetir "
+                "tension_question; não crie uma segunda formulação concorrente."
+            ),
+            (
+                "Toda seção precisa preencher biblical_basis e claim_classification. Use somente "
+                "bases presentes nas fontes compactas e classifique texto bíblico, contexto "
+                "verificado, interpretação e elaboração criativa sem deixar listas vazias."
+            ),
+            (
                 f"Entregue entre {config.min_words} e {config.max_words} palavras, "
                 f"adequado ao limite de {project.target_duration_seconds}s."
             ),
@@ -505,6 +548,11 @@ def prepare_shorts_script_queue(
                 "permitido pelo contexto e pelos limites de interpretação."
             ),
             "Repita job_id e input_hash exatamente e grave somente o package declarado no staging.",
+            (
+                "Depois de gravar o package, execute preflight.command. Ele é read-only e retorna "
+                "todos os erros detectáveis de uma vez. Corrija o staging até receber valid=true; "
+                "não entregue o pacote apenas com uma validação informal."
+            ),
             (
                 "Não altere project.json, roteiro ativo, aprovações, manifestos ou "
                 "qualquer arquivo fora do staging."
@@ -869,6 +917,301 @@ def _validate_language_and_visuals(package: ShortsScriptPackage) -> None:
             )
 
 
+def _add_validation_error(errors: list[str], message: str) -> None:
+    if message not in errors:
+        errors.append(message)
+
+
+def _collect_narrative_spine_errors(
+    package: ShortsScriptPackage,
+    errors: list[str],
+) -> tuple[dict[str, Any], bool]:
+    strategy = package.strategy
+    spine = strategy.narrative_spine
+    sections = package.script.sections
+    section_by_id = {section.section_id: section for section in sections}
+    if spine is None:
+        _add_validation_error(errors, "O roteiro precisa preencher strategy.narrative_spine.")
+        return section_by_id, False
+
+    spine_ids = [
+        spine.verse_section_id,
+        spine.tension_section_id,
+        spine.bridge_section_id,
+        spine.meaning_section_id,
+        spine.application_section_id,
+    ]
+    structurally_valid = True
+    if len(set(spine_ids)) != len(spine_ids):
+        _add_validation_error(
+            errors,
+            "Cada movimento da espinha narrativa precisa de uma seção distinta.",
+        )
+        structurally_valid = False
+    if not set(spine_ids).issubset(section_by_id):
+        _add_validation_error(errors, "A espinha narrativa referencia section_id inexistente.")
+        structurally_valid = False
+    if len(sections) < 6 or (sections and sections[-1].section_id in spine_ids):
+        _add_validation_error(
+            errors,
+            "O Short precisa de cinco movimentos editoriais e um encerramento.",
+        )
+    application = section_by_id.get(spine.application_section_id)
+    if application is not None and application.role != "application":
+        _add_validation_error(
+            errors,
+            "A resposta prática precisa usar uma seção role=application.",
+        )
+
+    mapped_text = (
+        (spine.tension_section_id, spine.tension_question, "tension_question"),
+        (spine.bridge_section_id, spine.bridge_statement, "bridge_statement"),
+        (spine.meaning_section_id, spine.central_truth, "central_truth"),
+        (spine.application_section_id, spine.practical_response, "practical_response"),
+    )
+    for section_id, required_text, field_name in mapped_text:
+        section = section_by_id.get(section_id)
+        if section is not None and not _contains_normalized(section.narration, required_text):
+            _add_validation_error(
+                errors,
+                f"narrative_spine.{field_name} precisa aparecer na seção mapeada.",
+            )
+    if _normalized(strategy.open_loop) != _normalized(spine.tension_question):
+        _add_validation_error(
+            errors,
+            "strategy.open_loop precisa repetir a tensão central da espinha.",
+        )
+    return section_by_id, structurally_valid
+
+
+def _collect_package_validation_errors(
+    layout: ProjectLayout,
+    package: ShortsScriptPackage,
+) -> list[str]:
+    errors: list[str] = []
+    project = layout.load_manifest()
+    config = project.config.shorts_script
+    script = package.script
+    strategy = package.strategy
+    sections = script.sections
+    if not sections or sections[0].role != "opening" or sections[-1].role != "closing":
+        _add_validation_error(
+            errors, "O roteiro precisa começar com opening e terminar com closing."
+        )
+    section_ids = [section.section_id for section in sections]
+    if len(section_ids) != len(set(section_ids)):
+        _add_validation_error(errors, "O roteiro contém section_id duplicado.")
+    if any(_RAW_NUMERIC_REFERENCE_PATTERN.search(section.narration) for section in sections):
+        _add_validation_error(
+            errors,
+            "Referências bíblicas faladas não podem usar o formato numérico 'Livro X:Y'; "
+            "narre 'Livro, capítulo X, versículo Y'.",
+        )
+    words = tokenize_words(script.narration_text())
+    if not config.min_words <= len(words) <= config.max_words:
+        _add_validation_error(
+            errors,
+            f"O roteiro tem {len(words)} palavras; esperado entre "
+            f"{config.min_words} e {config.max_words}.",
+        )
+    estimated_duration = len(words) / config.estimated_narration_wpm * 60
+    if estimated_duration > project.target_duration_seconds + config.duration_tolerance_seconds:
+        _add_validation_error(
+            errors,
+            f"O roteiro estima {estimated_duration:.1f}s na voz configurada e ultrapassa o "
+            f"alvo de {project.target_duration_seconds}s.",
+        )
+    hook_words = tokenize_words(strategy.hook)
+    if len(hook_words) > config.hook_max_words:
+        _add_validation_error(errors, "O gancho ultrapassa o limite de palavras configurado.")
+    if strategy.hook_target_end_seconds > config.hook_target_seconds + 0.5:
+        _add_validation_error(errors, "O gancho termina tarde demais para a meta inicial do Short.")
+    if sections and not _normalized(sections[0].narration).startswith(_normalized(strategy.hook)):
+        _add_validation_error(errors, "strategy.hook precisa ser o prefixo exato da abertura.")
+    closing = _normalized(sections[-1].narration) if sections else ""
+    if sections and not closing.endswith(_normalized(strategy.cta)):
+        _add_validation_error(errors, "strategy.cta precisa ser o sufixo exato do encerramento.")
+    if config.require_subscribe_cta and "inscrev" not in closing:
+        _add_validation_error(errors, "O CTA final precisa convidar o espectador a se inscrever.")
+    if not strategy.reason_to_subscribe.strip():
+        _add_validation_error(errors, "O CTA precisa explicar o benefício de acompanhar o canal.")
+    if len(strategy.retention_beats) < config.minimum_retention_beats:
+        _add_validation_error(errors, "A estratégia contém poucos beats de retenção.")
+    beat_ids = [beat.section_id for beat in strategy.retention_beats]
+    if not set(beat_ids).issubset(section_ids):
+        _add_validation_error(errors, "A estratégia referencia section_id inexistente.")
+    previous_start = -1.0
+    for beat in strategy.retention_beats:
+        if beat.target_start_seconds < previous_start:
+            _add_validation_error(errors, "Os beats de retenção não estão em ordem temporal.")
+        if beat.target_end_seconds > project.target_duration_seconds:
+            _add_validation_error(errors, "Um beat ultrapassa a duração-alvo do Short.")
+        previous_start = beat.target_start_seconds
+    if not any(beat.opens_loop for beat in strategy.retention_beats):
+        _add_validation_error(errors, "A estratégia precisa abrir ao menos um loop de curiosidade.")
+    if not any(beat.resolves_loop for beat in strategy.retention_beats):
+        _add_validation_error(errors, "A estratégia precisa resolver o loop de curiosidade.")
+
+    narration = _normalized(script.narration_text())
+    if _normalized(LEGACY_SCRIPTURE_BOUNDARY_PHRASE) in narration:
+        _add_validation_error(
+            errors,
+            "O roteiro não pode narrar o rótulo 'Até aqui, o texto bíblico'.",
+        )
+    if any(_normalized(phrase) in narration for phrase in _GENERIC_AI_PHRASES):
+        _add_validation_error(
+            errors,
+            "O roteiro contém uma construção genérica ou com aparência de texto de IA.",
+        )
+    for section in sections:
+        direction = _normalized(section.visual_direction or "")
+        if any(_normalized(term) in direction for term in _MULTI_SCENE_VISUAL_TERMS):
+            _add_validation_error(
+                errors,
+                f"A direção visual de {section.section_id} pede múltiplas cenas na mesma imagem.",
+            )
+
+    sources = read_model(layout.sources, SourceLibrary)
+    section_by_id, spine_ready = _collect_narrative_spine_errors(package, errors)
+    spine = strategy.narrative_spine
+    if config.narrative_standard == "verse_first":
+        if strategy.verse_opening is None or spine is None:
+            _add_validation_error(
+                errors,
+                "O padrão verse_first exige strategy.verse_opening e strategy.narrative_spine.",
+            )
+        elif spine.pattern != "verse_first" or strategy.hook_type != "scripture_opening":
+            _add_validation_error(
+                errors,
+                "O gancho verse_first precisa usar pattern e hook_type bíblicos.",
+            )
+        if (
+            strategy.verse_opening is not None
+            and strategy.verse_opening.target_end_seconds > config.verse_opening_max_seconds
+        ):
+            _add_validation_error(
+                errors,
+                "O versículo termina tarde demais para a abertura configurada.",
+            )
+        if spine is not None and sections:
+            if spine.verse_section_id != sections[0].section_id:
+                _add_validation_error(
+                    errors,
+                    "O versículo precisa ocupar a primeira seção do padrão verse_first.",
+                )
+            verse_section = section_by_id.get(spine.verse_section_id)
+            if verse_section is not None and verse_section.role != "opening":
+                _add_validation_error(
+                    errors,
+                    "A seção do versículo precisa usar role=opening.",
+                )
+    else:
+        if strategy.verse_opening is None or spine is None:
+            _add_validation_error(
+                errors,
+                "O padrão human_hook_to_bible exige citação bíblica e espinha narrativa.",
+            )
+        elif spine.pattern != "human_hook_to_bible":
+            _add_validation_error(
+                errors,
+                "narrative_spine.pattern precisa ser human_hook_to_bible.",
+            )
+        if strategy.hook_type == "scripture_opening":
+            _add_validation_error(
+                errors,
+                "O novo padrão precisa começar com um gancho humano, não com a referência.",
+            )
+        if not 1 <= len(strategy.hook_techniques) <= 3:
+            _add_validation_error(
+                errors,
+                "O gancho precisa registrar de uma a três técnicas naturais de atenção.",
+            )
+        if spine is not None and spine_ready and sections:
+            ordered_ids = [section.section_id for section in sections]
+            expected_order = [
+                spine.tension_section_id,
+                spine.verse_section_id,
+                spine.bridge_section_id,
+                spine.meaning_section_id,
+                spine.application_section_id,
+            ]
+            positions = [ordered_ids.index(section_id) for section_id in expected_order]
+            if positions != sorted(positions):
+                _add_validation_error(
+                    errors,
+                    "A estrutura deve seguir gancho, Bíblia, contexto, sentido e aplicação.",
+                )
+            if spine.tension_section_id != sections[0].section_id:
+                _add_validation_error(
+                    errors,
+                    "A primeira seção precisa ser o gancho humano do Short.",
+                )
+            if ordered_ids.index(spine.verse_section_id) != 1:
+                _add_validation_error(
+                    errors,
+                    "A citação bíblica precisa entrar imediatamente depois do gancho.",
+                )
+            verse_section = section_by_id.get(spine.verse_section_id)
+            if verse_section is not None and verse_section.role != "biblical_narrative":
+                _add_validation_error(
+                    errors,
+                    "A citação após o gancho precisa usar role=biblical_narrative.",
+                )
+
+    if spine is not None and spine_ready and strategy.verse_opening is not None:
+        try:
+            required_source_ids = _validate_scripture_contract(
+                layout,
+                package,
+                sources,
+                section_by_id,
+            )
+        except ValueError as exc:
+            _add_validation_error(errors, str(exc))
+        else:
+            try:
+                _validate_bridge_sources(package, sources, required_source_ids)
+            except ValueError as exc:
+                _add_validation_error(errors, str(exc))
+
+    try:
+        _validate_engagement_contract(layout, package)
+    except ValueError as exc:
+        _add_validation_error(errors, str(exc))
+
+    valid_source_ids = {entry.source_id for entry in sources.entries}
+    referenced_sources = set(script.source_ids) | set(strategy.source_ids)
+    if not referenced_sources.issubset(valid_source_ids):
+        _add_validation_error(errors, "O roteiro ou a estratégia referencia source_id inexistente.")
+    if set(strategy.section_ids) != set(section_ids):
+        _add_validation_error(
+            errors, "strategy.section_ids precisa mapear todas as seções do roteiro."
+        )
+    for section in sections:
+        if not section.biblical_basis:
+            _add_validation_error(
+                errors,
+                f"A seção {section.section_id} não registra base bíblica.",
+            )
+        if not section.claim_classification:
+            _add_validation_error(
+                errors,
+                f"A seção {section.section_id} não classifica suas afirmações.",
+            )
+    review = package.biblical_review
+    if review.script_version != script.version:
+        _add_validation_error(
+            errors,
+            "A revisão bíblica do pacote não corresponde ao roteiro entregue.",
+        )
+    if review.has_open_blockers:
+        _add_validation_error(
+            errors,
+            "A revisão bíblica do pacote ainda possui bloqueios abertos.",
+        )
+    return errors
+
+
 def _validate_package(
     layout: ProjectLayout,
     package: ShortsScriptPackage,
@@ -876,91 +1219,12 @@ def _validate_package(
 ) -> None:
     if package.job_id != queue.get("job_id") or package.input_hash != queue.get("input_hash"):
         raise RuntimeError("O pacote do roteirista pertence a uma fila antiga.")
-    project = layout.load_manifest()
-    config = project.config.shorts_script
-    script = package.script
-    strategy = package.strategy
-    sections = script.sections
-    if not sections or sections[0].role != "opening" or sections[-1].role != "closing":
-        raise ValueError("O roteiro precisa começar com opening e terminar com closing.")
-    section_ids = [section.section_id for section in sections]
-    if len(section_ids) != len(set(section_ids)):
-        raise ValueError("O roteiro contém section_id duplicado.")
-    if any(_RAW_NUMERIC_REFERENCE_PATTERN.search(section.narration) for section in sections):
-        raise ValueError(
-            "Referências bíblicas faladas não podem usar o formato numérico 'Livro X:Y'; "
-            "narre 'Livro, capítulo X, versículo Y'."
-        )
-    words = tokenize_words(script.narration_text())
-    if not config.min_words <= len(words) <= config.max_words:
-        raise ValueError(
-            f"O roteiro tem {len(words)} palavras; esperado entre "
-            f"{config.min_words} e {config.max_words}."
-        )
-    estimated_duration = len(words) / config.estimated_narration_wpm * 60
-    if estimated_duration > project.target_duration_seconds + config.duration_tolerance_seconds:
-        raise ValueError(
-            f"O roteiro estima {estimated_duration:.1f}s na voz configurada e ultrapassa o "
-            f"alvo de {project.target_duration_seconds}s."
-        )
-    hook_words = tokenize_words(strategy.hook)
-    if len(hook_words) > config.hook_max_words:
-        raise ValueError("O gancho ultrapassa o limite de palavras configurado.")
-    if strategy.hook_target_end_seconds > config.hook_target_seconds + 0.5:
-        raise ValueError("O gancho termina tarde demais para a meta inicial do Short.")
-    if not _normalized(sections[0].narration).startswith(_normalized(strategy.hook)):
-        raise ValueError("strategy.hook precisa ser o prefixo exato da abertura.")
-    closing = _normalized(sections[-1].narration)
-    if not closing.endswith(_normalized(strategy.cta)):
-        raise ValueError("strategy.cta precisa ser o sufixo exato do encerramento.")
-    if config.require_subscribe_cta and "inscrev" not in closing:
-        raise ValueError("O CTA final precisa convidar o espectador a se inscrever.")
-    if not strategy.reason_to_subscribe.strip():
-        raise ValueError("O CTA precisa explicar o benefício de acompanhar o canal.")
-    if len(strategy.retention_beats) < config.minimum_retention_beats:
-        raise ValueError("A estratégia contém poucos beats de retenção.")
-    beat_ids = [beat.section_id for beat in strategy.retention_beats]
-    if not set(beat_ids).issubset(section_ids):
-        raise ValueError("A estratégia referencia section_id inexistente.")
-    previous_start = -1.0
-    for beat in strategy.retention_beats:
-        if beat.target_start_seconds < previous_start:
-            raise ValueError("Os beats de retenção não estão em ordem temporal.")
-        if beat.target_end_seconds > project.target_duration_seconds:
-            raise ValueError("Um beat ultrapassa a duração-alvo do Short.")
-        previous_start = beat.target_start_seconds
-    if not any(beat.opens_loop for beat in strategy.retention_beats):
-        raise ValueError("A estratégia precisa abrir ao menos um loop de curiosidade.")
-    if not any(beat.resolves_loop for beat in strategy.retention_beats):
-        raise ValueError("A estratégia precisa resolver o loop de curiosidade.")
-    _validate_language_and_visuals(package)
-    sources = read_model(layout.sources, SourceLibrary)
-    if config.narrative_standard == "verse_first":
-        _validate_verse_first_standard(layout, package, sources)
-    else:
-        _validate_human_hook_standard(layout, package, sources)
-    _validate_engagement_contract(layout, package)
-    valid_source_ids = {entry.source_id for entry in sources.entries}
-    referenced_sources = set(script.source_ids) | set(strategy.source_ids)
-    if not referenced_sources.issubset(valid_source_ids):
-        raise ValueError("O roteiro ou a estratégia referencia source_id inexistente.")
-    if set(strategy.section_ids) != set(section_ids):
-        raise ValueError("strategy.section_ids precisa mapear todas as seções do roteiro.")
-    for section in sections:
-        if not section.biblical_basis:
-            raise ValueError(f"A seção {section.section_id} não registra base bíblica.")
-        if not section.claim_classification:
-            raise ValueError(f"A seção {section.section_id} não classifica suas afirmações.")
-    review = package.biblical_review
-    if review.script_version != script.version:
-        raise ValueError("A revisão bíblica do pacote não corresponde ao roteiro entregue.")
-    if review.has_open_blockers:
-        raise ValueError("A revisão bíblica do pacote ainda possui bloqueios abertos.")
+    errors = _collect_package_validation_errors(layout, package)
+    if errors:
+        raise ShortsScriptPackageValidationError(errors)
 
 
-def validate_shorts_script_package_staging(
-    layout: ProjectLayout,
-) -> tuple[dict[str, Any], ShortsScriptPackage]:
+def _load_shorts_script_queue(layout: ProjectLayout) -> dict[str, Any]:
     if not layout.shorts_script_queue.is_file():
         raise FileNotFoundError(f"Fila do roteirista ausente: {layout.shorts_script_queue}")
     queue = read_json(layout.shorts_script_queue)
@@ -971,10 +1235,72 @@ def validate_shorts_script_package_staging(
     baseline = queue.get("baseline_script_hash")
     if baseline != _baseline_hash(layout):
         raise RuntimeError("O roteiro ativo mudou depois que a fila do especialista foi criada.")
+    return queue
+
+
+def _normalize_staging_package_payload(payload: Any) -> tuple[Any, tuple[str, ...]]:
+    normalized = deepcopy(payload)
+    normalizations: list[str] = []
+    if not isinstance(normalized, dict):
+        return normalized, ()
+    strategy = normalized.get("strategy")
+    if not isinstance(strategy, dict):
+        return normalized, ()
+    spine = strategy.get("narrative_spine")
+    if not isinstance(spine, dict):
+        return normalized, ()
+    tension_question = spine.get("tension_question")
+    if not isinstance(tension_question, str) or not tension_question.strip():
+        return normalized, ()
+    open_loop = strategy.get("open_loop")
+    if not isinstance(open_loop, str) or _normalized(open_loop) != _normalized(tension_question):
+        strategy["open_loop"] = tension_question
+        normalizations.append(
+            "strategy.open_loop sincronizado com narrative_spine.tension_question."
+        )
+    return normalized, tuple(normalizations)
+
+
+def _load_normalized_staging_package(
+    layout: ProjectLayout,
+    queue: dict[str, Any],
+) -> tuple[ShortsScriptPackage, tuple[str, ...]]:
     package_path = _safe_staging_file(layout, queue["outputs"]["package"])
-    package = read_model(package_path, ShortsScriptPackage)
+    payload, normalizations = _normalize_staging_package_payload(read_json(package_path))
+    package = ShortsScriptPackage.model_validate(payload)
     _validate_package(layout, package, queue)
+    return package, normalizations
+
+
+def validate_shorts_script_package_staging(
+    layout: ProjectLayout,
+) -> tuple[dict[str, Any], ShortsScriptPackage]:
+    queue = _load_shorts_script_queue(layout)
+    package, _ = _load_normalized_staging_package(layout, queue)
     return queue, package
+
+
+def check_shorts_script_package_staging(layout: ProjectLayout) -> ShortsScriptStagingCheck:
+    """Validate the staging package without writing project or staging state."""
+
+    normalizations: tuple[str, ...] = ()
+    try:
+        queue = _load_shorts_script_queue(layout)
+        package_path = _safe_staging_file(layout, queue["outputs"]["package"])
+        payload, normalizations = _normalize_staging_package_payload(read_json(package_path))
+        package = ShortsScriptPackage.model_validate(payload)
+        _validate_package(layout, package, queue)
+    except ShortsScriptPackageValidationError as exc:
+        return ShortsScriptStagingCheck(False, exc.errors, normalizations)
+    except ValidationError as exc:
+        errors = tuple(
+            f"{'.'.join(str(item) for item in error['loc'])}: {error['msg']}"
+            for error in exc.errors()
+        )
+        return ShortsScriptStagingCheck(False, errors, normalizations)
+    except (FileNotFoundError, KeyError, RuntimeError, TypeError, ValueError) as exc:
+        return ShortsScriptStagingCheck(False, (str(exc),), normalizations)
+    return ShortsScriptStagingCheck(True, (), normalizations)
 
 
 def import_shorts_script_package(

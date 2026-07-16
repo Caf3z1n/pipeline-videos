@@ -3,14 +3,18 @@ description = "Produz pacote compacto de crescimento sem alterar estado ou publi
 model_reasoning_effort = "medium"
 nickname_candidates = ["Índice", "Busca", "CTR"]
 developer_instructions = """
-Leia somente youtube/growth-queue.json e o compact_context apontado por ela.
+Leia somente youtube/growth-queue.json, o compact_context e o
+thumbnail_visual_reference_path apontados por ela.
 Não leia o histórico da conversa, project.json, scenes/manifest.json ou images/manifest.json.
 Escreva somente os arquivos declarados em youtube/staging/youtube-growth-specialist/.
 Quando thumbnail_source_mode for generated_integrated_art, use uma chamada de imagegen por candidata
 e escreva o bitmap final no staging declarado. Incorpore texto, destaque vermelho e seta/X/sublinhado/
 pincel na própria geração, com grafia exata e integração de luz, profundidade e composição. Nunca
-entregue uma arte limpa para receber texto local nesse modo. Quando o modo legado for
-selected_scene_images, escolha source_scene_id e entregue os designs pareados sem chamar imagegen.
+entregue uma arte limpa para receber texto local. Nenhum outro thumbnail_source_mode é aceito.
+Quando thumbnail_reference_mode for opening_scene_edit_v1, edite exatamente a imagem declarada em
+thumbnail_visual_reference_path, passando esse arquivo em referenced_image_paths na chamada de
+imagegen. Depois da primeira saída válida, aceite-a sem repetir por qualidade, deriva visual ou texto
+imperfeito; repita somente se não houver saída por moderation_blocked.
 Siga exatamente os padrões title_standard, description_standard e thumbnail_standard da fila.
 No padrão novo, inicie títulos por "Passagem | Tema", use conflito concreto na capa, destaque
 vermelho e seta, X, sublinhado ou pincel com alvo narrativo real.

@@ -1,143 +1,94 @@
-# Produção otimizada e autopilot
+# Produção otimizada
 
-Este documento é carregado somente quando a tarefa realmente envolve criar, retomar ou renderizar
-um vídeo. O objetivo é manter o contexto dos agentes pequeno sem reduzir os contratos editoriais,
-bíblicos ou técnicos.
+## Perfil atual
 
-## Padrão para projetos novos
+Todos os projetos novos usam `draft_one_shot` e `token_optimized_v1`. A prévia permanece em
+resolução completa com CRF 16, preset `fast` e supersampling 2. O render final aprovado usa CRF 12,
+preset `slow` e supersampling 3.
 
-Projetos reais novos usam `token_optimized_v1`:
-
-- roteiro e revisão bíblica continuam com raciocínio alto;
-- `script/creative-contract.json` deriva deterministicamente uma única decisão de promessa, gancho,
-  payoff, funções narrativas e ritmo para todas as etapas seguintes;
-- trabalhadores de imagem usam contexto compacto, `fork_turns=none` e raciocínio baixo;
-- o especialista do YouTube lê apenas `youtube/growth-context.json`;
-- a prévia usa 1080p, CRF 16, preset `fast` e supersampling 2;
-- o render final aprovado preserva V4, CRF 12, preset `slow` e supersampling 3;
-- todos os formatos usam três thumbnails finais com texto e símbolos incorporados pelo imagegen;
-  `remote_review` é a exceção aditiva e usa exatamente uma;
-- scripts locais executam áudio, música, legendas, imports, render e validação.
-- a locução usa somente português, com citações literais verificadas em média uma vez por minuto;
-- a resposta pedida nos comentários fica entre aspas, isolada na legenda e seguida por um segundo
-  de silêncio;
-- títulos usam `Passagem | Tema`, a descrição recebe timeline bíblica e as legendas ficam no centro.
-
-Projetos existentes sem esse perfil continuam em `legacy_v4` e não são migrados implicitamente.
+Não existem perfis legados, modos Light, produção guiada ou fallback de imagens manuais. Áudio
+manual continua disponível porque muda somente a origem da locução e preserva o pipeline atual.
 
 ## Comando principal
 
-Depois que briefing, fontes, roteiro e revisão estiverem válidos:
+Depois de briefing, fontes, roteiro e revisão válidos:
 
 ```powershell
 uv run pipeline-videos autopilot <projeto> --allow-external
-```
-
-O primeiro passe prepara filas e executa imediatamente a lane local. Quando houver saídas externas,
-ele grava o resumo pequeno em `logs/autopilot-state.json`.
-
-Inicie os workers declarados e use:
-
-```powershell
 uv run pipeline-videos autopilot <projeto> --allow-external --wait-external
 ```
 
-O processo aguarda staging, importa cada lote uma única vez, compõe capas, renderiza a prévia e
-valida o projeto. Uma falha pode ser retomada com o mesmo comando; hashes e stagings válidos evitam
-repetir artefatos. Bloqueios de moderação de saída admitem no máximo três tentativas por item:
-original, repetição idêntica e alternativa visual com continuidade rígida.
+`run --dry-run` mostra o plano sem mutação. O autopilot prepara filas, executa áudio, legendas e
+música, aguarda os ativos criativos, importa cada lote uma vez, renderiza e valida. Hashes e staging
+válido tornam a retomada idempotente.
 
-O join de imagens valida todo o staging primeiro e grava manifesto, cenas e fila uma única vez por
-lote, com a fila por último. Ele não chama o importador individual em loop; se houver interrupção
-entre essas gravações, o mesmo lote reaproveita os hashes e conclui o estado no retry.
+## Produção local
 
-## Workers de imagem
+No cenário local, o roteiro de Short usa exatamente um `shorts_script_specialist` com raciocínio
+alto. Imagens podem usar até dois workers com `fork_turns=none`; cada worker recebe somente seu job
+compacto e escreve no staging declarado. O especialista de crescimento usa raciocínio médio,
+recebe a imagem ativa da abertura e gera exatamente um par título+thumbnail integrado.
 
-Quando `images/codex-queue.json` estiver pendente:
+O agente principal é o único escritor de `project.json`, filas, manifestos, decisões e eventos. Ele
+valida e importa roteiro, lote de imagens e crescimento de forma serializada.
 
-1. Use no máximo dois `image_worker` quando a vaga de crescimento estiver reservada.
-2. Crie cada worker sem histórico herdado (`fork_turns=none`).
-3. Entregue somente `images/jobs/image-worker-N.json`.
-4. O worker não deve ler o chat, `AGENTS.md`, `project.json` ou manifestos completos.
-5. Faça uma chamada `imagegen` por tentativa, preservando o prompt integral na primeira chamada.
-   Em `moderation_blocked`, repita exatamente o mesmo prompt uma vez. Se a repetição bloquear,
-   permita uma única alternativa de ação/enquadramento, mantendo identidade e idade aparente do
-   personagem, rosto, cabelo, figurino, proporções, silhueta, estilo, paleta, ambiente e sentido.
-6. Salve exclusivamente no `staging_path` e nunca importe ou aprove ativos.
-7. Processe o lote em uma única execução retomável sempre que a ferramenta permitir.
+## Produção remota
 
-Cada imagem continua sendo uma composição única, sem colagem, storyboard, díptico, tríptico, tela
-dividida, cenas empilhadas, divisor ou faixa branca para legenda. O padrão visual continua
-`cinematic-family-3d-v1`.
+Na VPS, o fluxo e os contratos são os mesmos. A única diferença é a orquestração criativa:
 
-## Especialista do YouTube
+- uma sessão persistente do agente principal por job;
+- modelo `gpt-5.6-sol`;
+- raciocínio `medium`;
+- nenhum subagente;
+- imagens processadas sequencialmente;
+- exatamente um título e uma thumbnail.
 
-Crie exatamente um `youtube_growth_specialist` quando a fila estiver pendente. Use contexto vazio e
-entregue somente `youtube/growth-queue.json`; a própria fila aponta para o contexto compacto.
+O executor inicia a sessão uma vez e usa `codex exec resume` nos checkpoints seguintes. Áudio,
+música, legendas, imports, render, validação e publicação continuam determinísticos no Python. Veja
+[Produção remota](remote-production.md).
 
-- completo: raciocínio médio;
-- Light: raciocínio baixo;
-- nunca publica, aprova ou altera estado compartilhado;
-- escreve somente em `youtube/staging/youtube-growth-specialist/`;
-- em projetos novos de qualquer formato, chama `imagegen` uma vez por candidata e salva a
-  thumbnail final já com texto e símbolo incorporados no staging declarado;
-- entrega três títulos e três designs pareados para A/B test;
-- trata cada índice como um par editorial: título para referência/tema/busca e capa para
-  tensão/decisão/contraste, sem repetir a mesma promessa nos dois textos;
-- usa conflito concreto, palavra de destaque vermelha e elemento narrativo com alvo real;
-- confirma grafia e acentos e rejeita texto flutuante ou sobreposto aos personagens;
-- segue somente orientações oficiais e nunca promete alcance ou viralização.
-- copia literalmente `content_promise` e `opening_hook` do contrato criativo; divergência bloqueia o
-  import antes de promover metadados.
+## Roteiro de Shorts
 
-Em `remote_review`, não crie o subagente: o agente principal lê a mesma fila compacta, escreve o
-staging declarado e importa uma única vez. A fila exige um título e um design integrados. O contrato
-de complementaridade, palavra vermelha e elemento narrativo com alvo real permanece integral.
+Prepare `script/shorts-queue.json`. O escritor autorizado produz
+`script/staging/shorts-script-specialist/package.json` e executa o comando `preflight.command`
+declarado na fila. O preflight é somente leitura e agrega todos os erros detectáveis. Normalizações
+seguras são aplicadas deterministicamente; uma falha restante permite uma única correção antes de
+encerrar.
 
-## Shorts
+O contrato editorial completo está em [Padrão de roteiro de Shorts](shorts-script-standard.md).
 
-O padrão editorial completo permanece em `docs/shorts-script-standard.md`. No modo completo, use
-exatamente um `shorts_script_specialist`; em modos Light, o agente principal produz o pacote com
-raciocínio baixo. Todos os modos mantêm revisão bíblica, validações, ElevenLabs com
-`--allow-external` e aprovação humana pendente.
+## Imagens
 
-No modo manual, pare para o envio das imagens e importe com `images import-manual`. No automático,
-use os jobs compactos e o `autopilot`.
+`images/codex-queue.json` contém uma imagem por item. A primeira tentativa usa o prompt integral.
+Em `moderation_blocked`, repita o mesmo prompt uma vez; somente após o segundo bloqueio use uma
+alternativa de ação ou enquadramento, preservando identidade, idade aparente, rosto, cabelo,
+figurino, proporções, estilo, paleta, ambiente e sentido narrativo.
 
-Quando `audio.provider=local_manual`, a lane local prepara `audio/manual-queue.json`, mostra ao
-usuário o conteúdo integral de `script/narration.txt` e pausa em `manual_audio`. Após o anexo, o
-agente principal executa `audio import-manual` uma vez. O importador normaliza o arquivo, chama o
-WhisperX CPU em ambiente `uv` isolado, divide os tempos por cena e conclui a etapa de áudio. Esse
-modo não usa ElevenLabs, não recebe `--allow-external` e nunca aceita alinhamento proporcional como
-substituto silencioso.
+Cada ativo é salvo no `staging_path`; `images import-batch` importa o lote uma vez. Nunca regenere
+item já importado ou aprovado.
 
-## Escritor único e concorrência
+## Crescimento e thumbnail
 
-- Subagentes escrevem somente em seus caminhos de staging.
-- O agente principal é o único escritor de `project.json`, filas, manifestos, decisões e eventos.
-- A lane local é serializada em `audio -> captions -> music`; no áudio manual, ela aguarda o anexo
-  antes de prosseguir.
-- Imports e montagem final são serializados.
-- O render usa no máximo dois segmentos FFmpeg independentes em paralelo.
-- Projetos diferentes podem rodar em paralelo; o mesmo projeto mantém um escritor único.
+A fila exige exatamente um par complementar. O título concentra passagem, tema e busca; a capa
+acrescenta tensão, decisão, contraste ou consequência. A thumbnail edita a imagem ativa da abertura
+e nasce no Imagegen com texto, palavra vermelha e seta, X, sublinhado ou pincel incorporados.
 
-## Limite da automação
+O importador aceita somente `generated_integrated_art`. Não existe compositor local, overlay de
+texto, reutilização de outra cena ou fallback para pacote antigo. Uma saída válida é aceita; retries
+adicionais existem apenas para `moderation_blocked` sem bitmap.
 
-O processo local não possui endpoint para chamar a geração de imagens embutida na assinatura do
-Codex. Por isso o `autopilot` automatiza todo o trabalho determinístico, mas ainda depende de workers
-para `imagegen`. Não trocar por API paga, browser ou pay-as-you-go sem aprovação explícita.
+## Áudio manual
 
-Na VPS, o executor abre um `codex exec --ephemeral` por fase: seleção editorial quando necessária,
-roteiro, uma execução por imagem e uma execução de crescimento. Cada fase recebe um JSON compacto
-em diretório fora do release Git; não relê README, AGENTS, histórico do job ou manifestos completos.
-Se o `imagegen` concluir mas o wrapper não expuser um caminho copiável, o executor recupera somente
-o PNG da sessão efêmera corrente em `.codex/generated_images/<thread_id>`, valida a assinatura do
-arquivo e o materializa no `staging_path` esperado. Ele não consulta sessões anteriores nem
-substitui um staging já existente.
-Apps, memories, goals, multi-agent e busca web ficam desativados nessa execução. Áudio, música,
-legendas, imports, render e validação são executados diretamente pelo Python.
+Quando `audio.provider=local_manual`, o pipeline prepara `audio/manual-queue.json`, apresenta
+`script/narration.txt` integralmente e aguarda um arquivo de voz limpo. `audio import-manual`
+normaliza o áudio e usa WhisperX em CPU. Não usa ElevenLabs, `--allow-external` ou alinhamento
+proporcional silencioso.
 
-Hooks de `PostToolUse`, `PreCompact` e `Stop` medem somente evento e tamanho, sem escrever em
-`stdout` e sem injetar contexto. O serviço local continua responsável por lock, retomada, validação,
-upload privado e eventual agendamento; isso não cria uma API paga de imagens e não autoriza
-publicação fora do pedido persistido. Veja `docs/remote-agent-contract.md`.
+## Concorrência e segurança
+
+- um único escritor por projeto;
+- imports e montagem final serializados;
+- projetos diferentes podem rodar em paralelo;
+- subagentes locais escrevem somente em staging;
+- o agente remoto não cria subagentes;
+- nunca publicar, agendar, aprovar ou alterar faturamento sem autorização persistida.

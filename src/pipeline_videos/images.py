@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont, ImageStat
 
@@ -31,11 +31,10 @@ from pipeline_videos.state import (
     start_stage,
     wait_stage,
 )
-from pipeline_videos.storage import ProjectLayout, read_json, read_model, write_json, write_text
+from pipeline_videos.storage import ProjectLayout, read_json, read_model, write_json
 from pipeline_videos.utils import relative_posix, sha256_file, sha256_value, utc_now
 
 CODEX_QUEUE_SCHEMA_VERSION = "1.6"
-MANUAL_PROMPTS_SCHEMA_VERSION = "1.1"
 
 
 def _scene_prompt_payload(scenes: SceneManifest) -> dict[str, Any]:
@@ -346,115 +345,13 @@ def _write_worker_job_files(layout: ProjectLayout, queue: dict[str, Any]) -> lis
     return artifacts
 
 
-def _manual_prompt_bundle(
-    layout: ProjectLayout,
-    queue: dict[str, Any],
-) -> dict[str, Any]:
-    project = layout.load_manifest()
-    items = list(queue.get("items", []))
-    batch_size = project.config.production.manual_image_batch_size
-    total_images = len(items)
-    chunks = [items[index : index + batch_size] for index in range(0, total_images, batch_size)]
-    parts: list[dict[str, Any]] = []
-    total_parts = len(chunks)
-    for part_index, chunk in enumerate(chunks, start=1):
-        lines = [
-            f"PARTE {part_index} DE {total_parts} — imagens do Short {project.project_id}",
-            "",
-            f"Gere exatamente {len(chunk)} imagens VERTICAIS 9:16 separadas, apresentadas em "
-            "carrossel e na ordem abaixo.",
-            "Não produza grade, colagem, contact sheet ou uma única imagem com vários quadros.",
-            (
-                "Dentro de cada imagem, mostre uma única composição contínua, um único momento, "
-                "um único ambiente e uma ação principal; não use painéis, cenas empilhadas, "
-                "divisórias ou faixa branca para reservar a legenda."
-            ),
-            "Não escreva número, legenda, título, logotipo ou marca-d'água dentro das imagens.",
-            "Cada bloco abaixo é autocontido: preserve integralmente estilo, paleta, personagens, "
-            "continuidade, composição e restrições declaradas em cada imagem.",
-        ]
-        if part_index > 1:
-            lines.extend(
-                [
-                    "Use a última imagem da parte anterior como referência adicional de "
-                    "continuidade visual, sem copiá-la como uma nova cena.",
-                    "Mantenha a numeração global indicada; não reinicie a sequência nesta parte.",
-                ]
-            )
-        for entry in chunk:
-            order = int(entry["order"])
-            lines.extend(
-                [
-                    "",
-                    f"IMAGEM {order:02d} DE {total_images:02d} — {entry['scene_id']}",
-                    "Entregue esta cena como uma imagem individual e separada no carrossel.",
-                    str(entry["prompt"]).strip(),
-                ]
-            )
-        lines.extend(
-            [
-                "",
-                "Antes de finalizar, confirme silenciosamente que a quantidade, a ordem e a "
-                "proporção 9:16 estão corretas. Exiba somente as imagens separadas.",
-            ]
-        )
-        parts.append(
-            {
-                "part": part_index,
-                "total_parts": total_parts,
-                "first_image": int(chunk[0]["order"]),
-                "last_image": int(chunk[-1]["order"]),
-                "image_count": len(chunk),
-                "scene_ids": [str(entry["scene_id"]) for entry in chunk],
-                "prompt": "\n".join(lines),
-            }
-        )
-    return {
-        "schema_version": MANUAL_PROMPTS_SCHEMA_VERSION,
-        "generated_at": utc_now(),
-        "project_id": project.project_id,
-        "batch_id": queue["batch_id"],
-        "status": StageStatus.WAITING_EXTERNAL.value if items else StageStatus.COMPLETED.value,
-        "provider": "chatgpt-web-manual",
-        "total_images": total_images,
-        "max_images_per_part": batch_size,
-        "upload_order": [str(entry["scene_id"]) for entry in items],
-        "parts": parts,
-    }
-
-
-def _write_manual_prompt_bundle(layout: ProjectLayout, queue: dict[str, Any]) -> dict[str, Any]:
-    bundle = _manual_prompt_bundle(layout, queue)
-    write_json(layout.manual_image_prompts, bundle)
-    sections = [
-        f"# Prompts manuais — {bundle['project_id']}",
-        "",
-        f"Total: {bundle['total_images']} imagens em {len(bundle['parts'])} parte(s).",
-        "Baixe as imagens separadamente e envie-as ao Codex na ordem global indicada.",
-    ]
-    for part in bundle["parts"]:
-        sections.extend(
-            [
-                "",
-                f"## Parte {part['part']} de {part['total_parts']}",
-                "",
-                "```text",
-                str(part["prompt"]),
-                "```",
-            ]
-        )
-    write_text(layout.manual_image_prompts_markdown, "\n".join(sections))
-    return bundle
-
-
 def build_codex_queue(
     layout: ProjectLayout,
     *,
     scene_id: str | None = None,
     force: bool = False,
-    delivery: Literal["codex", "manual"] = "codex",
 ) -> dict[str, Any]:
-    """Create a resumable image hand-off for Codex or a manual ChatGPT Web carousel."""
+    """Create the resumable image hand-off for the built-in Codex image generator."""
     project = layout.load_manifest()
     style = _resolved_style(layout)
     scenes = read_model(layout.scenes, SceneManifest)
@@ -470,7 +367,6 @@ def build_codex_queue(
     selected = _selected_ids(scenes, scene_id)
     extension = project.config.images.extension
     production = project.config.production
-    is_manual = delivery == "manual"
     queue_items: list[dict[str, Any]] = []
     pending_items = [
         item
@@ -486,7 +382,11 @@ def build_codex_queue(
         min(production.image_workers, 2) if growth_worker_reserved else production.image_workers
     )
     worker_count = (
-        0 if is_manual else min(image_worker_limit, len(pending_items)) if pending_items else 0
+        min(image_worker_limit, len(pending_items))
+        if pending_items and production.use_subagents
+        else 1
+        if pending_items
+        else 0
     )
     for index, item in enumerate(pending_items):
         version, destination = _next_version(layout, item, extension)
@@ -500,11 +400,15 @@ def build_codex_queue(
             "prompt_hash": item.prompt_hash,
             "expected_path": relative_posix(destination, layout.root),
             "staging_path": relative_posix(staging, layout.root),
-            "worker_id": f"image-worker-{(index % worker_count) + 1}" if worker_count else None,
+            "worker_id": (
+                f"image-worker-{(index % worker_count) + 1}"
+                if production.use_subagents and worker_count
+                else "main"
+                if worker_count
+                else None
+            ),
             "status": StageStatus.WAITING_EXTERNAL.value,
         }
-        if is_manual:
-            queue_entry["order"] = index + 1
         queue_items.append(queue_entry)
 
     generated_at = utc_now()
@@ -525,7 +429,7 @@ def build_codex_queue(
         "project_id": project.project_id,
         "batch_id": batch_id,
         "source_manifest_hash": source_manifest_hash,
-        "provider": "chatgpt-web-manual" if is_manual else "codex-built-in-imagegen",
+        "provider": "codex-built-in-imagegen",
         "visual_standard": {
             "id": style.visual_standard_id,
             "style_profile": relative_posix(layout.style_profile, layout.root),
@@ -534,63 +438,50 @@ def build_codex_queue(
         },
         "generation_retry_policy": imagegen_retry_policy(),
         "orchestration": {
-            "mode": (
-                "manual_upload"
-                if is_manual
-                else "subagents"
-                if production.use_subagents
-                else "single_agent"
-            ),
+            "mode": "subagents" if production.use_subagents else "single_agent",
             "worker_count": worker_count,
             "single_writer": True,
-            "reasoning_effort": "low",
-            "recommended_model": "gpt-5.6-terra",
+            "reasoning_effort": "low" if production.use_subagents else "medium",
+            "recommended_model": ("gpt-5.6-terra" if production.use_subagents else "gpt-5.6-sol"),
             "context_policy": production.worker_context_policy,
             "fork_turns": "none" if production.worker_context_policy == "compact_only" else "all",
             "growth_worker_reserved": growth_worker_reserved,
-            "worker_job_files": _worker_job_paths(layout, queue_items),
+            "worker_job_files": (
+                _worker_job_paths(layout, queue_items) if production.use_subagents else []
+            ),
         },
         "status": (
             StageStatus.WAITING_EXTERNAL.value if queue_items else StageStatus.COMPLETED.value
         ),
-        "instructions": (
-            [
-                "Usar images/manual-prompts.md no ChatGPT Web e gerar todas as imagens separadas.",
-                (
-                    "Se houver mais de 10 imagens, executar as partes na ordem sem reiniciar "
-                    "a numeração."
-                ),
-                "Baixar os arquivos individuais e enviá-los ao Codex na ordem global declarada.",
-                "O agente principal importa os anexos em ordem com images import-manual.",
-                "Não aprovar imagens nem modificar JSONs em nome do usuário.",
-            ]
-            if is_manual
-            else [
-                "Dividir os itens por worker_id e gerar os grupos em paralelo.",
-                "Quando growth_worker_reserved for true, manter uma vaga para "
-                "youtube_growth_specialist.",
-                "Gerar uma imagem por item com a ferramenta imagegen embutida do Codex.",
-                *imagegen_retry_instructions(asset_label="item de imagem"),
-                (
-                    "Preservar o visual_standard em todas as cenas: animação 3D cinematográfica "
-                    "familiar premium, personagens expressivos, formas arredondadas, materiais "
-                    "estilizados e iluminação de longa-metragem."
-                ),
-                (
-                    "Cada arquivo deve mostrar uma única composição contínua, um único momento, "
-                    "um único ambiente e uma ação principal. Não gerar colagem, storyboard, "
-                    "díptico, tríptico, tela dividida, cenas empilhadas, faixa branca ou divisor."
-                ),
-                (
-                    "Não reinterpretar o padrão como fotorrealismo, live action, ilustração 2D "
-                    "flat, anime, low-poly, boneco de plástico ou render 3D genérico. Não copiar "
-                    "personagens ou elementos de filmes existentes."
-                ),
-                "Cada trabalhador salva somente no staging_path relativo à raiz do projeto.",
-                "Trabalhadores não importam, não aprovam e não modificam JSONs compartilhados.",
-                "O agente principal executa images import-batch após todos terminarem.",
-            ]
-        ),
+        "instructions": [
+            (
+                "Dividir os itens por worker_id e gerar os grupos em paralelo."
+                if production.use_subagents
+                else "Gerar os itens sequencialmente no agente principal persistente."
+            ),
+            "Quando growth_worker_reserved for true, manter uma vaga para "
+            "youtube_growth_specialist.",
+            "Gerar uma imagem por item com a ferramenta imagegen embutida do Codex.",
+            *imagegen_retry_instructions(asset_label="item de imagem"),
+            (
+                "Preservar o visual_standard em todas as cenas: animação 3D cinematográfica "
+                "familiar premium, personagens expressivos, formas arredondadas, materiais "
+                "estilizados e iluminação de longa-metragem."
+            ),
+            (
+                "Cada arquivo deve mostrar uma única composição contínua, um único momento, "
+                "um único ambiente e uma ação principal. Não gerar colagem, storyboard, "
+                "díptico, tríptico, tela dividida, cenas empilhadas, faixa branca ou divisor."
+            ),
+            (
+                "Não reinterpretar o padrão como fotorrealismo, live action, ilustração 2D "
+                "flat, anime, low-poly, boneco de plástico ou render 3D genérico. Não copiar "
+                "personagens ou elementos de filmes existentes."
+            ),
+            "Cada trabalhador salva somente no staging_path relativo à raiz do projeto.",
+            "Trabalhadores não importam, não aprovam e não modificam JSONs compartilhados.",
+            "O agente principal executa images import-batch após todos terminarem.",
+        ],
         "items": queue_items,
     }
     input_hash = sha256_value(_queue_core(payload))
@@ -606,16 +497,10 @@ def build_codex_queue(
                     StageStatus.WAITING_EXTERNAL if queue_items else StageStatus.COMPLETED
                 )
                 if record.status == expected_status and record.input_hash == input_hash:
-                    if is_manual and (
-                        not layout.manual_image_prompts.is_file()
-                        or not layout.manual_image_prompts_markdown.is_file()
-                    ):
-                        _write_manual_prompt_bundle(layout, previous_queue)
-                    if not is_manual:
-                        _write_worker_job_files(layout, previous_queue)
+                    _write_worker_job_files(layout, previous_queue)
                     return previous_queue
 
-    provider = "chatgpt-web-manual" if is_manual else "codex"
+    provider = "codex"
     start_stage(layout, "images", input_hash, provider=provider)
     try:
         before_manifest = sha256_value(manifest)
@@ -634,42 +519,20 @@ def build_codex_queue(
             write_json(layout.images, manifest)
         _write_scenes_if_changed(layout, scenes, before_scenes)
         write_json(layout.image_queue, payload)
-        extra_artifacts: list[str] = []
-        if is_manual:
-            _write_manual_prompt_bundle(layout, payload)
-            extra_artifacts = [
-                relative_posix(layout.manual_image_prompts, layout.root),
-                relative_posix(layout.manual_image_prompts_markdown, layout.root),
-            ]
-        else:
-            extra_artifacts = _write_worker_job_files(layout, payload)
+        extra_artifacts = _write_worker_job_files(layout, payload)
         _finish_images_stage(
             layout,
             manifest,
             input_hash,
             provider=provider,
             waiting_external=bool(queue_items),
-            waiting_note=(
-                "Aguardando o usuário enviar no chat as imagens geradas externamente, na ordem "
-                "de images/manual-prompts.md."
-                if is_manual
-                else None
-            ),
+            waiting_note=None,
             extra_artifacts=extra_artifacts,
         )
         return payload
     except Exception as exc:
         fail_stage(layout, "images", exc)
         raise
-
-
-def build_manual_image_queue(
-    layout: ProjectLayout,
-    *,
-    scene_id: str | None = None,
-    force: bool = False,
-) -> dict[str, Any]:
-    return build_codex_queue(layout, scene_id=scene_id, force=force, delivery="manual")
 
 
 def _font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
@@ -1320,87 +1183,6 @@ def import_staged_images(
         raise
 
 
-def import_manual_images(
-    layout: ProjectLayout,
-    sources: list[Path],
-    *,
-    force: bool = False,
-) -> ImageManifest:
-    """Import externally generated images by their declared global scene order."""
-    if not layout.image_queue.is_file():
-        raise FileNotFoundError(f"Fila manual não encontrada: {layout.image_queue}")
-    queue = read_json(layout.image_queue)
-    if not isinstance(queue, dict) or queue.get("provider") != "chatgpt-web-manual":
-        raise ValueError("A fila ativa não pertence ao modo light-manual.")
-    raw_items = queue.get("items")
-    if not isinstance(raw_items, list):
-        raise ValueError("Fila manual inválida: items ausente ou não é uma lista.")
-
-    pending = [
-        entry
-        for entry in raw_items
-        if isinstance(entry, dict) and entry.get("status") != StageStatus.COMPLETED.value
-    ]
-    pending.sort(key=lambda entry: (int(entry.get("order", 0)), str(entry.get("scene_id", ""))))
-    resolved_sources = [source.expanduser().resolve() for source in sources]
-    if len(resolved_sources) != len(pending):
-        raise ValueError(
-            f"A fila espera {len(pending)} imagem(ns) pendente(s), mas foram enviados "
-            f"{len(resolved_sources)} arquivo(s)."
-        )
-    missing = [str(source) for source in resolved_sources if not source.is_file()]
-    if missing:
-        raise FileNotFoundError("Imagem(ns) enviada(s) não encontrada(s): " + ", ".join(missing))
-    hashes = [sha256_file(source) for source in resolved_sources]
-    if len(hashes) != len(set(hashes)):
-        raise ValueError(
-            "Há arquivos de imagem duplicados no lote manual; revise a ordem antes de importar."
-        )
-
-    queue_input_hash = sha256_value(_queue_core(queue))
-    stage = layout.load_manifest().stages["images"]
-    if stage.status == StageStatus.WAITING_EXTERNAL and stage.input_hash != queue_input_hash:
-        raise RuntimeError("A fila manual não corresponde à execução ativa do projeto.")
-
-    imported: ImageManifest | None = None
-    imported_scenes: list[str] = []
-    for entry, source in zip(pending, resolved_sources, strict=True):
-        scene_id = entry.get("scene_id")
-        if not isinstance(scene_id, str):
-            raise ValueError("Item da fila manual sem scene_id válido.")
-        imported = import_external_image(
-            layout,
-            scene_id,
-            source,
-            provider="chatgpt-web-manual",
-            force=force,
-        )
-        imported_scenes.append(scene_id)
-    if imported is None:
-        return build_image_manifest(layout)
-
-    _finish_images_stage(
-        layout,
-        imported,
-        queue_input_hash,
-        provider="chatgpt-web-manual",
-        waiting_external=False,
-        extra_artifacts=[
-            relative_posix(layout.manual_image_prompts, layout.root),
-            relative_posix(layout.manual_image_prompts_markdown, layout.root),
-        ],
-    )
-    layout.append_event(
-        {
-            "event": "manual_images_imported",
-            "batch_id": queue.get("batch_id"),
-            "count": len(imported_scenes),
-            "scenes": imported_scenes,
-        }
-    )
-    return imported
-
-
 def approve_image(
     layout: ProjectLayout,
     scene_id: str,
@@ -1577,7 +1359,5 @@ def prepare_images(
     if provider == "fixture":
         return generate_fixture_images(layout, scene_id=scene_id, force=force)
     if provider == "codex":
-        if project.config.production.mode == "light_manual":
-            return build_manual_image_queue(layout, scene_id=scene_id, force=force)
         return build_codex_queue(layout, scene_id=scene_id, force=force)
     raise ValueError(f"Provedor de imagens não suportado: {provider}")

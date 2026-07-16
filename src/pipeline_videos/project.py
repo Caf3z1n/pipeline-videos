@@ -102,8 +102,8 @@ A etapa `music` sorteia uma faixa da biblioteca local do pipeline e preserva uma
 
 Quando `youtube/growth-queue.json` estiver pendente, o subagente `youtube_growth_specialist` escreve
 somente em staging. Apenas o agente principal importa títulos, descrição, estratégia e thumbnails.
-Em `remote_review`, a fila define `single_agent`: o agente principal também produz o staging, sem
-criar subagente, e entrega exatamente um par título+thumbnail.
+Em produção remota, o mesmo agente principal permanece na sessão inteira, sem criar subagentes, e
+entrega exatamente um par título+thumbnail.
 
 Em projetos Short, `script/shorts-queue.json` contrata o `shorts_script_specialist`. Ele escreve
 somente no staging; o agente principal valida gancho, retenção, valor, CTA e revisão bíblica antes
@@ -138,17 +138,6 @@ def create_project(
     now = utc_now()
     config = ProjectConfig()
     config.production.mode = production_mode
-    if production_mode == "remote_review":
-        config.production.use_subagents = False
-        config.production.image_workers = 1
-        config.production.approval_policy = "final_only"
-        config.production.optimization_profile = "remote_single_variant_v1"
-        config.production.worker_context_policy = "compact_only"
-        config.youtube_growth.title_variants = 1
-        config.youtube_growth.thumbnail_variants = 1
-        config.shorts_script.use_specialist_subagent = False
-        config.youtube_publication.allow_automated_private_review_upload = True
-        config.youtube_publication.allow_automated_scheduled_release = True
     style = load_style(style_id)
     if style.visual_standard_id != config.images.visual_standard_id:
         config.images.enforce_visual_standard = False
@@ -166,18 +155,6 @@ def create_project(
         config.captions.margin_bottom = 310
         config.captions.vertical_position = "center"
         config.captions.context_labels_enabled = False
-        if production_mode in {"light_manual", "light_automatic"}:
-            config.audio.provider = "elevenlabs"
-            config.render.final_crf = 16
-            config.render.preview_crf = 16
-            config.render.final_preset = "fast"
-            config.render.preview_preset = "fast"
-            config.render.motion_supersample = 2
-            config.render.preview_motion_supersample = 2
-            config.shorts_script.use_specialist_subagent = False
-            config.production.use_subagents = True
-            config.production.image_workers = 3 if production_mode == "light_automatic" else 1
-            config.production.approval_policy = "final_only"
     if demo:
         config.render = RenderConfig(
             width=1280,
@@ -203,8 +180,7 @@ def create_project(
         config.shorts_script.enabled = False
         config.shorts_script.use_specialist_subagent = False
     else:
-        if production_mode != "remote_review":
-            config.production.optimization_profile = "token_optimized_v1"
+        config.production.optimization_profile = "token_optimized_v1"
         config.production.worker_context_policy = "compact_only"
         config.editorial_policy.standard = "scripture_rich_ptbr_v1"
         config.editorial_policy.forbid_english_editorial_jargon = True
@@ -218,8 +194,11 @@ def create_project(
         config.render.preview_crf = 16
         config.render.preview_preset = "fast"
         config.render.preview_motion_supersample = 2
-        config.youtube_growth.reuse_scene_images_for_thumbnails = False
+        config.render.background_blur_profile = "functional_caption_focus_v1"
+        config.youtube_growth.title_variants = 1
+        config.youtube_growth.thumbnail_variants = 1
         config.youtube_growth.thumbnail_generation_mode = "integrated_imagegen_v1"
+        config.youtube_growth.thumbnail_reference_mode = "opening_scene_edit_v1"
         config.youtube_growth.title_standard = "passage_pipe_topic_v1"
         config.youtube_growth.description_standard = "scripture_timeline_v1"
         config.youtube_growth.thumbnail_standard = "direct_conflict_red_v1"
@@ -312,10 +291,10 @@ def next_actions(layout: ProjectLayout) -> list[str]:
             and manifest.config.shorts_script.enabled
             and manifest.stages["shorts_script"].status != StageStatus.COMPLETED
         ):
-            if manifest.config.production.mode in {"light_manual", "light_automatic"}:
-                actions.append("Produzir e importar o pacote de roteiro Light no agente principal.")
-            else:
+            if manifest.config.shorts_script.use_specialist_subagent:
                 actions.append("Executar a etapa especialista de roteiro para Shorts.")
+            else:
+                actions.append("Produzir e validar o pacote de roteiro no agente principal.")
         else:
             actions.append("Importar ou registrar um roteiro estruturado.")
     elif manifest.approvals["script"].status.value != "approved":
@@ -323,12 +302,7 @@ def next_actions(layout: ProjectLayout) -> list[str]:
     if manifest.approvals["biblical_review"].status.value != "approved":
         actions.append("Concluir e aprovar a revisão de consistência bíblica.")
     if manifest.stages["images"].status == StageStatus.WAITING_EXTERNAL:
-        if manifest.config.production.mode == "light_manual":
-            actions.append(
-                "Aguardar os anexos do usuário e importá-los na ordem de images/manual-prompts.md."
-            )
-        else:
-            actions.append("Gerar/importar as imagens pendentes da fila do Codex.")
+        actions.append("Gerar/importar as imagens pendentes da fila do Codex.")
     if (
         manifest.config.audio.provider == "local_manual"
         and manifest.stages["audio"].status != StageStatus.COMPLETED

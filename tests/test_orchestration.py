@@ -176,7 +176,7 @@ def test_dynamic_pool_orders_jobs_and_recommends_next_free_worker(tmp_path) -> N
         "scene_id": "scene-002",
         "staging_path": "images/staging/scene-002-v001.png",
     }
-    assert plan["current_pause"] == "parallel_external_workers"
+    assert plan["current_pause"] == "external_generation"
     assert all(
         _task(plan, f"image:{job['job_id']}")["writes_project_state"] is False
         for job in assignment["jobs"]
@@ -186,15 +186,14 @@ def test_dynamic_pool_orders_jobs_and_recommends_next_free_worker(tmp_path) -> N
     assert all(path.read_bytes() == content for path, content in files_before.items())
 
 
-def test_light_manual_plan_has_no_image_workers_and_pauses_for_user_upload(tmp_path) -> None:
+def test_single_agent_plan_assigns_script_images_and_growth_to_main(tmp_path) -> None:
     layout = _short_layout(tmp_path)
     manifest = layout.load_manifest()
-    manifest.config.production.mode = "light_manual"
-    manifest.config.production.use_subagents = True
+    manifest.config.production.use_subagents = False
     manifest.config.production.image_workers = 1
     manifest.config.shorts_script.use_specialist_subagent = False
     manifest.config.youtube_growth.enabled = True
-    manifest.config.youtube_growth.use_specialist_subagent = True
+    manifest.config.youtube_growth.use_specialist_subagent = False
     manifest.stages["youtube_growth"] = manifest.stages["youtube_growth"].model_copy(
         update={"status": StageStatus.WAITING_EXTERNAL}
     )
@@ -205,7 +204,7 @@ def test_light_manual_plan_has_no_image_workers_and_pauses_for_user_upload(tmp_p
     write_json(
         layout.image_queue,
         {
-            "provider": "chatgpt-web-manual",
+            "provider": "codex-imagegen",
             "status": "waiting_external",
             "items": [
                 {
@@ -216,7 +215,7 @@ def test_light_manual_plan_has_no_image_workers_and_pauses_for_user_upload(tmp_p
                     "order": 1,
                     "staging_path": "images/staging/scene-001-v001.png",
                     "status": "waiting_external",
-                    "worker_id": None,
+                    "worker_id": "main",
                 }
             ],
         },
@@ -234,30 +233,14 @@ def test_light_manual_plan_has_no_image_workers_and_pauses_for_user_upload(tmp_p
 
     plan = build_one_shot_plan(layout)
 
-    assert plan["dynamic_image_assignment"]["max_parallel_workers"] == 0
-    assert plan["dynamic_image_assignment"]["worker_slots"] == []
-    assert _task(plan, "image:scene-001-v001")["owner"] == "user_manual_upload"
+    assert plan["dynamic_image_assignment"]["max_parallel_workers"] == 1
+    assert plan["dynamic_image_assignment"]["worker_slots"] == ["main"]
+    assert _task(plan, "shorts_script_generation")["owner"] == "main"
+    assert _task(plan, "image:scene-001-v001")["owner"] == "main"
     assert _task(plan, "youtube_growth_specialist")["status"] == "waiting_external"
-    assert _task(plan, "youtube_growth_specialist")["owner"] == "youtube_growth_specialist"
-    assert _task(plan, "images_import_batch")["command"] == "images import-manual"
-    assert plan["current_pause"] == "manual_image_upload"
-
-
-def test_new_light_plan_assigns_script_generation_to_main_agent(tmp_path) -> None:
-    layout = create_project(
-        "light-script",
-        "Light Script",
-        projects_dir=tmp_path,
-        target_duration_seconds=50,
-        video_format="short",
-        production_mode="light_automatic",
-    )
-
-    plan = build_one_shot_plan(layout)
-
-    assert _task(plan, "light_script_generation")["owner"] == "main"
-    assert _task(plan, "shorts_script_import")["depends_on"] == ["light_script_generation"]
-    assert plan["current_pause"] == "light_script_generation"
+    assert _task(plan, "youtube_growth_specialist")["owner"] == "main"
+    assert _task(plan, "images_import_batch")["command"] == "images import-batch"
+    assert plan["current_pause"] == "external_generation"
 
 
 def test_plan_marks_local_manual_audio_without_external_guard(tmp_path) -> None:
@@ -281,57 +264,27 @@ def test_plan_marks_local_manual_audio_without_external_guard(tmp_path) -> None:
     assert plan["current_pause"] == "manual_audio_upload"
 
 
-def test_light_short_creation_commands_keep_modes_separate_and_reserve_unique_verses(
-    tmp_path,
-) -> None:
+def test_manual_audio_short_uses_current_production_mode(tmp_path) -> None:
     runner = CliRunner()
 
-    manual = runner.invoke(
-        cli.app,
-        ["new-short-light-manual", "--projects-dir", str(tmp_path)],
-    )
-    automatic = runner.invoke(
-        cli.app,
-        ["new-short-light-automatica", "--projects-dir", str(tmp_path)],
-    )
     manual_audio = runner.invoke(
         cli.app,
         ["new-short-audio-manual", "--projects-dir", str(tmp_path)],
     )
 
-    assert manual.exit_code == 0, manual.output
-    assert automatic.exit_code == 0, automatic.output
     assert manual_audio.exit_code == 0, manual_audio.output
     manifests = sorted((tmp_path / "shorts").glob("*/project.json"))
-    assert len(manifests) == 3
+    assert len(manifests) == 1
     payloads = [json.loads(path.read_text(encoding="utf-8")) for path in manifests]
-    assert {payload["config"]["production"]["mode"] for payload in payloads} == {
-        "light_manual",
-        "light_automatic",
-        "draft_one_shot",
-    }
-    assert (
-        sum(payload["config"]["audio"]["provider"] == "local_manual" for payload in payloads) == 1
-    )
-    passages = {
-        json.loads((path.parent / "editorial/briefing.json").read_text(encoding="utf-8"))[
-            "main_passage"
-        ]
-        for path in manifests
-    }
-    assert len(passages) == 3
-    manual_manifest = next(
-        path
-        for path, payload in zip(manifests, payloads, strict=True)
-        if payload["config"]["production"]["mode"] == "light_manual"
-    )
-    started = runner.invoke(cli.app, ["run", str(manual_manifest.parent)])
+    assert payloads[0]["config"]["production"]["mode"] == "draft_one_shot"
+    assert payloads[0]["config"]["audio"]["provider"] == "local_manual"
+    started = runner.invoke(cli.app, ["run", str(manifests[0].parent)])
     assert started.exit_code == 0, started.output
     script_queue = json.loads(
-        (manual_manifest.parent / "script/shorts-queue.json").read_text(encoding="utf-8")
+        (manifests[0].parent / "script/shorts-queue.json").read_text(encoding="utf-8")
     )
-    assert script_queue["orchestration"]["mode"] == "main_agent"
-    assert script_queue["orchestration"]["reasoning_effort"] == "low"
+    assert script_queue["orchestration"]["mode"] == "subagent"
+    assert script_queue["orchestration"]["reasoning_effort"] == "high"
 
 
 def test_image_pool_uses_third_slot_when_growth_specialist_is_disabled(tmp_path) -> None:

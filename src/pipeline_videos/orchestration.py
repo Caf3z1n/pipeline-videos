@@ -280,18 +280,8 @@ def build_one_shot_plan(
 ) -> dict[str, Any]:
     """Build a deterministic, serializable and read-only one-shot execution plan."""
     manifest = layout.load_manifest()
-    light_mode = manifest.config.production.mode in {"light_manual", "light_automatic"}
-    manual_mode = manifest.config.production.mode == "light_manual"
-    shorts_enabled = (
-        manifest.video_format == "short"
-        and manifest.config.shorts_script.enabled
-        and (manifest.config.shorts_script.use_specialist_subagent or light_mode)
-    )
-    growth_enabled = (
-        not manifest.demo
-        and manifest.config.youtube_growth.enabled
-        and manifest.config.youtube_growth.use_specialist_subagent
-    )
+    shorts_enabled = manifest.video_format == "short" and manifest.config.shorts_script.enabled
+    growth_enabled = not manifest.demo and manifest.config.youtube_growth.enabled
     shorts_queue = _read_optional_queue(layout.shorts_script_queue)
     image_queue = _read_optional_queue(layout.image_queue)
     growth_queue = _read_optional_queue(layout.growth_queue)
@@ -332,14 +322,17 @@ def build_one_shot_plan(
     )
     reserved_growth_slots = 1 if growth_enabled else 0
     image_workers = (
-        0
-        if manual_mode
-        else min(
-            MAX_PARALLEL_SUBAGENTS - reserved_growth_slots,
-            manifest.config.production.image_workers,
+        min(
+            MAX_PARALLEL_SUBAGENTS - reserved_growth_slots, manifest.config.production.image_workers
         )
+        if manifest.config.production.use_subagents
+        else 1
     )
-    worker_slots = [f"image-worker-{index}" for index in range(1, image_workers + 1)]
+    worker_slots = (
+        [f"image-worker-{index}" for index in range(1, image_workers + 1)]
+        if manifest.config.production.use_subagents
+        else ["main"]
+    )
     image_external_status = images_stage
     if image_jobs and images_stage not in _DONE_STATUSES:
         image_external_status = (
@@ -370,7 +363,7 @@ def build_one_shot_plan(
             "shared_state": "project.json",
             "imports": [
                 "script shorts-import",
-                "images import-manual" if manual_mode else "images import-batch",
+                "images import-batch",
                 "metadata growth-import",
             ],
             "rule": (
@@ -418,13 +411,15 @@ def build_one_shot_plan(
         shorts_external_status,
         enabled=shorts_enabled,
     )
-    script_generation_task_id = (
-        "light_script_generation" if light_mode else "shorts_script_specialist"
-    )
+    script_generation_task_id = "shorts_script_generation"
     script_tasks = [
         _task(
             script_generation_task_id,
-            owner="main" if light_mode else "shorts_script_specialist",
+            owner=(
+                "shorts_script_specialist"
+                if manifest.config.shorts_script.use_specialist_subagent
+                else "main"
+            ),
             status=shorts_external_status,
             depends_on=("briefing",),
             writes_project_state=False,
@@ -471,9 +466,9 @@ def build_one_shot_plan(
             _task(
                 task_id,
                 owner=(
-                    "user_manual_upload"
-                    if manual_mode
-                    else recommended_owners.get(job["job_id"], "first_free_image_worker")
+                    recommended_owners.get(job["job_id"], "first_free_image_worker")
+                    if manifest.config.production.use_subagents
+                    else "main"
                 ),
                 status=job["status"],
                 depends_on=("scenes",),
@@ -486,7 +481,7 @@ def build_one_shot_plan(
         parallel_tasks.append(
             _task(
                 "images_queue",
-                owner="image-worker-pool",
+                owner="image-worker-pool" if manifest.config.production.use_subagents else "main",
                 status=images_stage,
                 depends_on=("scenes",),
                 writes_project_state=False,
@@ -496,7 +491,11 @@ def build_one_shot_plan(
         [
             _task(
                 "youtube_growth_specialist",
-                owner="youtube_growth_specialist",
+                owner=(
+                    "youtube_growth_specialist"
+                    if manifest.config.youtube_growth.use_specialist_subagent
+                    else "main"
+                ),
                 status=growth_external_status,
                 depends_on=("scenes",),
                 writes_project_state=False,
@@ -558,7 +557,7 @@ def build_one_shot_plan(
             status=images_import_status,
             depends_on=image_task_ids,
             writes_project_state=True,
-            command="images import-manual" if manual_mode else "images import-batch",
+            command="images import-batch",
         ),
         _task(
             "growth_import",
@@ -607,7 +606,7 @@ def build_one_shot_plan(
             "depends_on": [],
             "lanes": [
                 {
-                    "lane_id": "main-light-script" if light_mode else "main-and-script-specialist",
+                    "lane_id": "script-production",
                     "tasks": [task["task_id"] for task in script_tasks],
                 }
             ],
@@ -695,9 +694,7 @@ def build_one_shot_plan(
     elif pending_image_jobs or (
         growth_enabled and growth_external_status == StageStatus.WAITING_EXTERNAL.value
     ):
-        plan["current_pause"] = (
-            "manual_image_upload" if manual_mode else "parallel_external_workers"
-        )
+        plan["current_pause"] = "external_generation"
     elif images_import_status == "ready" or growth_import_status == "ready":
         plan["current_pause"] = "join_imports"
     elif audio_status == "blocked_external_guard":

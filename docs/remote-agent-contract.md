@@ -1,62 +1,50 @@
-# Contrato compacto do agente remoto
+# Contrato do agente remoto persistente
 
-Este contrato substitui a leitura repetida de `AGENTS.md`, `README.md` e dos documentos completos
-dentro de cada execução do Codex na VPS. O executor serializa somente a fase atual em
-`shared/jobs/contexts/<job>/run-NNN-<fase>/phase-request.json`.
+O executor remoto usa o mesmo fluxo de produção dos projetos locais. A diferença operacional é
+que cada job mantém uma única sessão do Codex durante toda a produção, com `gpt-5.6-sol`,
+`model_reasoning_effort=medium` e multi-agent desativado.
 
 ## Divisão de responsabilidades
 
-O Python é o único escritor do estado compartilhado. Ele executa `status`, `run --dry-run`,
-autopilot, imports, ElevenLabs, música, legendas, render, validação, upload privado e eventual
-agendamento. O Codex nunca executa o job inteiro.
+O Python continua sendo o único escritor do estado compartilhado. Ele executa locks, `status`,
+`run --dry-run`, autopilot, imports, ElevenLabs, música, legendas, render, validação, upload privado
+e eventual agendamento.
 
-Cada `codex exec` é efêmero e atende exatamente uma destas fases:
+O agente principal permanece na mesma sessão e executa os checkpoints criativos na ordem:
 
-1. seleção de fontes verificadas, somente quando o briefing ainda não está completo;
-2. roteiro de Short ou roteiro/revisão de vídeo longo;
-3. uma única imagem de cena;
-4. um único par título+thumbnail.
+1. seleção de fontes verificadas, quando o briefing ainda não estiver completo;
+2. roteiro e eventual correção contratual;
+3. imagens de cena, sequencialmente;
+4. um par título+thumbnail integrado.
 
-O JSON da fase informa entradas permitidas, saída obrigatória, modelo, raciocínio e política de
-retry. Imagens recebem apenas o próprio item e, quando existe, a imagem anterior de continuidade.
-Roteiro e crescimento recebem somente suas filas e contextos compactos.
+Cada checkpoint recebe um JSON compacto em
+`shared/jobs/contexts/<job>/main-agent/checkpoints/`. A primeira chamada usa `codex exec`; as
+seguintes usam `codex exec resume <session_id>`. O `session_id` fica persistido no job, portanto uma
+retomada do worker continua a conversa existente em vez de abrir outra sessão.
 
-## Isolamento de contexto
+## Restrições
 
-As execuções usam `--ephemeral`, `--ignore-user-config` e `--ignore-rules`, com diretório de trabalho
-fora do release Git. Apps, plugins, browser/computer use, goals, memories, multi-agent e busca web
-ficam desativados. Apenas shell, arquivos, hooks e `image_generation` permanecem disponíveis. A
-autenticação existente do Codex continua sendo usada; isso não cria API paga nem exige novo OAuth.
+- modelo fixo: `gpt-5.6-sol`;
+- raciocínio fixo: `medium`;
+- nenhum subagente ou worker Codex;
+- apps, browser, memories, goals e busca web desativados;
+- somente os arquivos declarados em `allowed_inputs` podem ser lidos em cada checkpoint;
+- o agente nunca lê segredos, publica, agenda, aprova ou altera faturamento;
+- imagens são geradas uma por vez e copiadas para o `staging_path` da fila;
+- filas antigas, modos Light e fallbacks de thumbnail local não são aceitos.
 
-O modelo e o raciocínio seguem a fila. Por padrão, todas as fases usam `gpt-5.6-terra`; variáveis de
-ambiente específicas continuam podendo sobrescrever o modelo de uma fase. No `remote_review`,
-roteiro de Short, imagens, crescimento e seleção editorial usam raciocínio baixo. Roteiro longo usa
-raciocínio alto; uma revisão longa isolada usa raciocínio médio.
+## Validação e retomada
 
-Antes de importar um roteiro de Short, o executor valida o staging. Confusões conhecidas entre
-`hook_type` e `hook_techniques`, desalinhamentos entre a espinha narrativa e suas seções e bases
-bíblicas omitidas são normalizados deterministicamente, sem nova chamada ao Codex. Se o pacote
-continuar inválido, ocorre no máximo uma fase curta `shorts_script_repair`, que lê somente a fila e
-o pacote inválido, preserva o conteúdo válido e corrige apenas o contrato. Uma segunda falha encerra
-o job para evitar consumo repetitivo.
+Antes do import do roteiro de Short, o executor roda o preflight agregado. Normalizações
+determinísticas são aplicadas sem nova chamada. Se ainda houver erros, a mesma sessão recebe no
+máximo um checkpoint curto de correção; uma segunda falha encerra o job.
 
-## Hooks
+Stagings válidos são reutilizados. Para imagens, a política continua limitada ao prompt original,
+uma repetição idêntica após `moderation_blocked` e uma alternativa visual restrita. A recuperação de
+PNG procura somente arquivos novos da sessão persistente e nunca substitui staging válido.
 
-O executor habilita hooks inline e revisados para `PostToolUse`, `PreCompact` e `Stop`. O script
-`scripts/remote_codex_hook.py` grava somente evento, modelo, fase, ferramenta e tamanhos de entrada e
-saída. Ele não grava conteúdo, não lê transcript e não escreve em `stdout`, portanto não injeta
-tokens adicionais no contexto.
+## Telemetria
 
-Hooks são telemetria, não o mecanismo principal de economia. O ganho vem das sessões curtas e da
-remoção das etapas determinísticas do agente. Como `suppressOutput` ainda não reduz a saída entregue
-ao modelo, o hook não tenta filtrar respostas de ferramentas.
-
-## Retomada e medição
-
-Cada fase concluída é persistida em `codex_runs` no JSON do job, com modelo, raciocínio e os campos
-de uso retornados por `codex exec --json`: input, input em cache, output e reasoning output. O status
-expõe também input novo e total novo+output.
-
-Stagings válidos são reutilizados. Em imagem, cada item mantém no máximo três tentativas: prompt
-original, repetição idêntica após `moderation_blocked` e uma alternativa restrita que preserva
-identidade e continuidade. Imports continuam acontecendo uma única vez pelo executor.
+Cada checkpoint concluído é registrado em `codex_runs` com modelo, raciocínio e uso retornado pelo
+JSONL. Hooks de `PostToolUse`, `PreCompact` e `Stop` registram apenas eventos e tamanhos, sem conteúdo
+de prompt, resposta ou segredo e sem escrever em `stdout`.
