@@ -1881,6 +1881,7 @@ def job_summary(job: RemoteVideoJob) -> dict[str, Any]:
         "publish_at": job.publish_at,
         "attempts": job.attempts,
         "current_phase": job.current_phase,
+        "codex_session_id": job.codex_session_id,
         "codex_run_count": len(job.codex_runs),
         "codex_usage": codex_usage_summary(job),
         "error": job.error,

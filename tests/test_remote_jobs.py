@@ -31,6 +31,7 @@ from pipeline_videos.remote_jobs import (
     codex_checkpoint_prompt,
     codex_usage_summary,
     job_is_due,
+    job_summary,
     prepare_job_project,
     work_once,
 )
@@ -249,6 +250,7 @@ def test_agent_checkpoints_persist_and_resume_the_same_session(tmp_path, monkeyp
 
     assert job.codex_session_id == session_id
     assert len(job.codex_runs) == 2
+    assert job_summary(job)["codex_session_id"] == session_id
     assert calls[0][1] == "exec"
     assert "resume" not in calls[0]
     assert calls[1][1:3] == ["exec", "resume"]
