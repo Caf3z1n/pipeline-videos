@@ -780,6 +780,30 @@ def _normalize_shorts_script_payload(payload: dict[str, Any]) -> tuple[dict[str,
             strategy["open_loop"] = tension
             changes.append("strategy.open_loop: tensão central")
 
+        section_ids = [
+            section.get("section_id")
+            for section in sections
+            if isinstance(section, dict) and isinstance(section.get("section_id"), str)
+        ]
+        if strategy.get("section_ids") != section_ids:
+            strategy["section_ids"] = section_ids
+            changes.append("strategy.section_ids: seções do roteiro")
+
+        verse_opening = strategy.get("verse_opening")
+        primary_source_id = (
+            verse_opening.get("source_id") if isinstance(verse_opening, dict) else None
+        )
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            section_id = section.get("section_id", "desconhecida")
+            if primary_source_id and not section.get("biblical_basis"):
+                section["biblical_basis"] = [primary_source_id]
+                changes.append(f"script.sections.{section_id}.biblical_basis: fonte principal")
+            if not section.get("claim_classification"):
+                section["claim_classification"] = ["interpretation"]
+                changes.append(f"script.sections.{section_id}.claim_classification: interpretação")
+
     return payload, "; ".join(changes) or None
 
 

@@ -155,6 +155,7 @@ def test_shorts_narrative_spine_is_aligned_to_mapped_sections_without_codex() ->
             "hook_type": "direct_tension",
             "hook_techniques": ["self_relevance"],
             "open_loop": "Resumo que não aparece no roteiro",
+            "verse_opening": {"source_id": "bpm-salmos-34-18"},
             "narrative_spine": {
                 "tension_section_id": "s1",
                 "bridge_section_id": "s3",
@@ -168,7 +169,12 @@ def test_shorts_narrative_spine_is_aligned_to_mapped_sections_without_codex() ->
         },
         "script": {
             "sections": [
-                {"section_id": "s1", "narration": "Você sorri, mas está cansado de fingir."},
+                {
+                    "section_id": "s1",
+                    "narration": "Você sorri, mas está cansado de fingir.",
+                    "biblical_basis": None,
+                    "claim_classification": [],
+                },
                 {"section_id": "s3", "narration": "A Bíblia não manda esconder a dor."},
                 {"section_id": "s4", "narration": "Isso não promete alívio imediato."},
                 {"section_id": "s5", "narration": "Converse hoje com uma pessoa segura."},
@@ -184,6 +190,9 @@ def test_shorts_narrative_spine_is_aligned_to_mapped_sections_without_codex() ->
     assert spine["central_truth"] == "Isso não promete alívio imediato."
     assert spine["practical_response"] == "Converse hoje com uma pessoa segura."
     assert normalized["strategy"]["open_loop"] == spine["tension_question"]
+    assert normalized["strategy"]["section_ids"] == ["s1", "s3", "s4", "s5"]
+    assert normalized["script"]["sections"][0]["biblical_basis"] == ["bpm-salmos-34-18"]
+    assert normalized["script"]["sections"][0]["claim_classification"] == ["interpretation"]
     assert "strategy.narrative_spine.tension_question" in change
 
 
