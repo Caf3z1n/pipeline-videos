@@ -19,6 +19,8 @@ from pipeline_videos.remote_jobs import (
     _failure_with_codex_context,
     _image_phase_specs,
     _import_editorial_source_selection,
+    _normalize_shorts_script_payload,
+    _shorts_script_repair_phase_spec,
     codex_phase_prompt,
     codex_usage_summary,
     job_is_due,
@@ -103,7 +105,7 @@ def test_codex_phase_command_is_ephemeral_compact_and_hooked(tmp_path) -> None:
     spec = CodexPhaseSpec(
         phase="image",
         item_id="scene-001-v001",
-        model="gpt-5.6-luna",
+        model="gpt-5.6-terra",
         reasoning_effort="low",
         payload={},
         expected_outputs=(tmp_path / "scene.png",),
@@ -128,6 +130,55 @@ def test_codex_phase_command_is_ephemeral_compact_and_hooked(tmp_path) -> None:
     assert any("hooks.Stop" in value for value in command)
 
 
+def test_shorts_hook_type_confusion_is_normalized_without_another_codex_run() -> None:
+    payload = {
+        "strategy": {
+            "hook_type": "emotional_mirroring",
+            "hook_techniques": ["self_relevance", "emotional_mirroring", "specificity"],
+        }
+    }
+
+    normalized, change = _normalize_shorts_script_payload(payload)
+
+    assert normalized["strategy"]["hook_type"] == "direct_tension"
+    assert normalized["strategy"]["hook_techniques"] == [
+        "self_relevance",
+        "emotional_mirroring",
+        "specificity",
+    ]
+    assert change == "strategy.hook_type: emotional_mirroring -> direct_tension"
+
+
+def test_shorts_repair_is_single_compact_terra_phase(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(topic="Esperança"))
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+    write_json(
+        layout.shorts_script_queue,
+        {
+            "job_id": "shorts-script-test",
+            "orchestration": {},
+            "outputs": {
+                "package": "script/staging/shorts-script-specialist/package.json",
+            },
+        },
+    )
+
+    spec = _shorts_script_repair_phase_spec(
+        layout,
+        ValueError("strategy.hook_type inválido"),
+    )
+
+    assert spec.phase == "shorts_script_repair"
+    assert spec.model == "gpt-5.6-terra"
+    assert spec.reasoning_effort == "low"
+    assert spec.payload["allowed_inputs"] == [
+        str(layout.shorts_script_queue),
+        str(layout.shorts_script_package_staging),
+    ]
+    assert "strategy.hook_type inválido" in spec.payload["task"]["validation_error"]
+
+
 def test_image_phases_receive_one_item_and_previous_staging_only(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Coragem"))
@@ -136,7 +187,7 @@ def test_image_phases_receive_one_item_and_previous_staging_only(tmp_path) -> No
         layout.image_queue,
         {
             "orchestration": {
-                "recommended_model": "gpt-5.6-luna",
+                "recommended_model": "gpt-5.6-terra",
                 "reasoning_effort": "low",
             },
             "visual_standard": {"id": "cinematic-family-3d-v1"},
@@ -180,7 +231,7 @@ def test_specific_topic_uses_compact_catalog_selection_phase(tmp_path) -> None:
     )
 
     assert spec.phase == "editorial_sources"
-    assert spec.model == "gpt-5.6-luna"
+    assert spec.model == "gpt-5.6-terra"
     assert spec.reasoning_effort == "low"
     assert spec.payload["allowed_inputs"] == []
     assert spec.payload["task"]["desired_candidate_count"] == 1
@@ -233,7 +284,7 @@ def test_codex_usage_summary_separates_cached_and_fresh_tokens(tmp_path) -> None
     run = {
         "phase": "image",
         "item_id": "scene-001-v001",
-        "model": "gpt-5.6-luna",
+        "model": "gpt-5.6-terra",
         "reasoning_effort": "low",
         "started_at": "2026-07-16T00:00:00Z",
         "finished_at": "2026-07-16T00:01:00Z",

@@ -246,7 +246,7 @@ def prepare_shorts_script_queue(
             "may_modify_project_state": False,
             "may_publish": False,
             "reasoning_effort": "low" if main_agent_mode else "high",
-            "recommended_model": "gpt-5.6-luna" if main_agent_mode else "gpt-5.6-sol",
+            "recommended_model": "gpt-5.6-terra",
             "context_policy": "compact_only",
             "fork_turns": "none" if not main_agent_mode else None,
         },
@@ -905,18 +905,14 @@ def _validate_package(
         raise ValueError("A revisão bíblica do pacote ainda possui bloqueios abertos.")
 
 
-def import_shorts_script_package(
+def validate_shorts_script_package_staging(
     layout: ProjectLayout,
-    *,
-    force: bool = False,
-) -> ShortsScriptPackage:
+) -> tuple[dict[str, Any], ShortsScriptPackage]:
     if not layout.shorts_script_queue.is_file():
         raise FileNotFoundError(f"Fila do roteirista ausente: {layout.shorts_script_queue}")
     queue = read_json(layout.shorts_script_queue)
     if not isinstance(queue, dict) or queue.get("role") != "shorts_script_specialist":
         raise ValueError("Fila do roteirista inválida.")
-    if layout.load_manifest().stages["shorts_script"].status == StageStatus.COMPLETED and not force:
-        return read_model(layout.shorts_script_package, ShortsScriptPackage)
     if queue.get("input_hash") != shorts_script_input_hash(layout):
         raise RuntimeError("A fila do roteirista ficou obsoleta após mudanças editoriais.")
     baseline = queue.get("baseline_script_hash")
@@ -925,6 +921,17 @@ def import_shorts_script_package(
     package_path = _safe_staging_file(layout, queue["outputs"]["package"])
     package = read_model(package_path, ShortsScriptPackage)
     _validate_package(layout, package, queue)
+    return queue, package
+
+
+def import_shorts_script_package(
+    layout: ProjectLayout,
+    *,
+    force: bool = False,
+) -> ShortsScriptPackage:
+    if layout.load_manifest().stages["shorts_script"].status == StageStatus.COMPLETED and not force:
+        return read_model(layout.shorts_script_package, ShortsScriptPackage)
+    queue, package = validate_shorts_script_package_staging(layout)
     script = package.script.model_copy(deep=True)
     script.version = int(queue["next_script_version"])
     script.word_count = len(tokenize_words(script.narration_text()))

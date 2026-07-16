@@ -47,6 +47,7 @@ REMOTE_JOB_SCHEMA_VERSION = "1.0"
 REMOTE_JOB_STATE_SCHEMA_VERSION = "1.1"
 DEFAULT_REMOTE_JOBS_DIR = REPO_ROOT / "remote-jobs"
 REMOTE_TIMEZONE = ZoneInfo("America/Sao_Paulo")
+DEFAULT_REMOTE_CODEX_MODEL = "gpt-5.6-terra"
 JOB_ID_PATTERN = re.compile(r"^video-[0-9]{8}-[0-9]{6}-[a-f0-9]{8}$")
 REMOTE_DISABLED_CODEX_FEATURES = (
     "apps",
@@ -535,7 +536,7 @@ def _editorial_sources_phase_spec(
     return CodexPhaseSpec(
         phase="editorial_sources",
         item_id=None,
-        model=os.getenv("PIPELINE_VIDEOS_REMOTE_EDITORIAL_MODEL", "gpt-5.6-luna"),
+        model=os.getenv("PIPELINE_VIDEOS_REMOTE_EDITORIAL_MODEL", DEFAULT_REMOTE_CODEX_MODEL),
         reasoning_effort="low",
         payload=payload,
         expected_outputs=(output,),
@@ -681,7 +682,7 @@ def _shorts_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     queue = read_json(layout.shorts_script_queue)
     model, effort = _phase_settings(
         queue,
-        fallback_model="gpt-5.6-luna",
+        fallback_model=DEFAULT_REMOTE_CODEX_MODEL,
         fallback_effort="low",
     )
     context = _project_file(layout, queue["inputs"]["compact_context"])
@@ -708,11 +709,151 @@ def _shorts_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     )
 
 
+_SHORTS_HOOK_TYPES = {
+    "scripture_opening",
+    "curiosity_gap",
+    "contrast",
+    "direct_tension",
+    "surprising_detail",
+}
+_SHORTS_TECHNIQUE_ONLY_HOOK_TYPES = {
+    "self_relevance",
+    "specificity",
+    "pattern_interrupt",
+    "open_loop",
+    "emotional_mirroring",
+}
+
+
+def _normalize_shorts_script_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+    strategy = payload.get("strategy")
+    if not isinstance(strategy, dict):
+        return payload, None
+    hook_type = strategy.get("hook_type")
+    if hook_type in _SHORTS_HOOK_TYPES or hook_type not in _SHORTS_TECHNIQUE_ONLY_HOOK_TYPES:
+        return payload, None
+    techniques = strategy.get("hook_techniques")
+    technique_values = set(techniques) if isinstance(techniques, list) else set()
+    if "contrast" in technique_values:
+        replacement = "contrast"
+    elif technique_values.intersection({"curiosity_gap", "open_loop"}):
+        replacement = "curiosity_gap"
+    elif hook_type == "pattern_interrupt":
+        replacement = "surprising_detail"
+    else:
+        replacement = "direct_tension"
+    strategy["hook_type"] = replacement
+    return payload, f"strategy.hook_type: {hook_type} -> {replacement}"
+
+
+def _shorts_script_repair_phase_spec(
+    layout: ProjectLayout,
+    validation_error: Exception,
+) -> CodexPhaseSpec:
+    queue = read_json(layout.shorts_script_queue)
+    package = _project_file(layout, queue["outputs"]["package"])
+    model, _ = _phase_settings(
+        queue,
+        fallback_model=DEFAULT_REMOTE_CODEX_MODEL,
+        fallback_effort="low",
+    )
+    return CodexPhaseSpec(
+        phase="shorts_script_repair",
+        item_id=str(queue.get("job_id")),
+        model=model,
+        reasoning_effort="low",
+        payload={
+            "allowed_inputs": [str(layout.shorts_script_queue), str(package)],
+            "task": {
+                "kind": "repair_shorts_script_package",
+                "queue_path": str(layout.shorts_script_queue),
+                "package_path": str(package),
+                "validation_error": str(validation_error)[:4000],
+                "instructions": [
+                    (
+                        "Corrija somente os campos necessários para satisfazer o schema e as "
+                        "regras da fila."
+                    ),
+                    "Preserve roteiro, citações, revisão bíblica e direção visual válidos.",
+                    (
+                        "Não crie conteúdo novo quando bastar corrigir enum, tipo, campo ausente "
+                        "ou vínculo."
+                    ),
+                    (
+                        "Sobrescreva apenas package_path com JSON válido; o executor validará "
+                        "novamente."
+                    ),
+                ],
+            },
+        },
+        expected_outputs=(package,),
+    )
+
+
+def _ensure_valid_shorts_script_staging(
+    job: RemoteVideoJob,
+    layout: ProjectLayout,
+    store: RemoteJobStore,
+    *,
+    repo_root: Path,
+    timeout_seconds: int,
+) -> RemoteVideoJob:
+    project = layout.load_manifest()
+    if (
+        project.video_format != "short"
+        or project.stages["shorts_script"].status == StageStatus.COMPLETED
+        or not _is_nonempty_file(layout.shorts_script_package_staging)
+    ):
+        return job
+
+    payload = read_json(layout.shorts_script_package_staging)
+    if isinstance(payload, dict):
+        normalized, change = _normalize_shorts_script_payload(payload)
+        if change:
+            write_json(layout.shorts_script_package_staging, normalized)
+            layout.append_event(
+                {
+                    "event": "shorts_script_staging_normalized",
+                    "job_id": job.job_id,
+                    "change": change,
+                    "codex_tokens_used": 0,
+                }
+            )
+
+    from pipeline_videos.shorts_script import validate_shorts_script_package_staging
+
+    try:
+        validate_shorts_script_package_staging(layout)
+        return job
+    except (ValueError, TypeError, KeyError) as exc:
+        latest, _ = store.find(job.job_id)
+        if any(run.phase == "shorts_script_repair" for run in latest.codex_runs):
+            raise RuntimeError(
+                "O pacote de roteiro continuou inválido após a única correção automática. "
+                f"Último erro: {exc}"
+            ) from exc
+        job = _execute_codex_phase(
+            latest,
+            _shorts_script_repair_phase_spec(layout, exc),
+            store,
+            repo_root=repo_root,
+            timeout_seconds=timeout_seconds,
+        )
+        try:
+            validate_shorts_script_package_staging(layout)
+        except (ValueError, TypeError, KeyError) as repair_exc:
+            raise RuntimeError(
+                "O pacote de roteiro continuou inválido após a única correção automática. "
+                f"Último erro: {repair_exc}"
+            ) from repair_exc
+        return job
+
+
 def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
     queue = read_json(layout.image_queue)
     model, effort = _phase_settings(
         queue,
-        fallback_model="gpt-5.6-luna",
+        fallback_model=DEFAULT_REMOTE_CODEX_MODEL,
         fallback_effort="low",
     )
     specs: list[CodexPhaseSpec] = []
@@ -760,7 +901,7 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     queue = read_json(layout.growth_queue)
     model, effort = _phase_settings(
         queue,
-        fallback_model="gpt-5.6-luna",
+        fallback_model=DEFAULT_REMOTE_CODEX_MODEL,
         fallback_effort="low",
     )
     context = _project_file(layout, queue["inputs"]["compact_context"])
@@ -841,7 +982,7 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     return CodexPhaseSpec(
         phase="long_script",
         item_id=None,
-        model=os.getenv("PIPELINE_VIDEOS_REMOTE_LONG_SCRIPT_MODEL", "gpt-5.6-sol"),
+        model=os.getenv("PIPELINE_VIDEOS_REMOTE_LONG_SCRIPT_MODEL", DEFAULT_REMOTE_CODEX_MODEL),
         reasoning_effort="high",
         payload=payload,
         expected_outputs=(script_output, review_output),
@@ -1202,7 +1343,7 @@ def _long_review_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     return CodexPhaseSpec(
         phase="long_biblical_review",
         item_id=None,
-        model=os.getenv("PIPELINE_VIDEOS_REMOTE_LONG_SCRIPT_MODEL", "gpt-5.6-sol"),
+        model=os.getenv("PIPELINE_VIDEOS_REMOTE_LONG_SCRIPT_MODEL", DEFAULT_REMOTE_CODEX_MODEL),
         reasoning_effort="medium",
         payload={
             "allowed_inputs": [],
@@ -1321,6 +1462,13 @@ def _produce_remote_candidate(
         timeout_seconds=timeout_seconds,
     )
     for _ in range(8):
+        job = _ensure_valid_shorts_script_staging(
+            job,
+            layout,
+            store,
+            repo_root=repo_root,
+            timeout_seconds=timeout_seconds,
+        )
         result = run_autopilot_once(layout, allow_external=True)
         if result.status == "completed":
             if result.validation_ok is not True:

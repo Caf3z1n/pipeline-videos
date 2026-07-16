@@ -327,7 +327,7 @@ def _write_worker_job_files(layout: ProjectLayout, queue: dict[str, Any]) -> lis
                 "role": "image_worker",
                 "context_policy": "compact_only",
                 "fork_turns": "none",
-                "recommended_model": "gpt-5.6-luna",
+                "recommended_model": "gpt-5.6-terra",
                 "reasoning_effort": "low",
                 "generation_retry_policy": imagegen_retry_policy(),
                 "instructions": [
@@ -542,7 +542,7 @@ def build_codex_queue(
             "worker_count": worker_count,
             "single_writer": True,
             "reasoning_effort": "low",
-            "recommended_model": "gpt-5.6-luna",
+            "recommended_model": "gpt-5.6-terra",
             "context_policy": production.worker_context_policy,
             "fork_turns": "none" if production.worker_context_policy == "compact_only" else "all",
             "growth_worker_reserved": growth_worker_reserved,

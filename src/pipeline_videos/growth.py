@@ -259,7 +259,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
             "may_modify_project_state": False,
             "may_publish": False,
             "reasoning_effort": "low" if light_mode else "medium",
-            "recommended_model": "gpt-5.6-luna" if light_mode else "gpt-5.6-terra",
+            "recommended_model": "gpt-5.6-terra",
             "context_policy": "compact_only",
             "fork_turns": None if single_agent_mode else "none",
         },

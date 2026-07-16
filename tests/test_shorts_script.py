@@ -305,7 +305,7 @@ def test_shorts_specialist_queue_imports_script_review_and_retention_strategy(tm
     assert queue["orchestration"]["may_modify_project_state"] is False
     assert queue["orchestration"]["context_policy"] == "compact_only"
     assert queue["orchestration"]["fork_turns"] == "none"
-    assert queue["orchestration"]["recommended_model"] == "gpt-5.6-sol"
+    assert queue["orchestration"]["recommended_model"] == "gpt-5.6-terra"
     assert queue["orchestration"]["reasoning_effort"] == "high"
     assert queue["inputs"] == {"compact_context": "script/shorts-context.json"}
     assert layout.shorts_script_context.is_file()

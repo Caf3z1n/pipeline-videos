@@ -28,9 +28,16 @@ fora do release Git. Apps, plugins, browser/computer use, goals, memories, multi
 ficam desativados. Apenas shell, arquivos, hooks e `image_generation` permanecem disponíveis. A
 autenticação existente do Codex continua sendo usada; isso não cria API paga nem exige novo OAuth.
 
-O modelo e o raciocínio seguem a fila. No `remote_review`, roteiro de Short, imagens, crescimento e
-seleção editorial usam `gpt-5.6-luna` com raciocínio baixo. Roteiro longo usa `gpt-5.6-sol` com
+O modelo e o raciocínio seguem a fila. Por padrão, todas as fases usam `gpt-5.6-terra`; variáveis de
+ambiente específicas continuam podendo sobrescrever o modelo de uma fase. No `remote_review`,
+roteiro de Short, imagens, crescimento e seleção editorial usam raciocínio baixo. Roteiro longo usa
 raciocínio alto; uma revisão longa isolada usa raciocínio médio.
+
+Antes de importar um roteiro de Short, o executor valida o staging. Confusões conhecidas entre
+`hook_type` e `hook_techniques` são normalizadas deterministicamente, sem nova chamada ao Codex. Se
+o pacote continuar inválido, ocorre no máximo uma fase curta `shorts_script_repair`, que lê somente
+a fila e o pacote inválido, preserva o conteúdo válido e corrige apenas o contrato. Uma segunda
+falha encerra o job para evitar consumo repetitivo.
 
 ## Hooks
 

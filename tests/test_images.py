@@ -127,7 +127,7 @@ def test_manifest_and_codex_queue_are_idempotent_and_can_target_one_scene(
     assert queue["orchestration"]["worker_count"] == 1
     assert queue["orchestration"]["single_writer"] is True
     assert queue["orchestration"]["reasoning_effort"] == "low"
-    assert queue["orchestration"]["recommended_model"] == "gpt-5.6-luna"
+    assert queue["orchestration"]["recommended_model"] == "gpt-5.6-terra"
     assert queue["orchestration"]["context_policy"] == "compact_only"
     assert queue["orchestration"]["fork_turns"] == "none"
     assert queue["orchestration"]["growth_worker_reserved"] is True
