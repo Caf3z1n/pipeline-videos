@@ -153,6 +153,12 @@ os pacotes compactos, processa as imagens sequencialmente e gera exatamente um t
 thumbnail integrada. Em Shorts, essa arte ocupa o primeiro frame; em vídeos longos, ela é enviada
 como thumbnail personalizada.
 
+O worker remoto divide a produção em sessões efêmeras: seleção de fontes quando necessária,
+roteiro, uma sessão por imagem e uma sessão para título+thumbnail. Cada uma recebe somente um JSON
+compacto; memória, apps, subagentes e busca ficam desativados. Áudio, música, legendas, imports,
+render, validação e upload rodam diretamente no Python. O status soma input, cache e output por fase,
+e hooks registram apenas métricas de tamanho, sem adicionar conteúdo ao contexto.
+
 Pedidos ficam em uma fila persistente e podem começar imediatamente ou somente entre 01:00 e 05:00
 no fuso `America/Sao_Paulo`. Todo upload automatizado começa como privado. `private_review` termina
 nesse ponto; `scheduled` só agenda quando o pedido original contém `publish_at` explícito com fuso.

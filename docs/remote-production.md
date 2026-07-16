@@ -6,6 +6,11 @@
 de áudio, render e validação, mas usa um único agente Codex e exatamente um par título+thumbnail.
 Os demais modos continuam com suas quantidades e especialistas atuais.
 
+O agente não recebe mais o job inteiro em uma conversa longa. O executor abre sessões efêmeras e
+isoladas para seleção editorial, roteiro, cada imagem e crescimento. Áudio, música, legendas,
+imports, render, validação e upload permanecem determinísticos e não consomem tokens do Codex. O
+contrato exato está em [Contrato compacto do agente remoto](remote-agent-contract.md).
+
 Cada pedido declara:
 
 - `video_format`: `short` ou `long`;
@@ -19,6 +24,11 @@ Cada pedido declara:
 
 `overnight` permite iniciar jobs somente entre 01:00 e 05:00 em `America/Sao_Paulo`. Um job iniciado
 nesse intervalo pode terminar depois das 05:00. A fila executa apenas um job por vez.
+
+Temas específicos também usam exclusivamente o catálogo bíblico local verificado. O Codex escolhe
+somente IDs oferecidos pelo executor; o Python reconstrói briefing e fontes a partir do catálogo.
+Para vídeos longos, a seleção inclui a quantidade mínima de excerpts literais exigida pela duração
+antes da fase de roteiro.
 
 ## Bloqueios de geração de imagem
 
@@ -96,3 +106,7 @@ O serviço usa prioridade reduzida de CPU e I/O e executa como `deploy`. Logs fi
 journalctl -u pipeline-videos-worker.service -n 100 --no-pager
 systemctl status pipeline-videos-worker.timer --no-pager
 ```
+
+O status inclui `current_phase`, `codex_run_count` e `codex_usage`. Os logs JSONL de cada fase ficam
+separados do log principal; hooks registram somente métricas de tamanho e ciclo de vida, sem o
+conteúdo dos prompts, comandos ou respostas.

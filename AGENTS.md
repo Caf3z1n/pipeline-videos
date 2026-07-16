@@ -127,6 +127,12 @@
 
 ## Produção remota econômica
 
+- O executor remoto divide o trabalho em `codex exec --ephemeral` isolados: seleção editorial,
+  roteiro, uma imagem por execução e crescimento. Cada fase lê somente seu JSON compacto e os
+  `allowed_inputs`; nunca peça que uma fase releia README, AGENTS, histórico ou o projeto inteiro.
+- Áudio, música, legendas, imports, render, validação, upload e agendamento são determinísticos e
+  não devem ser entregues ao Codex. Hooks remotos apenas medem eventos/tamanhos e não escrevem em
+  `stdout`.
 - `remote_review` é aditivo e processa roteiro, imagens e crescimento no agente principal, sem
   criar subagentes. Respeite as filas e os mesmos staging paths, mas faça as chamadas de `imagegen`
   sequencialmente e importe cada lote uma única vez.

@@ -119,6 +119,13 @@ O processo local não possui endpoint para chamar a geração de imagens embutid
 Codex. Por isso o `autopilot` automatiza todo o trabalho determinístico, mas ainda depende de workers
 para `imagegen`. Não trocar por API paga, browser ou pay-as-you-go sem aprovação explícita.
 
-Na VPS, `codex exec` é o único processo agente e pode consumir essas filas diretamente. O serviço
-local continua responsável por lock, retomada, validação, upload privado e eventual agendamento;
-isso não cria uma API paga de imagens e não autoriza publicação fora do pedido persistido.
+Na VPS, o executor abre um `codex exec --ephemeral` por fase: seleção editorial quando necessária,
+roteiro, uma execução por imagem e uma execução de crescimento. Cada fase recebe um JSON compacto
+em diretório fora do release Git; não relê README, AGENTS, histórico do job ou manifestos completos.
+Apps, memories, goals, multi-agent e busca web ficam desativados nessa execução. Áudio, música,
+legendas, imports, render e validação são executados diretamente pelo Python.
+
+Hooks de `PostToolUse`, `PreCompact` e `Stop` medem somente evento e tamanho, sem escrever em
+`stdout` e sem injetar contexto. O serviço local continua responsável por lock, retomada, validação,
+upload privado e eventual agendamento; isso não cria uma API paga de imagens e não autoriza
+publicação fora do pedido persistido. Veja `docs/remote-agent-contract.md`.

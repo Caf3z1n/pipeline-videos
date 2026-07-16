@@ -3,20 +3,29 @@ from __future__ import annotations
 import base64
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from pipeline_videos.cli import app
 from pipeline_videos.remote_jobs import (
+    CodexPhaseSpec,
+    RemoteCodexRun,
     RemoteJobStore,
     RemoteVideoRequest,
+    _codex_phase_command,
+    _editorial_sources_phase_spec,
     _failure_with_codex_context,
-    codex_job_prompt,
+    _image_phase_specs,
+    _import_editorial_source_selection,
+    codex_phase_prompt,
+    codex_usage_summary,
     job_is_due,
     prepare_job_project,
     work_once,
 )
+from pipeline_videos.storage import write_json
 
 
 def _request(**updates):
@@ -84,10 +93,163 @@ def test_prepare_job_project_enables_single_variant_without_human_approval(tmp_p
     assert manifest.config.youtube_growth.thumbnail_variants == 1
     assert manifest.config.youtube_publication.allow_automated_private_review_upload is True
     assert all(record.status.value == "pending" for record in manifest.approvals.values())
-    assert "sem criar subagentes" in codex_job_prompt(job, layout)
-    assert "exatamente um título e uma thumbnail" in codex_job_prompt(job, layout)
-    assert "repita exatamente o mesmo prompt" in codex_job_prompt(job, layout)
-    assert "Nunca substitua ou envelheça o personagem" in codex_job_prompt(job, layout)
+    prompt = codex_phase_prompt(Path("/tmp/phase-request.json"))
+    assert "uma fase isolada" in prompt
+    assert "Não leia README, AGENTS.md" in prompt
+    assert "não crie" in prompt.casefold()
+
+
+def test_codex_phase_command_is_ephemeral_compact_and_hooked(tmp_path) -> None:
+    spec = CodexPhaseSpec(
+        phase="image",
+        item_id="scene-001-v001",
+        model="gpt-5.6-luna",
+        reasoning_effort="low",
+        payload={},
+        expected_outputs=(tmp_path / "scene.png",),
+    )
+
+    command = _codex_phase_command(
+        codex_binary="codex",
+        spec=spec,
+        context_dir=tmp_path / "context",
+        output_message=tmp_path / "last-message.txt",
+        hook_script=tmp_path / "remote_codex_hook.py",
+    )
+
+    assert "--ephemeral" in command
+    assert "--ignore-user-config" in command
+    assert "--ignore-rules" in command
+    assert "multi_agent" in command
+    assert 'web_search="disabled"' in command
+    assert 'model_reasoning_effort="low"' in command
+    assert any("hooks.PostToolUse" in value for value in command)
+    assert any("hooks.PreCompact" in value for value in command)
+    assert any("hooks.Stop" in value for value in command)
+
+
+def test_image_phases_receive_one_item_and_previous_staging_only(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(topic="Coragem"))
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+    write_json(
+        layout.image_queue,
+        {
+            "orchestration": {
+                "recommended_model": "gpt-5.6-luna",
+                "reasoning_effort": "low",
+            },
+            "visual_standard": {"id": "cinematic-family-3d-v1"},
+            "generation_retry_policy": {"maximum_attempts_per_item": 3},
+            "items": [
+                {
+                    "job_id": "scene-001-v001",
+                    "status": "waiting_external",
+                    "prompt": "PROMPT EXCLUSIVO UM",
+                    "staging_path": "images/staging/scene-001/v001.png",
+                },
+                {
+                    "job_id": "scene-002-v001",
+                    "status": "waiting_external",
+                    "prompt": "PROMPT EXCLUSIVO DOIS",
+                    "staging_path": "images/staging/scene-002/v001.png",
+                },
+            ],
+        },
+    )
+
+    specs = _image_phase_specs(layout)
+
+    assert len(specs) == 2
+    assert specs[0].payload["task"]["item"]["prompt"] == "PROMPT EXCLUSIVO UM"
+    assert "PROMPT EXCLUSIVO DOIS" not in json.dumps(specs[0].payload, ensure_ascii=False)
+    assert specs[0].payload["allowed_inputs"] == []
+    assert specs[1].payload["allowed_inputs"] == [str(specs[0].expected_outputs[0])]
+
+
+def test_specific_topic_uses_compact_catalog_selection_phase(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(topic="coragem para conversas difíceis"))
+    projects_root = tmp_path / "projects"
+    layout = prepare_job_project(job, projects_root=projects_root)
+
+    spec = _editorial_sources_phase_spec(
+        job,
+        layout,
+        projects_root=projects_root,
+    )
+
+    assert spec.phase == "editorial_sources"
+    assert spec.model == "gpt-5.6-luna"
+    assert spec.reasoning_effort == "low"
+    assert spec.payload["allowed_inputs"] == []
+    assert spec.payload["task"]["desired_candidate_count"] == 1
+    assert spec.payload["task"]["candidates"]
+
+
+def test_long_job_materializes_enough_verified_sources_without_human_approval(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(video_format="long", duration_seconds=540))
+    projects_root = tmp_path / "projects"
+    layout = prepare_job_project(job, projects_root=projects_root)
+    spec = _editorial_sources_phase_spec(
+        job,
+        layout,
+        projects_root=projects_root,
+    )
+    task = spec.payload["task"]
+    main_id = task["required_main_candidate_id"]
+    supporting = [
+        item["candidate_id"] for item in task["candidates"] if item["candidate_id"] != main_id
+    ][: task["desired_candidate_count"] - 1]
+    write_json(
+        spec.expected_outputs[0],
+        {
+            "main_candidate_id": main_id,
+            "supporting_candidate_ids": supporting,
+            "rationale": "Passagens complementares verificadas para o tema.",
+        },
+    )
+
+    _import_editorial_source_selection(
+        job,
+        layout,
+        spec.expected_outputs[0],
+        projects_root=projects_root,
+    )
+
+    briefing = json.loads(layout.briefing.read_text(encoding="utf-8"))
+    sources = json.loads(layout.sources.read_text(encoding="utf-8"))["entries"]
+    assert len([source for source in sources if source["verified"]]) == 7
+    assert len(briefing["complementary_references"]) == 6
+    assert all(
+        record.status.value == "pending" for record in layout.load_manifest().approvals.values()
+    )
+
+
+def test_codex_usage_summary_separates_cached_and_fresh_tokens(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request())
+    run = {
+        "phase": "image",
+        "item_id": "scene-001-v001",
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "low",
+        "started_at": "2026-07-16T00:00:00Z",
+        "finished_at": "2026-07-16T00:01:00Z",
+        "exit_code": 0,
+        "input_tokens": 1000,
+        "cached_input_tokens": 800,
+        "output_tokens": 100,
+        "reasoning_output_tokens": 20,
+    }
+    job = job.model_copy(update={"codex_runs": [RemoteCodexRun.model_validate(run)]})
+
+    usage = codex_usage_summary(job)
+
+    assert usage["fresh_input_tokens"] == 200
+    assert usage["total_tokens"] == 1100
+    assert usage["fresh_plus_output_tokens"] == 300
 
 
 def test_remote_failure_keeps_moderation_as_root_cause(tmp_path) -> None:
