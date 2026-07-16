@@ -21,6 +21,7 @@ from pipeline_videos.remote_jobs import (
     _image_phase_specs,
     _import_editorial_source_selection,
     _normalize_shorts_script_payload,
+    _recover_generated_image_outputs,
     _shorts_script_repair_phase_spec,
     codex_phase_prompt,
     codex_usage_summary,
@@ -406,6 +407,66 @@ def test_codex_usage_summary_separates_cached_and_fresh_tokens(tmp_path) -> None
     assert usage["fresh_input_tokens"] == 200
     assert usage["total_tokens"] == 1100
     assert usage["fresh_plus_output_tokens"] == 300
+
+
+def test_remote_image_phase_recovers_png_from_ephemeral_codex_session(tmp_path) -> None:
+    thread_id = "019f699a-9ff9-7092-983b-26e5e8937c16"
+    phase_log = tmp_path / "phase.jsonl"
+    phase_log.write_text(
+        json.dumps({"type": "thread.started", "thread_id": thread_id}) + "\n",
+        encoding="utf-8",
+    )
+    generated = tmp_path / ".codex" / "generated_images" / thread_id / "exec-image.png"
+    generated.parent.mkdir(parents=True)
+    generated.write_bytes(b"\x89PNG\r\n\x1a\nrecovered image")
+    destination = tmp_path / "project" / "images" / "staging" / "scene-001.png"
+    spec = CodexPhaseSpec(
+        phase="image",
+        item_id="scene-001-v001",
+        model="gpt-5.6-terra",
+        reasoning_effort="low",
+        payload={},
+        expected_outputs=(destination,),
+    )
+
+    recovered = _recover_generated_image_outputs(
+        spec,
+        phase_log,
+        codex_home=tmp_path / ".codex",
+    )
+
+    assert recovered == [(generated, destination)]
+    assert destination.read_bytes() == generated.read_bytes()
+
+
+def test_remote_image_recovery_rejects_non_png_cache_artifact(tmp_path) -> None:
+    thread_id = "019f699a-9ff9-7092-983b-26e5e8937c16"
+    phase_log = tmp_path / "phase.jsonl"
+    phase_log.write_text(
+        json.dumps({"type": "thread.started", "thread_id": thread_id}) + "\n",
+        encoding="utf-8",
+    )
+    generated = tmp_path / ".codex" / "generated_images" / thread_id / "exec-image.png"
+    generated.parent.mkdir(parents=True)
+    generated.write_bytes(b"not really a png")
+    destination = tmp_path / "project" / "images" / "staging" / "scene-001.png"
+    spec = CodexPhaseSpec(
+        phase="image",
+        item_id="scene-001-v001",
+        model="gpt-5.6-terra",
+        reasoning_effort="low",
+        payload={},
+        expected_outputs=(destination,),
+    )
+
+    recovered = _recover_generated_image_outputs(
+        spec,
+        phase_log,
+        codex_home=tmp_path / ".codex",
+    )
+
+    assert recovered == []
+    assert not destination.exists()
 
 
 def test_remote_failure_keeps_moderation_as_root_cause(tmp_path) -> None:

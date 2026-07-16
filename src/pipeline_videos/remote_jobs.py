@@ -49,6 +49,8 @@ DEFAULT_REMOTE_JOBS_DIR = REPO_ROOT / "remote-jobs"
 REMOTE_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 DEFAULT_REMOTE_CODEX_MODEL = "gpt-5.6-terra"
 JOB_ID_PATTERN = re.compile(r"^video-[0-9]{8}-[0-9]{6}-[a-f0-9]{8}$")
+CODEX_THREAD_ID_PATTERN = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 REMOTE_DISABLED_CODEX_FEATURES = (
     "apps",
     "browser_use",
@@ -339,6 +341,16 @@ def prepare_job_project(
 
 def _is_nonempty_file(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
+
+
+def _is_png_file(path: Path) -> bool:
+    if not _is_nonempty_file(path):
+        return False
+    try:
+        with path.open("rb") as handle:
+            return handle.read(len(PNG_SIGNATURE)) == PNG_SIGNATURE
+    except OSError:
+        return False
 
 
 def _project_file(layout: ProjectLayout, value: str) -> Path:
@@ -1194,6 +1206,65 @@ def _usage_from_codex_jsonl(path: Path) -> dict[str, int]:
     return usage
 
 
+def _codex_thread_id_from_jsonl(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        with suppress(json.JSONDecodeError):
+            event = json.loads(line)
+            if event.get("type") != "thread.started":
+                continue
+            thread_id = str(event.get("thread_id", "")).strip().casefold()
+            if CODEX_THREAD_ID_PATTERN.fullmatch(thread_id):
+                return thread_id
+    return None
+
+
+def _recover_generated_image_outputs(
+    spec: CodexPhaseSpec,
+    phase_log: Path,
+    *,
+    codex_home: Path,
+) -> list[tuple[Path, Path]]:
+    if spec.phase not in {"image", "youtube_growth"}:
+        return []
+    missing_pngs = [
+        path
+        for path in spec.expected_outputs
+        if path.suffix.casefold() == ".png" and not _is_nonempty_file(path)
+    ]
+    if not missing_pngs:
+        return []
+    thread_id = _codex_thread_id_from_jsonl(phase_log)
+    if thread_id is None:
+        return []
+    generated_root = (codex_home.expanduser().resolve() / "generated_images").resolve()
+    session_dir = (generated_root / thread_id).resolve()
+    try:
+        session_dir.relative_to(generated_root)
+    except ValueError:
+        return []
+    if not session_dir.is_dir():
+        return []
+    candidates = sorted(
+        (path for path in session_dir.glob("exec-*.png") if _is_png_file(path)),
+        key=lambda path: (path.stat().st_mtime_ns, path.name),
+    )
+    if len(candidates) < len(missing_pngs):
+        return []
+    selected = candidates[-len(missing_pngs) :]
+    recovered: list[tuple[Path, Path]] = []
+    for source, destination in zip(selected, missing_pngs, strict=True):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        if not _is_png_file(destination):
+            with suppress(OSError):
+                destination.unlink()
+            continue
+        recovered.append((source, destination))
+    return recovered
+
+
 def _phase_slug(spec: CodexPhaseSpec) -> str:
     value = f"{spec.phase}-{spec.item_id or 'main'}".casefold()
     return re.sub(r"[^a-z0-9._-]+", "-", value).strip("-")[:100]
@@ -1269,6 +1340,19 @@ def _execute_codex_phase(
     except subprocess.TimeoutExpired:
         exit_code = 124
         error = f"Fase {phase_label} excedeu {timeout_seconds} segundos."
+    recovered_outputs: list[tuple[Path, Path]] = []
+    if exit_code == 0:
+        recovered_outputs = _recover_generated_image_outputs(
+            spec,
+            phase_log,
+            codex_home=Path(env.get("CODEX_HOME") or Path.home() / ".codex"),
+        )
+        if recovered_outputs and output_message.is_file():
+            with output_message.open("a", encoding="utf-8") as message:
+                message.write(
+                    "\nRecuperacao deterministica: o PNG gerado pelo imagegen foi "
+                    "materializado no staging exigido.\n"
+                )
     missing = [str(path) for path in spec.expected_outputs if not _is_nonempty_file(path)]
     if exit_code == 0 and missing:
         exit_code = 2
@@ -1308,6 +1392,11 @@ def _execute_codex_phase(
             f"input={record.input_tokens} cached={record.cached_input_tokens} "
             f"output={record.output_tokens}\n"
         )
+        for source, destination in recovered_outputs:
+            log.write(
+                f"[{finished_at}] imagegen_artifact_recovered phase={phase_label} "
+                f"source={source} destination={destination}\n"
+            )
     for path in (phase_log, hook_log, output_message, latest_message, master_log):
         if path.exists():
             with suppress(OSError):

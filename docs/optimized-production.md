@@ -122,6 +122,10 @@ para `imagegen`. Não trocar por API paga, browser ou pay-as-you-go sem aprovaç
 Na VPS, o executor abre um `codex exec --ephemeral` por fase: seleção editorial quando necessária,
 roteiro, uma execução por imagem e uma execução de crescimento. Cada fase recebe um JSON compacto
 em diretório fora do release Git; não relê README, AGENTS, histórico do job ou manifestos completos.
+Se o `imagegen` concluir mas o wrapper não expuser um caminho copiável, o executor recupera somente
+o PNG da sessão efêmera corrente em `.codex/generated_images/<thread_id>`, valida a assinatura do
+arquivo e o materializa no `staging_path` esperado. Ele não consulta sessões anteriores nem
+substitui um staging já existente.
 Apps, memories, goals, multi-agent e busca web ficam desativados nessa execução. Áudio, música,
 legendas, imports, render e validação são executados diretamente pelo Python.
 
