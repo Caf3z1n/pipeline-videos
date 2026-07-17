@@ -608,6 +608,28 @@ def test_growth_accepts_photographic_markers_in_negative_constraints(tmp_path) -
     )
 
 
+def test_growth_ignores_long_avoid_section_with_photographic_markers(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(tmp_path, video_format="short")
+    queue = prepare_growth_queue(layout)
+    package = _package(queue, format_name="short")
+    constrained_metadata = package.metadata.model_copy(
+        update={
+            "thumbnail_prompt": (
+                f"{package.metadata.thumbnail_prompt}\n"
+                "Avoid: qualquer mudança na arte-base além da composição editorial; texto "
+                "extra ou duplicado; fotorrealismo, fotografia, live action, editorial "
+                "photography, realistic photography e photorealistic portrait."
+            )
+        }
+    )
+
+    _validate_package(
+        layout,
+        package.model_copy(update={"metadata": constrained_metadata}),
+        queue,
+    )
+
+
 def test_growth_rejects_title_that_repeats_the_paired_thumbnail_text(tmp_path) -> None:
     layout = _project_with_editorial_inputs(tmp_path)
     queue = prepare_growth_queue(layout)

@@ -1312,6 +1312,108 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     )
 
 
+def _growth_correction_checkpoint(
+    layout: ProjectLayout,
+    validation_error: Exception,
+) -> CodexPhaseSpec:
+    base_spec = _growth_phase_spec(layout)
+    package = base_spec.expected_outputs[0]
+    payload = dict(base_spec.payload)
+    allowed_inputs = list(payload["allowed_inputs"])
+    if package.is_file():
+        allowed_inputs.append(str(package))
+    task = dict(payload["task"])
+    task.update(
+        {
+            "kind": "correct_one_title_thumbnail_pair",
+            "validation_error": str(validation_error)[:4000],
+            "instructions": [
+                "Corrija somente o pacote e a thumbnail integrados que falharam na validação.",
+                (
+                    "Preserve título, promessa, passagem, personagem, cena de abertura e todos "
+                    "os campos já válidos."
+                ),
+                (
+                    "Mantenha cinematic-family-3d-v1 e animação 3D cinematográfica familiar "
+                    "como estilo positivo. Termos fotográficos podem aparecer somente dentro "
+                    "de restrições negativas como Avoid."
+                ),
+                (
+                    "Se o estilo positivo pedir fotografia, reescreva o prompt e regenere uma "
+                    "única vez a thumbnail a partir da imagem de abertura obrigatória."
+                ),
+                (
+                    "Nesta correção, ignore a regra de pular staging já existente: sobrescreva "
+                    "explicitamente cada saída que precisar ser corrigida."
+                ),
+                (
+                    "Sobrescreva outputs.package e outputs.thumbnails. Não altere project.json, "
+                    "fila, aprovações ou outros ativos."
+                ),
+            ],
+        }
+    )
+    payload["allowed_inputs"] = allowed_inputs
+    payload["task"] = task
+    return CodexPhaseSpec(
+        phase="youtube_growth_correction",
+        item_id=base_spec.item_id,
+        model=base_spec.model,
+        reasoning_effort=base_spec.reasoning_effort,
+        payload=payload,
+        expected_outputs=base_spec.expected_outputs,
+    )
+
+
+def _growth_correction_is_available(job: RemoteVideoJob) -> bool:
+    correction_runs = sum(
+        run.phase == "youtube_growth_correction" and run.job_attempt == job.attempts
+        for run in job.codex_runs
+    )
+    return correction_runs < 1
+
+
+def _growth_package_repair_is_applicable(layout: ProjectLayout) -> bool:
+    project = layout.load_manifest()
+    return (
+        project.config.youtube_growth.enabled
+        and project.stages["youtube_growth"].status == StageStatus.WAITING_EXTERNAL
+        and _is_nonempty_file(layout.growth_package_staging)
+    )
+
+
+def _repair_growth_package_failure(
+    job: RemoteVideoJob,
+    layout: ProjectLayout,
+    store: RemoteJobStore,
+    error: Exception,
+    *,
+    repo_root: Path,
+    timeout_seconds: int,
+) -> RemoteVideoJob:
+    latest, _ = store.find(job.job_id)
+    if not _growth_correction_is_available(latest):
+        raise RuntimeError(
+            "A tentativa atual já usou o checkpoint único de correção do crescimento. "
+            "O job será retomado automaticamente em uma nova tentativa."
+        ) from error
+    corrected = _execute_agent_checkpoint(
+        latest,
+        _growth_correction_checkpoint(layout, error),
+        store,
+        repo_root=repo_root,
+        timeout_seconds=timeout_seconds,
+    )
+    layout.append_event(
+        {
+            "event": "remote_growth_automatic_repair",
+            "job_id": job.job_id,
+            "error": str(error)[:2000],
+        }
+    )
+    return corrected
+
+
 def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     from pipeline_videos.editorial import citation_target_range
     from pipeline_videos.long_form_script import minimum_long_form_reengagements
@@ -2042,6 +2144,16 @@ def _produce_remote_candidate(
         try:
             result = run_autopilot_once(layout, allow_external=True, review_candidate=True)
         except Exception as exc:
+            if _growth_package_repair_is_applicable(layout):
+                job = _repair_growth_package_failure(
+                    job,
+                    layout,
+                    store,
+                    exc,
+                    repo_root=repo_root,
+                    timeout_seconds=timeout_seconds,
+                )
+                continue
             if not _shorts_pipeline_repair_is_applicable(layout):
                 raise
             job = _repair_shorts_pipeline_failure(

@@ -58,6 +58,10 @@ tentativa ainda nÃ£o concluir, o job volta para `queued` (ou permanece em `wai
 backoff exponencial entre um minuto e seis horas, preservando projeto, sessÃ£o, artefatos e causa do
 erro. O estado `failed` permanece apenas para compatibilidade e retry manual de jobs antigos.
 
+No crescimento, o checkpoint de reparo é limitado a uma execução por tentativa. O validador exige
+o padrão 3D como estilo positivo e ignora termos fotográficos presentes dentro de seções negativas
+como `Avoid:`; fotografia ou live action declarados como estilo positivo continuam bloqueados.
+
 `render-review` usa os ativos ativos em qualidade final sem registrar aprovação humana. Upload
 automatizado exige a política de revisão privada, render candidato válido, validação técnica e
 visibilidade inicial `private`. Agendamento exige também `publication_mode=scheduled` e

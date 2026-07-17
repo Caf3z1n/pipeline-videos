@@ -21,6 +21,8 @@ from pipeline_videos.remote_jobs import (
     _editorial_sources_phase_spec,
     _execute_agent_checkpoint,
     _failure_with_codex_context,
+    _growth_correction_checkpoint,
+    _growth_correction_is_available,
     _growth_phase_spec,
     _image_phase_specs,
     _import_editorial_source_selection,
@@ -478,6 +480,62 @@ def test_shorts_correction_allows_two_checkpoints_in_the_persistent_session(tmp_
     assert _shorts_script_correction_is_available(two_corrections) is False
     next_attempt = two_corrections.model_copy(update={"attempts": 2})
     assert _shorts_script_correction_is_available(next_attempt) is True
+
+
+def test_growth_correction_is_one_checkpoint_per_job_attempt(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(topic="Cuidado"))
+    correction_run = RemoteCodexRun(
+        phase="youtube_growth_correction",
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
+        job_attempt=1,
+        started_at="2026-07-17T10:00:00Z",
+        finished_at="2026-07-17T10:01:00Z",
+        exit_code=0,
+    )
+
+    assert _growth_correction_is_available(job.model_copy(update={"attempts": 1})) is True
+    corrected = job.model_copy(update={"attempts": 1, "codex_runs": [correction_run]})
+    assert _growth_correction_is_available(corrected) is False
+    assert _growth_correction_is_available(corrected.model_copy(update={"attempts": 2})) is True
+
+
+def test_growth_correction_checkpoint_preserves_queue_and_reports_error(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(topic="Cuidado"))
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+    context = layout.root / "youtube" / "growth-context.json"
+    reference = layout.root / "images" / "opening.png"
+    package = layout.growth_package_staging
+    thumbnail = layout.growth_staging / "thumbnail-001.png"
+    reference.parent.mkdir(parents=True, exist_ok=True)
+    reference.write_bytes(b"reference")
+    write_json(context, {"project_id": job.job_id})
+    write_json(package, {"invalid": True})
+    write_json(
+        layout.growth_queue,
+        {
+            "job_id": "growth-test",
+            "inputs": {
+                "compact_context": "youtube/growth-context.json",
+                "thumbnail_visual_reference_path": "images/opening.png",
+                "thumbnail_visual_reference_scene_id": "scene-001",
+            },
+            "outputs": {
+                "package": "youtube/staging/youtube-growth-specialist/package.json",
+                "thumbnails": ["youtube/staging/youtube-growth-specialist/thumbnail-001.png"],
+            },
+            "visual_standard": {"reference_policy": "required_opening_scene_image"},
+        },
+    )
+
+    spec = _growth_correction_checkpoint(layout, ValueError("estilo fotográfico inválido"))
+
+    assert spec.phase == "youtube_growth_correction"
+    assert spec.expected_outputs == (package, thumbnail)
+    assert str(package) in spec.payload["allowed_inputs"]
+    assert "estilo fotográfico inválido" in spec.payload["task"]["validation_error"]
 
 
 def test_automatic_recovery_backoff_starts_fast_and_is_capped() -> None:

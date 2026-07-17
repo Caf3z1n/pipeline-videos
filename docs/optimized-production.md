@@ -89,6 +89,11 @@ O importador aceita somente `generated_integrated_art`. Não existe compositor l
 texto, reutilização de outra cena ou fallback para pacote antigo. Uma saída válida é aceita; retries
 adicionais existem apenas para `moderation_blocked` sem bitmap.
 
+O guard visual exige os marcadores positivos de `cinematic-family-3d-v1` e animação 3D, mas
+desconsidera marcadores fotográficos declarados dentro de seções negativas como `Avoid:`. Se um
+pacote pedir fotografia como estilo positivo ou falhar em outra regra determinística de crescimento,
+o remoto permite um único checkpoint de correção por tentativa antes de voltar ao backoff.
+
 ## Áudio manual
 
 Quando `audio.provider=local_manual`, o pipeline prepara `audio/manual-queue.json`, apresenta

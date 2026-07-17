@@ -656,7 +656,8 @@ def _validate_thumbnail_visual_standard(
     if not isinstance(contract, dict) or not contract.get("enforced"):
         return
     prompt = package.metadata.thumbnail_prompt.strip()
-    normalized_prompt = _normalized_search_text(prompt)
+    positive_prompt = _prompt_without_negative_sections(prompt)
+    normalized_prompt = _normalized_search_text(positive_prompt)
     standard_id = str(contract.get("id", "")).strip()
     if standard_id and _normalized_search_text(standard_id) not in normalized_prompt:
         raise ValueError(
@@ -717,6 +718,29 @@ def _contains_positive_style_marker(normalized_prompt: str, marker: str) -> bool
         if not any(token in negations for token in prefix):
             return True
     return False
+
+
+_NEGATIVE_PROMPT_SECTION_LABELS = {
+    "avoid",
+    "evitar",
+    "evite",
+    "negative constraints",
+    "negative prompt",
+    "restricoes negativas",
+}
+
+
+def _prompt_without_negative_sections(prompt: str) -> str:
+    positive_lines: list[str] = []
+    inside_negative_section = False
+    for line in prompt.splitlines():
+        section_match = re.match(r"^\s*([^:\n]{1,80})\s*:\s*(.*)$", line)
+        if section_match:
+            label = _normalized_search_text(section_match.group(1))
+            inside_negative_section = label in _NEGATIVE_PROMPT_SECTION_LABELS
+        if not inside_negative_section:
+            positive_lines.append(line)
+    return "\n".join(positive_lines)
 
 
 def _safe_staging_file(layout: ProjectLayout, relative_path: str) -> Path:
