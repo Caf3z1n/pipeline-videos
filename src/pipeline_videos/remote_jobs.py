@@ -8,7 +8,7 @@ import subprocess
 import time
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
@@ -46,7 +46,7 @@ from pipeline_videos.validation import validate_project
 from pipeline_videos.verse_selection import create_auto_video
 
 REMOTE_JOB_SCHEMA_VERSION = "1.0"
-REMOTE_JOB_STATE_SCHEMA_VERSION = "1.3"
+REMOTE_JOB_STATE_SCHEMA_VERSION = "1.4"
 DEFAULT_REMOTE_JOBS_DIR = REPO_ROOT / "remote-jobs"
 REMOTE_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 DEFAULT_REMOTE_CODEX_MODEL = "gpt-5.6-sol"
@@ -85,6 +85,7 @@ class RemoteCodexRun(PipelineModel):
     item_id: str | None = None
     model: str
     reasoning_effort: RemoteReasoningEffort
+    job_attempt: int = 0
     started_at: str
     finished_at: str
     exit_code: int
@@ -150,7 +151,7 @@ class RemoteVideoRequest(PipelineModel):
 
 
 class RemoteVideoJob(PipelineModel):
-    schema_version: Literal["1.0", "1.1", "1.2", "1.3"] = REMOTE_JOB_STATE_SCHEMA_VERSION
+    schema_version: Literal["1.0", "1.1", "1.2", "1.3", "1.4"] = REMOTE_JOB_STATE_SCHEMA_VERSION
     job_id: str
     status: RemoteJobStatus
     request: RemoteVideoRequest
@@ -165,6 +166,8 @@ class RemoteVideoJob(PipelineModel):
     codex_session_id: str | None = None
     codex_runs: list[RemoteCodexRun] = Field(default_factory=list)
     codex_exit_code: int | None = None
+    automatic_recovery_count: int = 0
+    next_retry_at: datetime | None = None
     schedule_occurrence_id: str | None = None
     error: str | None = None
 
@@ -290,7 +293,13 @@ class RemoteJobStore:
         job, _ = self.find(job_id)
         if job.status != "failed":
             raise RuntimeError("Somente jobs com falha podem voltar para a fila.")
-        return self.transition(job, "queued", error=None, codex_exit_code=None)
+        return self.transition(
+            job,
+            "queued",
+            error=None,
+            codex_exit_code=None,
+            next_retry_at=None,
+        )
 
     def due_jobs(self, *, now: datetime | None = None) -> list[RemoteVideoJob]:
         current = now or datetime.now(UTC)
@@ -299,6 +308,8 @@ class RemoteJobStore:
 
 def job_is_due(job: RemoteVideoJob, now: datetime | None = None) -> bool:
     current = (now or datetime.now(UTC)).astimezone(UTC)
+    if job.next_retry_at and current < job.next_retry_at.astimezone(UTC):
+        return False
     request = job.request
     if request.not_before and current < request.not_before.astimezone(UTC):
         return False
@@ -957,6 +968,15 @@ def _shorts_script_correction_checkpoint(
                         "Sobrescreva apenas package_path e execute o preflight da fila. Corrija "
                         "todos os erros retornados até obter valid=true."
                     ),
+                    (
+                        "validation_error tambÃ©m pode vir de uma etapa determinÃ­stica posterior "
+                        "ao preflight. Nesse caso, corrija o pacote para satisfazer explicitamente "
+                        "essa restriÃ§Ã£o antes de encerrar."
+                    ),
+                    (
+                        "Copie job_id e input_hash da fila atual, mesmo quando package_path ainda "
+                        "contiver uma versÃ£o anterior do pacote."
+                    ),
                 ],
             },
         },
@@ -965,8 +985,62 @@ def _shorts_script_correction_checkpoint(
 
 
 def _shorts_script_correction_is_available(job: RemoteVideoJob) -> bool:
-    correction_runs = sum(run.phase == "shorts_script_correction" for run in job.codex_runs)
+    correction_runs = sum(
+        run.phase == "shorts_script_correction" and run.job_attempt == job.attempts
+        for run in job.codex_runs
+    )
     return correction_runs < 2
+
+
+def _shorts_pipeline_repair_is_applicable(layout: ProjectLayout) -> bool:
+    project = layout.load_manifest()
+    return (
+        project.video_format == "short"
+        and project.config.shorts_script.enabled
+        and project.stages["scenes"].status == StageStatus.FAILED
+    )
+
+
+def _repair_shorts_pipeline_failure(
+    job: RemoteVideoJob,
+    layout: ProjectLayout,
+    store: RemoteJobStore,
+    error: Exception,
+    *,
+    repo_root: Path,
+    timeout_seconds: int,
+) -> RemoteVideoJob:
+    from pipeline_videos.shorts_script import (
+        import_shorts_script_package,
+        prepare_shorts_script_queue,
+        validate_shorts_script_package_staging,
+    )
+
+    latest, _ = store.find(job.job_id)
+    if not _shorts_script_correction_is_available(latest):
+        raise RuntimeError(
+            "A tentativa atual esgotou dois checkpoints de correÃ§Ã£o do roteiro de Short. "
+            "O job serÃ¡ retomado automaticamente em uma nova tentativa."
+        ) from error
+    prepare_shorts_script_queue(layout, force=True)
+    latest = _execute_agent_checkpoint(
+        latest,
+        _shorts_script_correction_checkpoint(layout, error),
+        store,
+        repo_root=repo_root,
+        timeout_seconds=timeout_seconds,
+    )
+    validate_shorts_script_package_staging(layout)
+    import_shorts_script_package(layout, force=True)
+    layout.append_event(
+        {
+            "event": "remote_pipeline_automatic_repair",
+            "job_id": job.job_id,
+            "failed_stage": "scenes",
+            "error": str(error)[:2000],
+        }
+    )
+    return latest
 
 
 def _ensure_valid_shorts_script_staging(
@@ -1652,6 +1726,7 @@ def _execute_agent_checkpoint(
         item_id=spec.item_id,
         model=spec.model,
         reasoning_effort=spec.reasoning_effort,
+        job_attempt=latest.attempts,
         started_at=started_at,
         finished_at=finished_at,
         exit_code=exit_code,
@@ -1952,7 +2027,20 @@ def _produce_remote_candidate(
             repo_root=repo_root,
             timeout_seconds=timeout_seconds,
         )
-        result = run_autopilot_once(layout, allow_external=True, review_candidate=True)
+        try:
+            result = run_autopilot_once(layout, allow_external=True, review_candidate=True)
+        except Exception as exc:
+            if not _shorts_pipeline_repair_is_applicable(layout):
+                raise
+            job = _repair_shorts_pipeline_failure(
+                job,
+                layout,
+                store,
+                exc,
+                repo_root=repo_root,
+                timeout_seconds=timeout_seconds,
+            )
+            continue
         if result.status == "completed":
             if result.validation_ok is not True:
                 raise RuntimeError("A validação técnica do candidato remoto falhou.")
@@ -2053,7 +2141,7 @@ def work_once(
             store=store,
             schedule_store=RemoteScheduleStore(store.root),
         )
-    waiting = list(reversed(store.list(status="waiting_youtube")))
+    waiting = [job for job in reversed(store.list(status="waiting_youtube")) if job_is_due(job)]
     if waiting:
         job = waiting[0]
         if dry_run:
@@ -2072,9 +2160,15 @@ def work_once(
                 .isoformat()
                 .replace("+00:00", "Z"),
                 error=None,
+                next_retry_at=None,
             )
         except Exception as exc:
-            return store.transition(job, "failed", error=str(exc)[:2000])
+            return _schedule_automatic_recovery(
+                store,
+                job,
+                exc,
+                status="waiting_youtube",
+            )
 
     due = store.due_jobs()
     if not due:
@@ -2082,7 +2176,13 @@ def work_once(
     job = due[0]
     if dry_run:
         return job
-    job = store.transition(job, "running", attempts=job.attempts + 1, error=None)
+    job = store.transition(
+        job,
+        "running",
+        attempts=job.attempts + 1,
+        error=None,
+        next_retry_at=None,
+    )
     try:
         layout = prepare_job_project(job, projects_root=projects_root)
         job = store.transition(job, "running", project_path=str(layout.root))
@@ -2101,12 +2201,46 @@ def work_once(
         return store.transition(job, "completed", **updates)
     except Exception as exc:
         latest, _ = store.find(job.job_id)
-        return store.transition(
+        return _schedule_automatic_recovery(
+            store,
             latest,
-            "failed",
-            current_phase=None,
-            error=_failure_with_codex_context(latest, store, exc),
+            exc,
+            status="queued",
         )
+
+
+def _automatic_recovery_delay_seconds(recovery_count: int) -> int:
+    exponent = min(max(recovery_count - 1, 0), 9)
+    return min(21_600, 60 * (2**exponent))
+
+
+def _schedule_automatic_recovery(
+    store: RemoteJobStore,
+    job: RemoteVideoJob,
+    exc: Exception,
+    *,
+    status: Literal["queued", "waiting_youtube"],
+) -> RemoteVideoJob:
+    latest, _ = store.find(job.job_id)
+    recovery_count = latest.automatic_recovery_count + 1
+    delay_seconds = _automatic_recovery_delay_seconds(recovery_count)
+    next_retry_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
+    error = _failure_with_codex_context(latest, store, exc)
+    recovered = store.transition(
+        latest,
+        status,
+        current_phase=None,
+        automatic_recovery_count=recovery_count,
+        next_retry_at=next_retry_at,
+        error=error,
+    )
+    with store.log_path(job.job_id).open("a", encoding="utf-8") as log:
+        log.write(
+            f"[{utc_now()}] automatic_recovery_scheduled status={status} "
+            f"count={recovery_count} next_retry_at={next_retry_at.isoformat()} "
+            f"error={error[:500]!r}\n"
+        )
+    return recovered
 
 
 def codex_usage_summary(job: RemoteVideoJob) -> dict[str, int]:
@@ -2142,6 +2276,12 @@ def job_summary(job: RemoteVideoJob) -> dict[str, Any]:
         "schedule_occurrence_id": job.schedule_occurrence_id,
         "codex_run_count": len(job.codex_runs),
         "codex_usage": codex_usage_summary(job),
+        "automatic_recovery_count": job.automatic_recovery_count,
+        "next_retry_at": (
+            job.next_retry_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+            if job.next_retry_at
+            else None
+        ),
         "error": job.error,
         "updated_at": job.updated_at,
     }

@@ -16,6 +16,7 @@ from pipeline_videos.remote_jobs import (
     RemoteCodexRun,
     RemoteJobStore,
     RemoteVideoRequest,
+    _automatic_recovery_delay_seconds,
     _codex_agent_command,
     _editorial_sources_phase_spec,
     _execute_agent_checkpoint,
@@ -446,18 +447,27 @@ def test_shorts_correction_allows_two_checkpoints_in_the_persistent_session(tmp_
         phase="shorts_script_correction",
         model="gpt-5.6-sol",
         reasoning_effort="medium",
+        job_attempt=1,
         started_at="2026-07-16T09:00:00Z",
         finished_at="2026-07-16T09:01:00Z",
         exit_code=0,
     )
 
-    one_correction = job.model_copy(update={"codex_runs": [correction_run]})
+    one_correction = job.model_copy(update={"attempts": 1, "codex_runs": [correction_run]})
     two_corrections = one_correction.model_copy(
         update={"codex_runs": [correction_run, correction_run]}
     )
 
     assert _shorts_script_correction_is_available(one_correction) is True
     assert _shorts_script_correction_is_available(two_corrections) is False
+    next_attempt = two_corrections.model_copy(update={"attempts": 2})
+    assert _shorts_script_correction_is_available(next_attempt) is True
+
+
+def test_automatic_recovery_backoff_starts_fast_and_is_capped() -> None:
+    assert _automatic_recovery_delay_seconds(1) == 60
+    assert _automatic_recovery_delay_seconds(2) == 120
+    assert _automatic_recovery_delay_seconds(20) == 21_600
 
 
 def test_remote_image_phase_delegates_two_compact_workers_in_parallel(tmp_path) -> None:
@@ -748,6 +758,29 @@ def test_work_once_dry_run_does_not_claim_or_execute_job(tmp_path) -> None:
     assert persisted.project_path is None
 
 
+def test_work_once_requeues_failure_for_automatic_recovery(tmp_path, monkeypatch) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    queued = store.enqueue(_request())
+
+    def fail_prepare(*args, **kwargs):
+        raise RuntimeError("falha recuperavel de teste")
+
+    monkeypatch.setattr("pipeline_videos.remote_jobs.prepare_job_project", fail_prepare)
+
+    recovered = work_once(
+        store=store,
+        projects_root=tmp_path / "projects",
+        repo_root=tmp_path,
+    )
+
+    assert recovered is not None
+    assert recovered.job_id == queued.job_id
+    assert recovered.status == "queued"
+    assert recovered.automatic_recovery_count == 1
+    assert recovered.next_retry_at is not None
+    assert "falha recuperavel de teste" in (recovered.error or "")
+
+
 def test_remote_cli_accepts_utf8_base64_payload(tmp_path) -> None:
     payload = _request(topic="Fé em tempos difíceis").model_dump(mode="json")
     encoded = base64.b64encode(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode(
@@ -779,3 +812,13 @@ def test_not_before_delays_immediate_job(tmp_path) -> None:
 
     assert job_is_due(job, now) is False
     assert job_is_due(job, now + timedelta(hours=2)) is True
+
+
+def test_next_retry_at_delays_automatic_recovery(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    now = datetime.now(UTC)
+    job = store.enqueue(_request())
+    waiting = store.transition(job, "queued", next_retry_at=now + timedelta(minutes=5))
+
+    assert job_is_due(waiting, now) is False
+    assert job_is_due(waiting, now + timedelta(minutes=6)) is True

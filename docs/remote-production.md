@@ -45,10 +45,18 @@ como fallback.
 
 ```text
 queued -> running -> completed
+       <- recuperaÃ§Ã£o automÃ¡tica com backoff
                   -> waiting_youtube -> completed
-                  -> failed -> queued (retry)
+                     recuperaÃ§Ã£o automÃ¡tica com backoff
+failed -> queued (retry de jobs legados)
 queued/waiting_youtube -> cancelled
 ```
+
+Falhas de execuÃ§Ã£o nÃ£o encerram novos jobs. Erros editoriais ou determinÃ­sticos corrigÃ­veis
+acionam um checkpoint de reparo na mesma sessÃ£o e reimportam somente o staging necessÃ¡rio. Se a
+tentativa ainda nÃ£o concluir, o job volta para `queued` (ou permanece em `waiting_youtube`) com
+backoff exponencial entre um minuto e seis horas, preservando projeto, sessÃ£o, artefatos e causa do
+erro. O estado `failed` permanece apenas para compatibilidade e retry manual de jobs antigos.
 
 `render-review` usa os ativos ativos em qualidade final sem registrar aprovação humana. Upload
 automatizado exige a política de revisão privada, render candidato válido, validação técnica e
