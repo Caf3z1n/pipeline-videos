@@ -292,8 +292,11 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         "job_id": job_id,
         "input_hash": input_hash,
         "contract_guard": {
-            key: growth_context["creative_contract"][key]
-            for key in ("input_hash", "content_promise", "opening_hook")
+            **{
+                key: growth_context["creative_contract"][key]
+                for key in ("input_hash", "content_promise", "opening_hook")
+            },
+            "opening_scene_id": growth_context["opening_scene"]["scene_id"],
         },
         "status": StageStatus.WAITING_EXTERNAL.value,
         "role": config.specialist_role,
@@ -304,7 +307,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
             "may_modify_project_state": False,
             "may_publish": False,
             "reasoning_effort": "medium",
-            "recommended_model": "gpt-5.6-sol" if single_agent_mode else "gpt-5.6-terra",
+            "recommended_model": "gpt-5.6-sol",
             "context_policy": "compact_only",
             "fork_turns": None if single_agent_mode else "none",
         },
@@ -324,6 +327,14 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 project.config.images.visual_standard_id,
                 "animação 3D cinematográfica familiar premium",
             ],
+            "required_typography_prompt_markers": [
+                "integrated_extruded_3d_v1",
+                "tipografia 3D extrudada integrada",
+                "bordas chanfradas",
+                "sombras de contato",
+                "perspectiva coerente",
+                "material coerente com a cena",
+            ],
             "forbidden_positive_style_markers": list(_PHOTOGRAPHIC_THUMBNAIL_STYLE_MARKERS),
         },
         "outputs": {
@@ -342,6 +353,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
             "title_standard": config.title_standard,
             "description_standard": config.description_standard,
             "thumbnail_standard": config.thumbnail_standard,
+            "thumbnail_typography_standard": config.thumbnail_typography_standard,
             "title_thumbnail_pairing_standard": config.title_thumbnail_pairing_standard,
             "design_contract": {
                 "text_word_count": [2, 5],
@@ -351,6 +363,14 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 "strong_outline": True,
                 "strong_shadow": True,
                 "texture": "subtle",
+                "typography_standard": config.thumbnail_typography_standard,
+                "typography_treatment": "integrated_extruded_3d",
+                "visible_extrusion": True,
+                "beveled_edges": True,
+                "contact_and_occlusion_shadows": True,
+                "scene_coherent_material_and_lighting": True,
+                "perspective_matches_scene": True,
+                "hierarchy_by_scale": "dominant_keyword_scale",
                 "safe_areas_required": True,
                 "optional_narrative_elements": ["arrow", "x", "underline", "brush"],
                 "pillow_is_text_authority": False,
@@ -416,6 +436,30 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 "sombra fortes e textura sutil."
             ),
             (
+                "Use obrigatoriamente thumbnail_typography_standard="
+                "integrated_extruded_3d_v1. Em cada design, mantenha "
+                "typography_treatment=integrated_extruded_3d, "
+                "typography_hierarchy=dominant_keyword_scale e "
+                "typography_material=scene_lit_text_material."
+            ),
+            (
+                "Inclua literalmente em metadata.thumbnail_prompt: 'Typography standard: "
+                "integrated_extruded_3d_v1. Tipografia 3D extrudada integrada, com espessura "
+                "visível, bordas chanfradas, sombras de contato e oclusão, perspectiva coerente "
+                "e material coerente com a cena.'"
+            ),
+            (
+                "Modele as letras como objetos 3D pertencentes à cena: volume espesso visível, "
+                "bevel nas bordas, textura material, highlights direcionais e sombras de contato "
+                "coerentes com a luz. A palavra ou linha dominante deve ser muito maior que as "
+                "demais; não use todas as palavras no mesmo tamanho."
+            ),
+            (
+                "A palavra vermelha deve receber o mesmo volume, bevel, material e profundidade "
+                "das letras principais. A seta/X/sublinhado/pincel também deve ter espessura, "
+                "perspectiva e sombra coerentes, nunca aparência de adesivo ou overlay plano."
+            ),
+            (
                 "Respeite safe areas e verifique a legibilidade em tela pequena sem cobrir "
                 "rostos, ação ou o objeto dominante."
             ),
@@ -440,6 +484,25 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 (
                     "Evite teses abstratas no título quando o nome do personagem ou do conflito "
                     "for mais forte. Mantenha a promessa fiel ao vídeo."
+                ),
+            ]
+        )
+    elif config.title_standard == "tension_pipe_passage_v2":
+        main_passage = str(
+            growth_context.get("creative_contract", {}).get("main_passage", "")
+        ).strip()
+        payload["instructions"].extend(
+            [
+                (
+                    "Todos os títulos devem seguir exatamente 'Tensão ou promessa concreta | "
+                    f"{main_passage}'. Coloque a passagem depois da barra e faça a primeira parte "
+                    "entregar o conflito específico do cold open, sem pergunta genérica."
+                ),
+                (
+                    "Preencha strategy.promise_match copiando content_promise, opening_hook como "
+                    "opening_line e inputs.thumbnail_visual_reference_scene_id. Em title_delivery, "
+                    "copie exatamente a parte do título antes da barra; em thumbnail_delivery, "
+                    "copie exatamente o texto do primeiro thumbnail_design."
                 ),
             ]
         )
@@ -481,15 +544,21 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                     "seguinte."
                 ),
                 (
-                    "Em cada par, distribua a promessa: o título deve carregar referência, tema "
+                    "Em cada par, o título deve carregar tensão concreta, referência e busca; a "
+                    "thumbnail acrescenta conflito, decisão ou consequência visual."
+                    if config.title_standard == "tension_pipe_passage_v2"
+                    else "Em cada par, distribua a promessa: o título deve carregar "
+                    "referência, tema "
                     "e intenção de busca; o texto da thumbnail deve acrescentar tensão, decisão, "
                     "contraste, consequência ou pergunta visual que o título ainda não disse."
                 ),
                 (
-                    "É proibido repetir na thumbnail a frase temática que aparece depois da barra "
-                    "vertical do título. Também não use essa frase inteira como trecho dentro da "
-                    "thumbnail, nem a frase inteira da thumbnail dentro do título. Compartilhar "
-                    "uma palavra-chave ou nome próprio continua permitido quando necessário."
+                    "É proibido repetir na thumbnail a tensão escrita antes da barra vertical. "
+                    "Também não use a frase inteira da thumbnail dentro do título."
+                    if config.title_standard == "tension_pipe_passage_v2"
+                    else "É proibido repetir na thumbnail a frase temática que aparece depois da "
+                    "barra vertical do título. Também não use essa frase inteira como trecho "
+                    "dentro da thumbnail, nem a frase inteira da thumbnail dentro do título."
                 ),
                 (
                     "Preencha title_thumbnail_complement explicando de forma concisa a função "
@@ -509,6 +578,12 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 "destaque vermelha e o elemento narrativo vermelho. Texto e símbolo precisam "
                 "participar da iluminação, profundidade, perspectiva e composição da arte; "
                 "não entregue arte-base limpa nem aparência de camada solta."
+            ),
+            (
+                "Componha a tipografia 3D como camada de primeiro ou médio plano da imagem, com "
+                "oclusão e sombra de contato convincentes. Preserve a leitura instantânea em "
+                "tela pequena e a hierarquia dramática entre linha auxiliar, palavra dominante "
+                "e destaque vermelho."
             ),
             (
                 "Confirme visualmente a grafia e os acentos antes de concluir. Não aceite "
@@ -599,6 +674,22 @@ def _validate_thumbnail_visual_standard(
         raise ValueError(
             "O prompt da thumbnail tenta usar fotografia ou fotorrealismo em vez do padrão 3D."
         )
+    typography_standard = str(outputs.get("thumbnail_typography_standard", "")).strip()
+    if typography_standard == "integrated_extruded_3d_v1":
+        required_typography_markers = contract.get(
+            "required_typography_prompt_markers",
+            ["integrated_extruded_3d_v1", "tipografia 3D extrudada integrada"],
+        )
+        missing_markers = [
+            str(marker)
+            for marker in required_typography_markers
+            if str(marker).strip() and _normalized_search_text(str(marker)) not in normalized_prompt
+        ]
+        if missing_markers:
+            raise ValueError(
+                "O prompt da thumbnail não declara o tratamento obrigatório de tipografia 3D "
+                f"integrada: {', '.join(missing_markers)}."
+            )
 
 
 def _contains_positive_style_marker(normalized_prompt: str, marker: str) -> bool:
@@ -671,8 +762,11 @@ _PAIRING_CONFLICT_WORDS = {
 }
 
 
-def _title_topic(title: str) -> str:
-    return title.split("|", 1)[1].strip() if "|" in title else title.strip()
+def _title_topic(title: str, title_standard: str) -> str:
+    if "|" not in title:
+        return title.strip()
+    left, right = (part.strip() for part in title.split("|", 1))
+    return left if title_standard == "tension_pipe_passage_v2" else right
 
 
 def _pairing_content_tokens(value: str) -> list[str]:
@@ -684,8 +778,13 @@ def _pairing_content_tokens(value: str) -> list[str]:
     ]
 
 
-def _title_repeats_thumbnail(title: str, thumbnail_text: str) -> bool:
-    topic = _normalized_search_text(_title_topic(title))
+def _title_repeats_thumbnail(
+    title: str,
+    thumbnail_text: str,
+    *,
+    title_standard: str,
+) -> bool:
+    topic = _normalized_search_text(_title_topic(title, title_standard))
     thumbnail = _normalized_search_text(thumbnail_text)
     if not topic or not thumbnail:
         return False
@@ -747,6 +846,14 @@ def _validate_package(
         raise ValueError("O pacote precisa de um thumbnail_design por candidata.")
     if any(design.texture != "subtle_grain" for design in package.strategy.thumbnail_designs):
         raise ValueError("O novo padrão de thumbnail exige textura sutil no texto.")
+    if outputs.get("thumbnail_typography_standard") == "integrated_extruded_3d_v1":
+        for design in package.strategy.thumbnail_designs:
+            if design.typography_treatment != "integrated_extruded_3d":
+                raise ValueError("A thumbnail precisa usar tipografia 3D extrudada integrada.")
+            if design.typography_hierarchy != "dominant_keyword_scale":
+                raise ValueError("A thumbnail precisa hierarquizar a palavra dominante por escala.")
+            if design.typography_material != "scene_lit_text_material":
+                raise ValueError("A tipografia precisa compartilhar material e luz com a cena.")
     if outputs.get("title_thumbnail_pairing_standard") == "complementary_v1":
         designs = package.strategy.thumbnail_designs
         normalized_design_texts = {_normalized_search_text(design.text) for design in designs}
@@ -756,7 +863,11 @@ def _validate_package(
             zip(titles[:expected_designs], designs, strict=True),
             start=1,
         ):
-            if _title_repeats_thumbnail(title, design.text):
+            if _title_repeats_thumbnail(
+                title,
+                design.text,
+                title_standard=str(outputs.get("title_standard", "")),
+            ):
                 raise ValueError(
                     f"O par {index} repete na thumbnail a promessa do título; "
                     "os dois textos precisam se complementar."
@@ -818,6 +929,30 @@ def _validate_package(
             raise ValueError(
                 "Todos os títulos precisam seguir 'Passagem principal | Tema principal'."
             )
+    elif outputs.get("title_standard") == "tension_pipe_passage_v2":
+        briefing = read_model(layout.briefing, Briefing)
+        suffix = f" | {briefing.main_passage.strip()}"
+        if not suffix.strip(" |") or any(
+            not title.endswith(suffix) or not title.removesuffix(suffix).strip() for title in titles
+        ):
+            raise ValueError(
+                "Todos os títulos precisam seguir 'Tensão concreta | Passagem principal'."
+            )
+        promise_match = package.strategy.promise_match
+        if promise_match is None:
+            raise ValueError("O título v2 exige strategy.promise_match.")
+        if promise_match.content_promise != contract_guard.get("content_promise"):
+            raise ValueError("promise_match mudou a promessa do contrato criativo.")
+        if promise_match.opening_line != contract_guard.get("opening_hook"):
+            raise ValueError("promise_match mudou a primeira fala do contrato criativo.")
+        if promise_match.opening_scene_id != contract_guard.get("opening_scene_id"):
+            raise ValueError("promise_match não aponta para a cena de abertura ativa.")
+        if promise_match.title_delivery != metadata.title.removesuffix(suffix).strip():
+            raise ValueError("title_delivery precisa copiar a tensão antes da barra.")
+        if not package.strategy.thumbnail_designs or (
+            promise_match.thumbnail_delivery != package.strategy.thumbnail_designs[0].text
+        ):
+            raise ValueError("thumbnail_delivery precisa copiar o texto da thumbnail principal.")
     if len(package.strategy.official_guidelines) < 3 or not set(
         package.strategy.official_guidelines
     ).issubset(OFFICIAL_YOUTUBE_GUIDELINES):

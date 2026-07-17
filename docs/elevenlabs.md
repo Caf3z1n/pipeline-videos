@@ -30,8 +30,8 @@ API oficial `GET /v1/models` informa capacidade TTS, limites por usuário Free/p
 ## Segurança, custo e retry
 
 - chave lida apenas de `ELEVENLABS_API_KEY`;
-- voice ID de config do projeto ou `ELEVENLABS_VOICE_ID`; o padrão recomendado para novas
-  produções é `oy1Z2MNJzUkfXcLIq8CS`;
+- voice ID de config do projeto ou `ELEVENLABS_VOICE_ID`; o padrão para novas produções é
+  `wKukuyYdIlElkaj9zEQG`;
 - chamada bloqueada sem `--allow-external`;
 - headers `request-id`, `character-cost`, `x-trace-id` e concorrência ficam nos metadados;
 - áudio base64 e chave nunca ficam em logs;

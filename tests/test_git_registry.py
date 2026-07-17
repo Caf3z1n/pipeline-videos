@@ -4,7 +4,14 @@ import json
 import subprocess
 from pathlib import Path
 
-from pipeline_videos.git_registry import read_shared_registry, update_shared_registry
+import pytest
+
+from pipeline_videos.git_registry import (
+    RegistryUnavailableError,
+    read_shared_registry,
+    shared_registry_enabled,
+    update_shared_registry,
+)
 
 
 def _git(path: Path, *args: str) -> None:
@@ -22,6 +29,20 @@ def _repository(tmp_path: Path, name: str, remote: Path) -> Path:
     _git(repository, "init", "--quiet")
     _git(repository, "remote", "add", "registry", str(remote))
     return repository
+
+
+def test_shared_registry_is_fail_closed_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("PIPELINE_VIDEOS_CONTENT_REGISTRY_MODE", raising=False)
+
+    assert shared_registry_enabled() is True
+
+
+def test_git_registry_requires_explicit_remote(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("PIPELINE_VIDEOS_CONTENT_REGISTRY_MODE", "git")
+    monkeypatch.delenv("PIPELINE_VIDEOS_CONTENT_REGISTRY_REMOTE", raising=False)
+
+    with pytest.raises(RegistryUnavailableError, match="REMOTE.*obrigatório"):
+        read_shared_registry(repo_root=tmp_path)
 
 
 def test_git_registry_writes_versioned_json_without_checking_out_branch(

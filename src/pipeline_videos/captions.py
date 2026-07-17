@@ -643,23 +643,46 @@ def render_ass_active_card_v2(
         for item in layouts:
             escaped = _escape_ass_token(item.text)
             italic = "\\i1" if item.word.index in italic_word_indexes else ""
-            position = f"{{\\an5\\pos({item.center_x},{item.center_y}){italic}}}"
-            lines.append(
-                f"Dialogue: 1,{block_start},{block_end},BaseV2,,0,0,0,,{position}{escaped}"
-            )
-
             active_start = _ass_time_from_centiseconds(round(item.word.start * 100))
             active_end = _ass_time_from_centiseconds(round(item.word.end * 100))
+            base_start = active_start if style.word_arrival_animation else block_start
+            if style.word_arrival_animation:
+                duration = style.word_arrival_duration_ms
+                rise = style.word_arrival_rise_px
+                start_scale_x = max(1, round(style.font_scale_x * 0.75))
+                position = (
+                    f"{{\\an5\\move({item.center_x},{item.center_y + rise},"
+                    f"{item.center_x},{item.center_y},0,{duration})"
+                    f"\\fad({min(65, duration)},0)\\alpha&H68&"
+                    f"\\fscx{start_scale_x}\\fscy82"
+                    f"\\t(0,{duration},\\alpha&H00&\\fscx{style.font_scale_x}\\fscy100)"
+                    f"{italic}}}"
+                )
+            else:
+                position = f"{{\\an5\\pos({item.center_x},{item.center_y}){italic}}}"
+            lines.append(f"Dialogue: 1,{base_start},{block_end},BaseV2,,0,0,0,,{position}{escaped}")
+
             path = _rounded_rect_ass_path(
                 item.card_width,
                 item.card_height,
                 style.highlight_card_radius,
             )
-            drawing = (
-                f"{{\\an7\\pos({item.card_x},{item.card_y})\\p1\\1c{card}"
-                "\\1a&H00&\\bord0\\shad0}"
-                f"{path}{{\\p0}}"
-            )
+            if style.word_arrival_animation:
+                duration = style.word_arrival_duration_ms
+                card_rise = round(style.word_arrival_rise_px * 0.7)
+                drawing = (
+                    f"{{\\an7\\move({item.card_x},{item.card_y + card_rise},"
+                    f"{item.card_x},{item.card_y},0,{duration})"
+                    f"\\fad({min(55, duration)},{min(45, duration)})"
+                    f"\\p1\\1c{card}\\1a&H00&\\bord0\\shad0}}"
+                    f"{path}{{\\p0}}"
+                )
+            else:
+                drawing = (
+                    f"{{\\an7\\pos({item.card_x},{item.card_y})\\p1\\1c{card}"
+                    "\\1a&H00&\\bord0\\shad0}"
+                    f"{path}{{\\p0}}"
+                )
             lines.append(f"Dialogue: 0,{active_start},{active_end},CardV2,,0,0,0,,{drawing}")
             lines.append(
                 f"Dialogue: 2,{active_start},{active_end},ActiveV2,,0,0,0,,{position}{escaped}"

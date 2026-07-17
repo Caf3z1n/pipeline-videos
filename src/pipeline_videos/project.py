@@ -102,12 +102,16 @@ A etapa `music` sorteia uma faixa da biblioteca local do pipeline e preserva uma
 
 Quando `youtube/growth-queue.json` estiver pendente, o subagente `youtube_growth_specialist` escreve
 somente em staging. Apenas o agente principal importa títulos, descrição, estratégia e thumbnails.
-Em produção remota, o mesmo agente principal permanece na sessão inteira, sem criar subagentes, e
-entrega exatamente um par título+thumbnail.
+Em produção remota, o coordenador permanece na sessão do job e cria o mesmo especialista de
+crescimento do fluxo local, que entrega exatamente um par título+thumbnail no staging.
 
 Em projetos Short, `script/shorts-queue.json` contrata o `shorts_script_specialist`. Ele escreve
 somente no staging; o agente principal valida gancho, retenção, valor, CTA e revisão bíblica antes
 de promover uma nova versão do roteiro.
+
+Em vídeos longos novos, o roteiro usa `retention_story_long_v1`: começa no conflito, sustenta uma
+pergunta central, progride por movimentos com nova informação, reengaja periodicamente e distribui
+citações bíblicas verificadas ao longo da narrativa. Consulte `docs/long-form-script-standard.md`.
 """
 
 
@@ -186,11 +190,16 @@ def create_project(
         config.editorial_policy.forbid_english_editorial_jargon = True
         config.editorial_policy.forbid_generic_text_reference = True
         config.editorial_policy.require_literal_scripture_citations = True
-        config.editorial_policy.require_quoted_comment_response = True
+        long_form_retention = video_format != "short"
+        config.long_form_script.enabled = long_form_retention
+        config.long_form_script.narrative_standard = (
+            "retention_story_long_v1" if long_form_retention else "legacy"
+        )
+        config.editorial_policy.require_quoted_comment_response = False
         config.captions.vertical_position = "center"
-        config.captions.isolate_quoted_comment_response = True
-        config.captions.comment_response_hold_seconds = 1.0
-        config.audio.comment_response_silence_seconds = 1.0
+        config.captions.isolate_quoted_comment_response = False
+        config.captions.comment_response_hold_seconds = 0.0
+        config.audio.comment_response_silence_seconds = 0.0
         config.render.preview_crf = 16
         config.render.preview_preset = "fast"
         config.render.preview_motion_supersample = 2
@@ -199,9 +208,10 @@ def create_project(
         config.youtube_growth.thumbnail_variants = 1
         config.youtube_growth.thumbnail_generation_mode = "integrated_imagegen_v1"
         config.youtube_growth.thumbnail_reference_mode = "opening_scene_edit_v1"
-        config.youtube_growth.title_standard = "passage_pipe_topic_v1"
+        config.youtube_growth.title_standard = "tension_pipe_passage_v2"
         config.youtube_growth.description_standard = "scripture_timeline_v1"
         config.youtube_growth.thumbnail_standard = "direct_conflict_red_v1"
+        config.youtube_growth.thumbnail_typography_standard = "integrated_extruded_3d_v1"
         config.youtube_growth.title_thumbnail_pairing_standard = "complementary_v1"
 
     stages = initial_stage_records()

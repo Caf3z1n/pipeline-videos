@@ -12,8 +12,11 @@ from pipeline_videos.models import (
     ScriptDocument,
     ScriptSection,
     ShortsCommentPrompt,
+    ShortsEngagementPlan,
     ShortsNarrativeSpine,
+    ShortsReplayBridge,
     ShortsRetentionBeat,
+    ShortsRetentionStory,
     ShortsScriptPackage,
     ShortsScriptStrategy,
     ShortsVerseOpening,
@@ -22,6 +25,7 @@ from pipeline_videos.models import (
     StageStatus,
 )
 from pipeline_videos.project import create_project
+from pipeline_videos.scenes import build_scenes
 from pipeline_videos.shorts_script import (
     LEGACY_SCRIPTURE_BOUNDARY_PHRASE,
     ShortsScriptPackageValidationError,
@@ -44,9 +48,13 @@ def _short_project(tmp_path):
         project_date=date(2026, 7, 14),
     )
     manifest = layout.load_manifest()
+    manifest.config.shorts_script.narrative_standard = "human_hook_to_bible"
     manifest.config.shorts_script.min_words = 60
     manifest.config.shorts_script.max_words = 140
     manifest.config.shorts_script.minimum_retention_beats = 3
+    manifest.config.shorts_script.require_comment_prompt = True
+    manifest.config.shorts_script.require_subscribe_cta = True
+    manifest.config.editorial_policy.require_quoted_comment_response = True
     layout.save_manifest(manifest)
     write_json(
         layout.briefing,
@@ -299,6 +307,317 @@ def _package(queue: dict) -> ShortsScriptPackage:
     )
 
 
+def _retention_project(tmp_path):
+    layout = create_project(
+        "salmos-56-retencao",
+        "Davi não esperou o medo desaparecer",
+        projects_dir=tmp_path,
+        target_duration_seconds=50,
+        video_format="short",
+        project_date=date(2026, 7, 16),
+    )
+    write_json(
+        layout.briefing,
+        Briefing(
+            title="Davi não esperou o medo desaparecer",
+            main_passage="Salmos 56:3",
+            central_theme="Confiar em Deus enquanto o medo ainda está presente.",
+            practical_application="Dizer a Deus o que assusta e dar o próximo passo responsável.",
+            audience="Pessoas paralisadas pelo medo.",
+            emotional_intent="Criar tensão, clareza e coragem responsável.",
+            bible_translation="BPM",
+            target_duration_seconds=50,
+            retention_archetype="counterintuitive_reveal",
+            human_conflict="Davi sente medo diante de um perigo real.",
+            central_question="Sentir medo significava perder a fé?",
+            visual_progression=[
+                "Davi ouve passos no escuro.",
+                "O perigo se aproxima.",
+                "Davi escolhe o próximo passo.",
+            ],
+            possible_reveal="Davi diz quando tiver medo, não se tiver medo.",
+            title_seed="Davi não esperou o medo desaparecer",
+        ),
+    )
+    write_json(
+        layout.sources,
+        SourceLibrary(
+            entries=[
+                SourceEntry(
+                    source_id="bpm-salmos-56-3",
+                    kind="biblical_text",
+                    title="Salmos 56:3 — BPM",
+                    passage="Salmos 56:1-4",
+                    translation="BPM",
+                    author_or_publisher="eBible.org",
+                    url="https://example.invalid/salmos-56",
+                    accessed_at="2026-07-16",
+                    excerpt="Quando eu tiver medo, colocarei a minha confiança em ti.",
+                    use_in_video="Citação literal obrigatória.",
+                    claim_scope="Somente Salmos 56:3.",
+                    rights_note="Domínio público; fixture de teste.",
+                    verified=True,
+                )
+            ]
+        ),
+    )
+    return layout
+
+
+def _retention_package(queue: dict) -> ShortsScriptPackage:
+    verse = "Quando eu tiver medo, colocarei a minha confiança em ti."
+    lead_in = "Em Salmos, capítulo 56, versículo 3, lemos:"
+    hook = "Davi ouviu passos e congelou."
+    central_question = "Sentir medo significava perder a fé?"
+    payoff = "Coragem bíblica não esconde o medo."
+    practical_response = (
+        "Hoje, diga a Deus exatamente o que assusta você, escolha a próxima atitude "
+        "responsável e faça apenas esse passo."
+    )
+    cta = "Inscreva-se: os passos do medo não decidem o seu caminho."
+    sections = [
+        ScriptSection(
+            section_id="section-001",
+            role="opening",
+            title="Passos no escuro",
+            narration=hook,
+            biblical_basis=["Salmos 56:3"],
+            claim_classification=["creative_elaboration"],
+            retention_goal="Abrir dentro da ação e tornar o perigo imediatamente legível.",
+            visual_direction="Davi para no escuro ao ouvir passos próximos atrás dele.",
+        ),
+        ScriptSection(
+            section_id="section-002",
+            role="biblical_narrative",
+            title="O medo real",
+            narration=(f"O perigo era real, e ele não escondeu o que sentia. {central_question}"),
+            biblical_basis=["Salmos 56:1-4"],
+            claim_classification=["interpretation"],
+            retention_goal="Aumentar a tensão sem fingir que fé elimina emoções.",
+            visual_direction="Davi encosta numa parede enquanto uma sombra se aproxima.",
+        ),
+        ScriptSection(
+            section_id="section-003",
+            role="biblical_narrative",
+            title="A evidência bíblica",
+            narration=f"{lead_in} “{verse}”",
+            biblical_basis=["Salmos 56:3"],
+            claim_classification=["biblical_text"],
+            retention_goal="Usar a citação para mudar a leitura do medo.",
+            visual_direction="Davi mantém os olhos abertos enquanto decide em quem confiar.",
+        ),
+        ScriptSection(
+            section_id="section-004",
+            role="reflection",
+            title="A primeira virada",
+            narration=(
+                "Repara na primeira palavra: quando. "
+                "Davi não esperou uma vida sem medo para confiar."
+            ),
+            biblical_basis=["Salmos 56:3"],
+            claim_classification=["interpretation"],
+            retention_goal="Revelar o detalhe que contraria a expectativa comum.",
+            visual_direction="Davi abre a mão que estava fechada e volta a respirar.",
+        ),
+        ScriptSection(
+            section_id="section-005",
+            role="reflection",
+            title="O reengajamento",
+            narration=(
+                "Só que confiar não apagou o perigo. "
+                "Mudou quem decidia o próximo passo: o medo ou Deus."
+            ),
+            biblical_basis=["Salmos 56:3"],
+            claim_classification=["interpretation"],
+            retention_goal="Trocar alívio instantâneo por uma decisão concreta.",
+            visual_direction="Davi vê a saída e move um pé apesar da sombra próxima.",
+        ),
+        ScriptSection(
+            section_id="section-006",
+            role="application",
+            title="O payoff",
+            narration=f"Esse é o ponto: {payoff} {practical_response}",
+            biblical_basis=["Salmos 56:3"],
+            claim_classification=["interpretation"],
+            retention_goal="Resolver a pergunta e entregar uma ação praticável.",
+            visual_direction="Uma pessoa anota uma atitude e se levanta para executá-la.",
+        ),
+        ScriptSection(
+            section_id="section-007",
+            role="closing",
+            title="Callback",
+            narration=cta,
+            biblical_basis=["Salmos 56:3"],
+            claim_classification=["interpretation"],
+            retention_goal="Encerrar no callback sem despedida.",
+            visual_direction="Davi avança enquanto os mesmos passos ficam para trás.",
+        ),
+    ]
+    strategy = ShortsScriptStrategy(
+        target_viewer="Pessoas paralisadas por medo real.",
+        viewer_need="Entender que confiança não exige negar o medo.",
+        core_value=payoff,
+        content_promise=hook,
+        hook=hook,
+        hook_type="surprising_detail",
+        hook_techniques=["specificity", "open_loop"],
+        hook_target_end_seconds=1.9,
+        verse_opening=ShortsVerseOpening(
+            source_id="bpm-salmos-56-3",
+            reference="Salmos 56:3",
+            translation="BPM",
+            quote_mode="literal",
+            lead_in=lead_in,
+            verse_text=verse,
+            target_start_seconds=8.0,
+            target_end_seconds=16.0,
+        ),
+        retention_story=ShortsRetentionStory(
+            archetype="counterintuitive_reveal",
+            opening_section_id="section-001",
+            scripture_section_id="section-003",
+            progression_section_ids=[
+                "section-002",
+                "section-003",
+                "section-004",
+                "section-005",
+            ],
+            reengagement_section_id="section-005",
+            payoff_section_id="section-006",
+            cta_section_id="section-007",
+            opening_promise=hook,
+            central_question=central_question,
+            progression=[
+                "O perigo era real",
+                verse,
+                "Davi não esperou uma vida sem medo para confiar.",
+                "Confiar não apagou o perigo.",
+            ],
+            reengagement="Mudou quem decidia o próximo passo: o medo ou Deus.",
+            scripture_anchor=verse,
+            payoff=payoff,
+            practical_response=practical_response,
+            engagement=ShortsEngagementPlan(
+                mode="subscribe",
+                spoken_text=cta,
+                objective="Convidar a acompanhar novas mensagens com o mesmo rigor.",
+                fit_reason="O callback transforma os passos ameaçadores em caminho escolhido.",
+                target_start_seconds=46.0,
+                target_end_seconds=50.0,
+            ),
+            replay_bridge=ShortsReplayBridge(
+                mode="verbal_and_visual",
+                opening_element="passos",
+                closing_callback="os passos do medo não decidem o seu caminho",
+                added_meaning="Os passos deixam de representar ameaça e passam a representar ação.",
+            ),
+            source_ids=["bpm-salmos-56-3"],
+        ),
+        open_loop=central_question,
+        payoff=payoff,
+        practical_value=practical_response,
+        cta=cta,
+        reason_to_subscribe="",
+        retention_beats=[
+            ShortsRetentionBeat(
+                section_id="section-001",
+                purpose="hook",
+                viewer_question="Quem está se aproximando?",
+                viewer_value="Entrar diretamente no perigo percebido por Davi.",
+                target_start_seconds=0,
+                target_end_seconds=2,
+                opens_loop=central_question,
+                new_information="Davi congela ao ouvir passos.",
+                visual_change="O movimento para abruptamente no escuro.",
+            ),
+            ShortsRetentionBeat(
+                section_id="section-002",
+                purpose="open_loop",
+                viewer_question=central_question,
+                viewer_value="Reconhecer que o medo descrito é real.",
+                target_start_seconds=2,
+                target_end_seconds=8,
+                new_information="O perigo não é imaginário.",
+                visual_change="A sombra se aproxima da parede.",
+            ),
+            ShortsRetentionBeat(
+                section_id="section-003",
+                purpose="progression",
+                viewer_question="O que Davi faz com esse medo?",
+                viewer_value="Ouvir a resposta literal do salmo.",
+                target_start_seconds=8,
+                target_end_seconds=16,
+                new_information="Davi escolhe confiar quando sente medo.",
+                visual_change="A mão de Davi deixa de procurar uma fuga.",
+            ),
+            ShortsRetentionBeat(
+                section_id="section-004",
+                purpose="progression",
+                viewer_question="Qual detalhe muda a leitura?",
+                viewer_value="Perceber a força da palavra quando.",
+                target_start_seconds=16,
+                target_end_seconds=23,
+                new_information="A confiança começa antes do medo desaparecer.",
+                visual_change="A mão fechada se abre.",
+            ),
+            ShortsRetentionBeat(
+                section_id="section-005",
+                purpose="reveal",
+                viewer_question="Então o perigo desapareceu?",
+                viewer_value="Distinguir confiança de alívio instantâneo.",
+                target_start_seconds=23,
+                target_end_seconds=32,
+                pattern_interrupt="O perigo permanece visível depois da citação.",
+                new_information="Confiar muda quem decide, não apaga o perigo.",
+                visual_change="Davi move um pé apesar da sombra.",
+            ),
+            ShortsRetentionBeat(
+                section_id="section-006",
+                purpose="payoff",
+                viewer_question="Como agir hoje?",
+                viewer_value="Receber uma resposta prática e limitada.",
+                target_start_seconds=32,
+                target_end_seconds=46,
+                resolves_loop=central_question,
+                new_information="Coragem permite agir sem esconder o medo.",
+                visual_change="Uma atitude concreta é anotada e iniciada.",
+            ),
+            ShortsRetentionBeat(
+                section_id="section-007",
+                purpose="cta",
+                viewer_question="Como continuar lembrando disso?",
+                viewer_value="Acompanhar novas mensagens bíblicas.",
+                target_start_seconds=46,
+                target_end_seconds=50,
+                new_information="Os passos agora representam o caminho escolhido.",
+                visual_change="Davi avança e deixa os passos ameaçadores para trás.",
+            ),
+        ],
+        source_ids=["bpm-salmos-56-3"],
+        section_ids=[section.section_id for section in sections],
+        biblical_safeguards=["Não tratar medo como pecado automático."],
+        compliance_checks=["Citação literal entre 8 e 20 segundos", "CTA de uma ação"],
+    )
+    script = ScriptDocument(
+        version=queue["next_script_version"],
+        title="Davi não esperou o medo desaparecer",
+        sections=sections,
+        source_ids=["bpm-salmos-56-3"],
+    )
+    return ShortsScriptPackage(
+        job_id=queue["job_id"],
+        input_hash=queue["input_hash"],
+        script=script,
+        biblical_review=BiblicalReview(
+            script_version=script.version,
+            reviewed_at=utc_now(),
+            reviewer="shorts_script_specialist",
+            summary="Citação literal conferida e aplicação distinguida do texto bíblico.",
+        ),
+        strategy=strategy,
+    )
+
+
 def test_shorts_specialist_queue_imports_script_review_and_retention_strategy(tmp_path) -> None:
     layout = _short_project(tmp_path)
     queue = prepare_shorts_script_queue(layout)
@@ -308,7 +627,7 @@ def test_shorts_specialist_queue_imports_script_review_and_retention_strategy(tm
     assert queue["orchestration"]["may_modify_project_state"] is False
     assert queue["orchestration"]["context_policy"] == "compact_only"
     assert queue["orchestration"]["fork_turns"] == "none"
-    assert queue["orchestration"]["recommended_model"] == "gpt-5.6-terra"
+    assert queue["orchestration"]["recommended_model"] == "gpt-5.6-sol"
     assert queue["orchestration"]["reasoning_effort"] == "high"
     assert queue["preflight"] == {
         "read_only": True,
@@ -384,6 +703,63 @@ def test_shorts_specialist_queue_imports_script_review_and_retention_strategy(tm
     assert manifest.stages["script"].status == StageStatus.COMPLETED
     assert manifest.stages["biblical_review"].status == StageStatus.COMPLETED
     assert manifest.approvals["script"].status.value == "pending"
+
+
+def test_retention_story_v2_imports_and_builds_eight_to_ten_scenes(tmp_path) -> None:
+    layout = _retention_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+
+    assert queue["retention_contract"] == {
+        "standard": "retention_story_v2",
+        "selected_archetype": "counterintuitive_reveal",
+        "allowed_archetypes": [
+            "conflict_first",
+            "counterintuitive_reveal",
+            "stair_step_progression",
+        ],
+        "timeline_seconds": {
+            "cold_open": [0, 2],
+            "conflict_or_action": [2, 8],
+            "scripture": [8, 20],
+            "progression_and_reengagement": [20, 32],
+            "payoff_and_application": [32, 45],
+            "single_action_cta": [45, 55],
+        },
+        "cta_max_words": 12,
+        "cta_max_seconds": 4.0,
+        "target_scene_count": [8, 10],
+    }
+    assert any("retention_story_v2" in item for item in queue["instructions"])
+    assert any("exatamente uma ação" in item for item in queue["instructions"])
+    assert any("oito a dez cenas" in item for item in queue["instructions"])
+
+    write_json(layout.shorts_script_package_staging, _retention_package(queue))
+    imported = import_shorts_script_package(layout)
+    scenes = build_scenes(layout, skip_approvals=True)
+
+    assert imported.strategy.retention_story is not None
+    assert imported.strategy.narrative_spine is None
+    assert imported.strategy.verse_opening.target_start_seconds == 8.0
+    assert imported.strategy.retention_story.engagement.mode == "subscribe"
+    assert 8 <= len(scenes.scenes) <= 10
+    contract = read_model(layout.creative_contract, CreativeContract)
+    assert contract.pacing.profile_id == "short_retention_v2"
+    assert sum("reengagement" in beat.functions for beat in contract.beats) == 1
+
+
+def test_retention_story_v2_rejects_stacked_cta(tmp_path) -> None:
+    layout = _retention_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+    payload = _retention_package(queue).model_dump(mode="json")
+    stacked = "Inscreva-se e compartilhe: os passos do medo não decidem seu caminho."
+    payload["strategy"]["retention_story"]["engagement"]["spoken_text"] = stacked
+    payload["script"]["sections"][-1]["narration"] = stacked
+    write_json(layout.shorts_script_package_staging, payload)
+
+    result = check_shorts_script_package_staging(layout)
+
+    assert result.valid is False
+    assert any("exatamente a única ação" in error for error in result.errors)
 
 
 def test_shorts_staging_preflight_aggregates_errors_and_is_read_only(tmp_path) -> None:

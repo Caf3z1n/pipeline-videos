@@ -7,6 +7,10 @@ from typing import Any
 
 from PIL import Image, ImageChops, ImageOps, ImageStat
 
+from pipeline_videos.long_form_script import (
+    minimum_long_form_reengagements,
+    validate_long_form_retention_script,
+)
 from pipeline_videos.models import (
     AudioManifest,
     BiblicalReview,
@@ -223,6 +227,28 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
         captions = read_model(layout.captions, CaptionManifest)
         metadata = read_model(layout.metadata, YouTubeMetadata)
 
+        if (
+            manifest.video_format != "short"
+            and manifest.config.long_form_script.enabled
+            and manifest.config.long_form_script.narrative_standard == "retention_story_long_v1"
+        ):
+            from pipeline_videos.models import Briefing, SourceLibrary
+
+            long_diagnostics = validate_long_form_retention_script(
+                script,
+                target_duration_seconds=manifest.target_duration_seconds,
+                config=manifest.config.long_form_script,
+                sources=read_model(layout.sources, SourceLibrary),
+                briefing=read_model(layout.briefing, Briefing),
+            )
+            report.checks["long_form_retention_standard"] = "retention_story_long_v1"
+            report.checks["long_form_estimated_duration_seconds"] = long_diagnostics[
+                "estimated_duration_seconds"
+            ]
+            report.checks["long_form_scripture_citations"] = len(
+                long_diagnostics["scripture_citation_timestamps"]
+            )
+
         if review.script_version != script.version:
             report.errors.append("A revisão bíblica não corresponde à versão ativa do roteiro.")
         if review.has_open_blockers:
@@ -243,8 +269,21 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
             report.errors.append("O contrato criativo precisa declarar gancho e payoff.")
         reengagements = sum("reengagement" in beat.functions for beat in contract.beats)
         report.checks["creative_reengagements"] = reengagements
-        if contract.format == "long_form" and len(contract.beats) >= 5 and reengagements < 2:
-            report.errors.append("O vídeo longo precisa de dois pontos de reengajamento.")
+        if contract.format == "long_form" and len(contract.beats) >= 5:
+            required_reengagements = (
+                minimum_long_form_reengagements(
+                    manifest.target_duration_seconds,
+                    manifest.config.long_form_script,
+                )
+                if manifest.config.long_form_script.narrative_standard == "retention_story_long_v1"
+                else 2
+            )
+            report.checks["creative_required_reengagements"] = required_reengagements
+            if reengagements < required_reengagements:
+                report.errors.append(
+                    "O vídeo longo precisa de ao menos "
+                    f"{required_reengagements} pontos de reengajamento."
+                )
 
         script_words = _canonical_words(script.narration_text())
         scene_words = _canonical_words(" ".join(scene.narration for scene in scenes.scenes))

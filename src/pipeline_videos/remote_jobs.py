@@ -18,6 +18,7 @@ from pydantic import Field, model_validator
 
 from pipeline_videos.imagegen_retry import imagegen_retry_instructions
 from pipeline_videos.models import (
+    DEFAULT_ELEVENLABS_VOICE_ID,
     BiblicalReview,
     Briefing,
     PipelineModel,
@@ -45,7 +46,7 @@ from pipeline_videos.validation import validate_project
 from pipeline_videos.verse_selection import create_auto_video
 
 REMOTE_JOB_SCHEMA_VERSION = "1.0"
-REMOTE_JOB_STATE_SCHEMA_VERSION = "1.2"
+REMOTE_JOB_STATE_SCHEMA_VERSION = "1.3"
 DEFAULT_REMOTE_JOBS_DIR = REPO_ROOT / "remote-jobs"
 REMOTE_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 DEFAULT_REMOTE_CODEX_MODEL = "gpt-5.6-sol"
@@ -62,7 +63,6 @@ REMOTE_DISABLED_CODEX_FEATURES = (
     "goals",
     "in_app_browser",
     "memories",
-    "multi_agent",
     "plugins",
     "remote_plugin",
     "tool_suggest",
@@ -150,7 +150,7 @@ class RemoteVideoRequest(PipelineModel):
 
 
 class RemoteVideoJob(PipelineModel):
-    schema_version: Literal["1.0", "1.1", "1.2"] = REMOTE_JOB_STATE_SCHEMA_VERSION
+    schema_version: Literal["1.0", "1.1", "1.2", "1.3"] = REMOTE_JOB_STATE_SCHEMA_VERSION
     job_id: str
     status: RemoteJobStatus
     request: RemoteVideoRequest
@@ -165,6 +165,7 @@ class RemoteVideoJob(PipelineModel):
     codex_session_id: str | None = None
     codex_runs: list[RemoteCodexRun] = Field(default_factory=list)
     codex_exit_code: int | None = None
+    schedule_occurrence_id: str | None = None
     error: str | None = None
 
 
@@ -218,21 +219,39 @@ class RemoteJobStore:
             path.chmod(0o600)
         return path
 
-    def enqueue(self, request: RemoteVideoRequest) -> RemoteVideoJob:
+    def enqueue(
+        self,
+        request: RemoteVideoRequest,
+        *,
+        job_id: str | None = None,
+        schedule_occurrence_id: str | None = None,
+        now: datetime | None = None,
+    ) -> RemoteVideoJob:
         if not request.external_services_authorized:
             raise ValueError(
                 "O pedido precisa autorizar explicitamente Imagegen, ElevenLabs e upload privado."
             )
-        now = datetime.now(UTC)
-        if request.publish_at is not None and request.publish_at.astimezone(UTC) <= now:
+        current = now or datetime.now(UTC)
+        if request.publish_at is not None and request.publish_at.astimezone(UTC) <= current:
             raise ValueError("publish_at precisa estar no futuro.")
-        job_id = f"video-{now:%Y%m%d-%H%M%S}-{uuid4().hex[:8]}"
+        resolved_job_id = job_id or f"video-{current:%Y%m%d-%H%M%S}-{uuid4().hex[:8]}"
+        if not JOB_ID_PATTERN.fullmatch(resolved_job_id):
+            raise ValueError("ID de job inválido.")
+        with suppress(FileNotFoundError):
+            existing, _ = self.find(resolved_job_id)
+            if (
+                existing.request != request
+                or existing.schedule_occurrence_id != schedule_occurrence_id
+            ):
+                raise RuntimeError("Colisão no identificador determinístico do job remoto.")
+            return existing
         job = RemoteVideoJob(
-            job_id=job_id,
+            job_id=resolved_job_id,
             status="queued",
             request=request,
             created_at=utc_now(),
             updated_at=utc_now(),
+            schedule_occurrence_id=schedule_occurrence_id,
         )
         self.save(job)
         return job
@@ -328,11 +347,12 @@ def prepare_job_project(
             production_mode="draft_one_shot",
         )
     manifest = layout.load_manifest()
-    manifest.config.production.use_subagents = False
-    manifest.config.production.image_workers = 1
-    manifest.config.shorts_script.use_specialist_subagent = False
-    manifest.config.youtube_growth.use_specialist_subagent = False
+    manifest.config.production.use_subagents = True
+    manifest.config.production.image_workers = 3
+    manifest.config.shorts_script.use_specialist_subagent = True
+    manifest.config.youtube_growth.use_specialist_subagent = True
     manifest.config.audio.provider = request.audio_provider
+    manifest.config.audio.voice_id = DEFAULT_ELEVENLABS_VOICE_ID
     manifest.config.youtube_growth.title_variants = 1
     manifest.config.youtube_growth.thumbnail_variants = 1
     manifest.config.youtube_publication.allow_automated_private_review_upload = True
@@ -342,15 +362,21 @@ def prepare_job_project(
     layout.save_manifest(manifest)
     layout.append_decision(
         {
-            "type": "remote_single_agent_job",
+            "type": "remote_local_parity_job",
             "job_id": job.job_id,
             "start_policy": request.start_policy,
             "publication_mode": request.publication_mode,
             "publish_at": request.publish_at.isoformat() if request.publish_at else None,
             "title_thumbnail_variants": 1,
+            "voice_id": DEFAULT_ELEVENLABS_VOICE_ID,
             "model": DEFAULT_REMOTE_CODEX_MODEL,
-            "reasoning_effort": DEFAULT_REMOTE_REASONING_EFFORT,
-            "subagents": False,
+            "coordinator_reasoning_effort": DEFAULT_REMOTE_REASONING_EFFORT,
+            "specialist_reasoning_effort": {
+                "shorts_script_specialist": "high",
+                "image_worker": "low",
+                "youtube_growth_specialist": "medium",
+            },
+            "subagents": True,
             "human_approval_recorded": False,
         }
     )
@@ -386,12 +412,14 @@ def codex_checkpoint_prompt(request_path: Path) -> str:
 
 Na primeira execução, leia uma única vez AGENTS.md, README.md, docs/optimized-production.md e o
 project.json indicado. Nas retomadas, preserve todas as decisões e o contexto desta mesma sessão.
-Leia o JSON do checkpoint e os caminhos listados em allowed_inputs. Escreva apenas os arquivos em
-required_outputs e use os comandos de preflight declarados até a validação ficar válida. Não crie
-subagentes, não leia segredos, não aprove em nome do usuário e não envie, publique ou agende no
-YouTube. Use somente o imagegen embutido quando solicitado; nunca troque para API paga. Preserve
-moderation_blocked se as tentativas permitidas se esgotarem. Responda de forma breve com o estado
-do checkpoint e as saídas produzidas.
+Leia o JSON do checkpoint e os caminhos listados em allowed_inputs. Quando delegation.required for
+true, crie exatamente os subagentes declarados, sempre com fork_turns=none, entregue a cada um
+somente o input compacto atribuído e aguarde todos terminarem. O coordenador não deve substituir o
+trabalho de um especialista. Escreva apenas os arquivos em required_outputs e use os comandos de
+preflight declarados até a validação ficar válida. Não leia segredos, não aprove em nome do usuário
+e não envie, publique ou agende no YouTube. Use somente o imagegen embutido quando solicitado;
+nunca troque para API paga. Preserve moderation_blocked se as tentativas permitidas se esgotarem.
+Responda de forma breve com o estado do checkpoint e as saídas produzidas.
 """
 
 
@@ -402,9 +430,9 @@ def _phase_payload(job: RemoteVideoJob, spec: CodexPhaseSpec) -> dict[str, Any]:
         "phase": spec.phase,
         "item_id": spec.item_id,
         "contract": {
-            "persistent_single_agent": True,
+            "persistent_coordinator": True,
             "shared_state_writer": "deterministic_remote_executor",
-            "may_create_subagents": False,
+            "may_create_subagents": True,
             "may_read_secrets": False,
             "may_import_or_approve": False,
             "may_upload_publish_or_schedule": False,
@@ -520,8 +548,15 @@ def _editorial_sources_phase_spec(
                     "reference": candidate.reference,
                     "verse_text": candidate.verse_text,
                     "title": candidate.title,
+                    "title_seed": candidate.title_seed,
                     "central_theme": candidate.central_theme,
                     "practical_application": candidate.practical_application,
+                    "human_conflict": candidate.human_conflict,
+                    "central_question": candidate.central_question,
+                    "visual_progression": candidate.visual_progression,
+                    "possible_reveal": candidate.possible_reveal,
+                    "retention_archetypes": candidate.retention_archetypes,
+                    "retention_potential_score": candidate.retention_potential_score,
                     "themes": candidate.themes,
                     "characters": candidate.characters,
                     "interpretation_limits": candidate.interpretation_limits,
@@ -589,6 +624,7 @@ def _import_editorial_source_selection(
     from pipeline_videos.verse_selection import (
         load_verse_catalog,
         reserve_project_candidates,
+        select_retention_archetype,
         sync_shared_usage,
     )
 
@@ -613,21 +649,27 @@ def _import_editorial_source_selection(
         raise ValueError("A seleção remota de passagens não corresponde ao catálogo permitido.")
     selected = [by_id[item] for item in selected_ids]
     main = selected[0]
+    usage = sync_shared_usage(projects_root, catalog=load_verse_catalog())
+    retention_archetype = (
+        select_retention_archetype(main, usage) if project.video_format == "short" else None
+    )
     reserve_project_candidates(
         projects_root,
         project_id=project.project_id,
         video_format=project.video_format,
         candidates=selected,
         catalog=load_verse_catalog(),
+        retention_archetype=retention_archetype,
     )
     current = Briefing.model_validate(read_json(layout.briefing))
-    title = job.request.title or job.request.topic or current.title or main.title
+    suggested_title = main.title_seed.strip() or main.title
+    title = job.request.title or job.request.topic or current.title or suggested_title
     central_theme = current.central_theme.strip() or job.request.topic or main.central_theme
     call_to_action = current.call_to_action.strip()
     if not call_to_action:
         call_to_action = (
-            "Escolher um convite natural para comentar uma palavra específica e finalizar "
-            f"exatamente com: {project.config.shorts_script.final_subscribe_cta}"
+            "Escolher exatamente uma ação natural — comentar, inscrever-se ou compartilhar — "
+            "integrada ao payoff, em até doze palavras e quatro segundos."
             if project.video_format == "short"
             else "Concluir com aplicação fiel e convite comunitário natural, sem pressão."
         )
@@ -651,6 +693,12 @@ def _import_editorial_source_selection(
         claims_to_avoid=list(dict.fromkeys(current.claims_to_avoid or main.claims_to_avoid)),
         visual_notes=list(dict.fromkeys(current.visual_notes or main.visual_notes)),
         call_to_action=call_to_action,
+        retention_archetype=retention_archetype,
+        human_conflict=current.human_conflict.strip() or main.human_conflict,
+        central_question=current.central_question.strip() or main.central_question,
+        visual_progression=current.visual_progression or main.visual_progression,
+        possible_reveal=current.possible_reveal.strip() or main.possible_reveal,
+        title_seed=current.title_seed.strip() or main.title_seed,
     )
     current_sources = SourceLibrary.model_validate(read_json(layout.sources))
     non_biblical = [source for source in current_sources.entries if source.kind != "biblical_text"]
@@ -684,6 +732,7 @@ def _import_editorial_source_selection(
             "candidate_ids": selected_ids,
             "references": [candidate.reference for candidate in selected],
             "rationale": str(selection.get("rationale", ""))[:500],
+            "retention_archetype": retention_archetype,
             "human_approval_recorded": False,
         }
     )
@@ -700,6 +749,14 @@ def _shorts_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
         model=DEFAULT_REMOTE_CODEX_MODEL,
         reasoning_effort="medium",
         payload={
+            "delegation": {
+                "required": True,
+                "role": "shorts_script_specialist",
+                "count": 1,
+                "fork_turns": "none",
+                "reasoning_effort": "high",
+                "model": DEFAULT_REMOTE_CODEX_MODEL,
+            },
             "allowed_inputs": [str(layout.shorts_script_queue), str(context)],
             "task": {
                 "kind": "produce_shorts_script_package",
@@ -752,9 +809,55 @@ def _normalize_shorts_script_payload(payload: dict[str, Any]) -> tuple[dict[str,
         strategy["hook_type"] = replacement
         changes.append(f"strategy.hook_type: {hook_type} -> {replacement}")
 
-    spine = strategy.get("narrative_spine")
     script = payload.get("script")
     sections = script.get("sections") if isinstance(script, dict) else None
+    story = strategy.get("retention_story")
+    if isinstance(story, dict) and isinstance(sections, list):
+        synchronization = (
+            ("content_promise", "opening_promise"),
+            ("open_loop", "central_question"),
+            ("payoff", "payoff"),
+            ("practical_value", "practical_response"),
+        )
+        for strategy_field, story_field in synchronization:
+            value = story.get(story_field)
+            if isinstance(value, str) and value.strip() and strategy.get(strategy_field) != value:
+                strategy[strategy_field] = value
+                changes.append(f"strategy.{strategy_field}: retention_story.{story_field}")
+        engagement = story.get("engagement")
+        spoken_text = engagement.get("spoken_text") if isinstance(engagement, dict) else None
+        if (
+            isinstance(spoken_text, str)
+            and spoken_text.strip()
+            and strategy.get("cta") != spoken_text
+        ):
+            strategy["cta"] = spoken_text
+            changes.append("strategy.cta: retention_story.engagement.spoken_text")
+
+        section_ids = [
+            section.get("section_id")
+            for section in sections
+            if isinstance(section, dict) and isinstance(section.get("section_id"), str)
+        ]
+        if strategy.get("section_ids") != section_ids:
+            strategy["section_ids"] = section_ids
+            changes.append("strategy.section_ids: seções do roteiro")
+        verse_opening = strategy.get("verse_opening")
+        primary_source_id = (
+            verse_opening.get("source_id") if isinstance(verse_opening, dict) else None
+        )
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            section_id = section.get("section_id", "desconhecida")
+            if primary_source_id and not section.get("biblical_basis"):
+                section["biblical_basis"] = [primary_source_id]
+                changes.append(f"script.sections.{section_id}.biblical_basis: fonte principal")
+            if not section.get("claim_classification"):
+                section["claim_classification"] = ["interpretation"]
+                changes.append(f"script.sections.{section_id}.claim_classification: interpretação")
+
+    spine = strategy.get("narrative_spine")
     if isinstance(spine, dict) and isinstance(sections, list):
         section_by_id = {
             section.get("section_id"): section
@@ -826,6 +929,14 @@ def _shorts_script_correction_checkpoint(
         model=DEFAULT_REMOTE_CODEX_MODEL,
         reasoning_effort="medium",
         payload={
+            "delegation": {
+                "required": True,
+                "role": "shorts_script_specialist",
+                "count": 1,
+                "fork_turns": "none",
+                "reasoning_effort": "high",
+                "model": DEFAULT_REMOTE_CODEX_MODEL,
+            },
             "allowed_inputs": [str(layout.shorts_script_queue), str(package)],
             "task": {
                 "kind": "correct_shorts_script_package",
@@ -919,45 +1030,109 @@ def _ensure_valid_shorts_script_staging(
 
 def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
     queue = read_json(layout.image_queue)
-    specs: list[CodexPhaseSpec] = []
-    successful_reference: Path | None = None
-    for item in queue.get("items", []):
-        if not isinstance(item, dict) or item.get("status") != StageStatus.WAITING_EXTERNAL.value:
-            continue
-        staging = _project_file(layout, str(item["staging_path"]))
-        if _is_nonempty_file(staging):
-            successful_reference = staging
-            continue
-        references = [str(successful_reference)] if successful_reference else []
-        specs.append(
-            CodexPhaseSpec(
-                phase="image",
-                item_id=str(item.get("job_id")),
-                model=DEFAULT_REMOTE_CODEX_MODEL,
-                reasoning_effort=DEFAULT_REMOTE_REASONING_EFFORT,
-                payload={
-                    "allowed_inputs": references,
-                    "task": {
-                        "kind": "generate_one_scene_image_with_builtin_imagegen",
-                        "tool": "$imagegen",
-                        "item": item,
-                        "reference_images": references,
-                        "visual_standard": queue.get("visual_standard", {}),
-                        "generation_retry_policy": queue.get("generation_retry_policy", {}),
-                        "instructions": [
-                            "Use o prompt do item integralmente na primeira tentativa.",
-                            *imagegen_retry_instructions(asset_label="imagem desta cena"),
-                            "Gere uma composição única, sem colagem ou painéis.",
-                            "Copie o PNG final exatamente para item.staging_path.",
-                            "Não leia a fila completa nem qualquer manifesto do projeto.",
-                        ],
-                    },
+    pending_items = [
+        item
+        for item in queue.get("items", [])
+        if isinstance(item, dict)
+        and item.get("status") == StageStatus.WAITING_EXTERNAL.value
+        and not _is_nonempty_file(_project_file(layout, str(item["staging_path"])))
+    ]
+    if not pending_items:
+        return []
+
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for index, item in enumerate(pending_items):
+        worker_id = str(item.get("worker_id") or f"image-worker-{(index % 2) + 1}")
+        groups.setdefault(worker_id, []).append(item)
+    if len(groups) > 2:
+        redistributed: dict[str, list[dict[str, Any]]] = {
+            "image-worker-1": [],
+            "image-worker-2": [],
+        }
+        for index, item in enumerate(pending_items):
+            redistributed[f"image-worker-{(index % 2) + 1}"].append(item)
+        groups = redistributed
+
+    declared = queue.get("orchestration", {}).get("worker_job_files", {})
+    declared = declared if isinstance(declared, dict) else {}
+    assignments: list[dict[str, Any]] = []
+    expected_outputs: list[Path] = []
+    allowed_inputs: list[str] = []
+    for worker_id, items in groups.items():
+        relative_job_path = declared.get(worker_id)
+        if isinstance(relative_job_path, str):
+            job_path = _project_file(layout, relative_job_path)
+        else:
+            job_path = layout.image_jobs / f"remote-{worker_id}.json"
+            write_json(
+                job_path,
+                {
+                    "schema_version": "1.0",
+                    "project_id": queue.get("project_id"),
+                    "batch_id": queue.get("batch_id"),
+                    "worker_id": worker_id,
+                    "role": "image_worker",
+                    "context_policy": "compact_only",
+                    "fork_turns": "none",
+                    "recommended_model": DEFAULT_REMOTE_CODEX_MODEL,
+                    "reasoning_effort": "low",
+                    "generation_retry_policy": queue.get("generation_retry_policy", {}),
+                    "visual_standard": queue.get("visual_standard", {}),
+                    "jobs": items,
                 },
-                expected_outputs=(staging,),
             )
+        outputs = [_project_file(layout, str(item["staging_path"])) for item in items]
+        expected_outputs.extend(outputs)
+        allowed_inputs.append(str(job_path))
+        assignments.append(
+            {
+                "role": "image_worker",
+                "worker_id": worker_id,
+                "job_path": str(job_path),
+                "required_outputs": [str(path) for path in outputs],
+            }
         )
-        successful_reference = staging
-    return specs
+
+    return [
+        CodexPhaseSpec(
+            phase="image_workers",
+            item_id=str(queue.get("batch_id") or "batch"),
+            model=DEFAULT_REMOTE_CODEX_MODEL,
+            reasoning_effort=DEFAULT_REMOTE_REASONING_EFFORT,
+            payload={
+                "delegation": {
+                    "required": True,
+                    "role": "image_worker",
+                    "count": len(assignments),
+                    "max_parallel": 2,
+                    "fork_turns": "none",
+                    "reasoning_effort": "low",
+                    "model": DEFAULT_REMOTE_CODEX_MODEL,
+                    "assignments": assignments,
+                },
+                "allowed_inputs": allowed_inputs,
+                "task": {
+                    "kind": "delegate_image_worker_batches",
+                    "tool": "$imagegen",
+                    "visual_standard": queue.get("visual_standard", {}),
+                    "generation_retry_policy": queue.get("generation_retry_policy", {}),
+                    "instructions": [
+                        "Crie um image_worker por assignment e inicie os dois em paralelo.",
+                        (
+                            "Cada trabalhador deve ler somente seu job_path e gravar seus "
+                            "staging_path."
+                        ),
+                        *imagegen_retry_instructions(asset_label="job de imagem"),
+                        (
+                            "Nenhum trabalhador pode importar, aprovar ou alterar estado "
+                            "compartilhado."
+                        ),
+                    ],
+                },
+            },
+            expected_outputs=tuple(expected_outputs),
+        )
+    ]
 
 
 def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
@@ -1014,6 +1189,14 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
         model=DEFAULT_REMOTE_CODEX_MODEL,
         reasoning_effort=DEFAULT_REMOTE_REASONING_EFFORT,
         payload={
+            "delegation": {
+                "required": True,
+                "role": "youtube_growth_specialist",
+                "count": 1,
+                "fork_turns": "none",
+                "reasoning_effort": "medium",
+                "model": DEFAULT_REMOTE_CODEX_MODEL,
+            },
             "allowed_inputs": allowed_inputs,
             "task": {
                 "kind": "produce_one_title_thumbnail_pair",
@@ -1045,11 +1228,17 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
 
 def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     from pipeline_videos.editorial import citation_target_range
+    from pipeline_videos.long_form_script import minimum_long_form_reengagements
 
     project = layout.load_manifest()
+    long_config = project.config.long_form_script
     minimum, maximum = citation_target_range(
         project.target_duration_seconds,
         project.config.editorial_policy,
+    )
+    required_reengagements = minimum_long_form_reengagements(
+        project.target_duration_seconds,
+        long_config,
     )
     script_output = layout.root / "script" / "staging" / "remote-long-script" / "script.json"
     review_output = (
@@ -1068,10 +1257,25 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
             "sources": read_json(layout.sources),
             "literal_citation_target": {"minimum": minimum, "maximum": maximum},
             "creative_contract": {
+                "narrative_standard": long_config.narrative_standard,
                 "content_promise_source": "briefing.central_theme",
                 "payoff_source": "briefing.practical_application",
-                "pacing_profile": "balanced_long_v1",
-                "required_reengagements": 2,
+                "pacing_profile": "long_retention_v1",
+                "opening_target_max_seconds": long_config.opening_target_max_seconds,
+                "required_reengagements": required_reengagements,
+                "maximum_reengagement_gap_seconds": (long_config.maximum_reengagement_gap_seconds),
+                "payoff_start_minimum_ratio": long_config.payoff_start_minimum_ratio,
+                "cta_max_words": long_config.cta_max_words,
+                "cta_max_seconds": long_config.cta_max_seconds,
+                "cta_actions": ["comment", "subscribe", "share"],
+            },
+            "scripture_cadence": {
+                "first_citation_max_seconds": (long_config.first_scripture_citation_max_seconds),
+                "minimum_gap_seconds": long_config.minimum_scripture_citation_gap_seconds,
+                "maximum_gap_seconds": long_config.maximum_scripture_citation_gap_seconds,
+                "final_citation_max_distance_seconds": (
+                    long_config.final_scripture_citation_max_distance_seconds
+                ),
             },
             "schemas": {
                 "script": compact_json_schema(ScriptDocument.model_json_schema()),
@@ -1089,15 +1293,48 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 "Verbalize Livro, capítulo e versículo; deixe somente o excerpt entre aspas.",
                 "Classifique afirmações e preserve limites de interpretação do briefing.",
                 (
-                    "Faça a opening cumprir a promessa do briefing imediatamente; progrida sem "
-                    "trechos de preenchimento, reengaje aproximadamente em um terço e dois terços "
-                    "e entregue o payoff na aplicação/closing."
+                    "Comece dentro de um conflito concreto, sem saudação, apresentação do canal ou "
+                    "'no vídeo de hoje'. Faça opening_hook ser o prefixo literal da locução, "
+                    "verbalize content_promise e central_question na abertura e conclua o cold "
+                    f"open até {long_config.opening_target_max_seconds:.0f}s."
                 ),
                 (
-                    "Preencha retention_goal em toda seção com sua função e valor para o público. "
-                    "Silêncio ou contemplação só podem permanecer quando tiverem função declarada."
+                    "Copie briefing.audience literalmente em target_viewer, "
+                    "briefing.central_theme em content_promise e "
+                    "briefing.practical_application em practical_application; inclua as duas "
+                    "últimas frases literalmente nos movimentos correspondentes da locução."
                 ),
-                "A closing deve pedir uma resposta específica entre aspas nos comentários.",
+                (
+                    "Construa uma progressão por movimentos: cada seção acrescenta fato, ação, "
+                    "consequência, reversão ou mudança de entendimento. Use ao menos "
+                    f"{required_reengagements} reengajamentos e nunca passe de "
+                    f"{long_config.maximum_reengagement_gap_seconds:.0f}s sem nova informação "
+                    "relevante."
+                ),
+                (
+                    "Preencha long_form_strategy por completo. Cada beat mapeia exatamente uma "
+                    "seção em ordem; copie beat.viewer_value em retention_goal e "
+                    "beat.visual_progression em visual_direction. Contemplação só pode permanecer "
+                    "quando acrescentar significado."
+                ),
+                (
+                    "Mapeie cada citação em scripture_anchors na mesma ordem da locução. Insira a "
+                    "primeira até "
+                    f"{long_config.first_scripture_citation_max_seconds:.0f}s, mantenha "
+                    "as citações separadas e não deixe um intervalo superior a "
+                    f"{long_config.maximum_scripture_citation_gap_seconds:.0f}s. Cada citação deve "
+                    "funcionar como evidência, mudança de ato ou aprofundamento da história."
+                ),
+                (
+                    "Reserve o payoff para o quarto final, resolva central_question, entregue uma "
+                    "aplicação específica e faça o callback retomar a abertura com novo "
+                    "significado."
+                ),
+                (
+                    "A closing termina imediatamente após exatamente uma ação de CTA: comentar, "
+                    "inscrever-se ou compartilhar. Integre-a ao payoff, respeite os limites do "
+                    "creative_contract e, se escolher comentário, coloque a resposta entre aspas."
+                ),
                 "A revisão deve manter approved=false e registrar blockers reais sem ocultá-los.",
                 f"Grave ScriptDocument em {script_output}.",
                 f"Grave BiblicalReview com script_version=1 em {review_output}.",
@@ -1176,6 +1413,8 @@ def _codex_agent_command(
             "--enable",
             "image_generation",
             "--enable",
+            "multi_agent",
+            "--enable",
             "hooks",
             *[
                 value
@@ -1248,7 +1487,7 @@ def _recover_generated_image_outputs(
     session_id: str | None = None,
     generated_after_ns: int = 0,
 ) -> list[tuple[Path, Path]]:
-    if spec.phase not in {"image", "youtube_growth"}:
+    if spec.phase not in {"image", "image_workers", "youtube_growth"}:
         return []
     missing_pngs = [
         path
@@ -1556,6 +1795,7 @@ def _validate_long_script_staging(
     review_path: Path,
 ) -> tuple[ScriptDocument, BiblicalReview]:
     from pipeline_videos.editorial import validate_script_editorial_policy
+    from pipeline_videos.long_form_script import validate_long_form_retention_script
 
     document = ScriptDocument.model_validate_json(script_path.read_text(encoding="utf-8"))
     review = BiblicalReview.model_validate_json(review_path.read_text(encoding="utf-8"))
@@ -1566,6 +1806,13 @@ def _validate_long_script_staging(
         duration_seconds=project.target_duration_seconds,
         policy=project.config.editorial_policy,
         sources=sources,
+    )
+    validate_long_form_retention_script(
+        document,
+        target_duration_seconds=project.target_duration_seconds,
+        config=project.config.long_form_script,
+        sources=sources,
+        briefing=Briefing.model_validate(read_json(layout.briefing)),
     )
     if review.script_version != document.version:
         raise ValueError("A revisão em staging não corresponde ao roteiro longo.")
@@ -1796,6 +2043,16 @@ def work_once(
     repo_root: Path = REPO_ROOT,
     dry_run: bool = False,
 ) -> RemoteVideoJob | None:
+    if not dry_run:
+        from pipeline_videos.remote_schedules import (
+            RemoteScheduleStore,
+            materialize_daily_schedules,
+        )
+
+        materialize_daily_schedules(
+            store=store,
+            schedule_store=RemoteScheduleStore(store.root),
+        )
     waiting = list(reversed(store.list(status="waiting_youtube")))
     if waiting:
         job = waiting[0]
@@ -1882,6 +2139,7 @@ def job_summary(job: RemoteVideoJob) -> dict[str, Any]:
         "attempts": job.attempts,
         "current_phase": job.current_phase,
         "codex_session_id": job.codex_session_id,
+        "schedule_occurrence_id": job.schedule_occurrence_id,
         "codex_run_count": len(job.codex_runs),
         "codex_usage": codex_usage_summary(job),
         "error": job.error,

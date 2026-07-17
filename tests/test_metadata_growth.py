@@ -28,6 +28,7 @@ from pipeline_videos.models import (
     YouTubeGrowthPackage,
     YouTubeGrowthStrategy,
     YouTubeMetadata,
+    YouTubePromiseMatch,
     YouTubeThumbnailDesign,
 )
 from pipeline_videos.project import create_project
@@ -155,15 +156,33 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
         "thumbnail_design_count",
         queue["outputs"].get("thumbnail_count", len(queue["outputs"]["thumbnails"])),
     )
+    title_standard = queue["outputs"]["title_standard"]
+    if title_standard == "tension_pipe_passage_v2":
+        titles = [
+            "O detalhe escondido em Davi e Golias | 1 Samuel 17",
+            "Por que Davi e Golias começou antes da pedra | 1 Samuel 17",
+            "O medo que muda a história de Davi e Golias | 1 Samuel 17",
+        ][:design_count]
+        promise_match = YouTubePromiseMatch(
+            content_promise=queue["contract_guard"]["content_promise"],
+            opening_line=queue["contract_guard"]["opening_hook"],
+            opening_scene_id=queue["contract_guard"]["opening_scene_id"],
+            title_delivery=titles[0].split("|", 1)[0].strip(),
+            thumbnail_delivery=design_specs[0].text,
+        )
+    else:
+        titles = [
+            "1 Samuel 17 | Davi e Golias: Coragem Diante do Medo",
+            "1 Samuel 17 | Como Davi Enfrentou Golias?",
+            "1 Samuel 17 | Davi Não Recuou Diante do Gigante",
+        ][:design_count]
+        promise_match = None
     return YouTubeGrowthPackage(
         job_id=queue["job_id"],
         input_hash=queue["input_hash"],
         metadata=YouTubeMetadata(
-            title="1 Samuel 17 | Davi e Golias: Coragem Diante do Medo",
-            alternative_titles=[
-                "1 Samuel 17 | Como Davi Enfrentou Golias?",
-                "1 Samuel 17 | Davi Não Recuou Diante do Gigante",
-            ][: max(0, design_count - 1)],
+            title=titles[0],
+            alternative_titles=titles[1:],
             description=(
                 "Entenda a história de Davi e Golias e o que ela ensina sobre coragem e fé."
             ),
@@ -173,8 +192,11 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
             thumbnail_concept="Davi pequeno diante da sombra de Golias",
             thumbnail_prompt=(
                 "Visual standard: cinematic-family-3d-v1. Style/medium: animação 3D "
-                "cinematográfica familiar premium. Contraste de escala, emoção clara e "
-                "composição simples."
+                "cinematográfica familiar premium. Typography standard: "
+                "integrated_extruded_3d_v1. Tipografia 3D extrudada integrada, com espessura "
+                "visível, bordas chanfradas, sombras de contato e oclusão, perspectiva coerente "
+                "e material coerente com a cena. Contraste de escala, emoção clara e composição "
+                "simples."
             ),
             thumbnail_alternatives=["Pedra no ar", "Sombra do gigante"],
         ),
@@ -189,6 +211,7 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
             title_rationale="Combina busca clara e curiosidade legítima.",
             thumbnail_rationale="O contraste de escala comunica o conflito rapidamente.",
             title_thumbnail_complement="O título explica; a imagem dramatiza a escala.",
+            promise_match=promise_match,
             source_ids=[],
             section_ids=["section-001"],
             thumbnail_designs=design_specs[:design_count],
@@ -253,7 +276,7 @@ def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path
     assert queue["orchestration"]["single_writer"] is True
     assert queue["orchestration"]["may_modify_project_state"] is False
     assert queue["orchestration"]["reasoning_effort"] == "medium"
-    assert queue["orchestration"]["recommended_model"] == "gpt-5.6-terra"
+    assert queue["orchestration"]["recommended_model"] == "gpt-5.6-sol"
     assert queue["orchestration"]["fork_turns"] == "none"
     assert queue["orchestration"]["context_policy"] == "compact_only"
     assert queue["inputs"] == {
@@ -279,9 +302,10 @@ def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path
     assert queue["outputs"]["base_art_without_text"] is False
     assert queue["outputs"]["text_overlay_required"] is False
     assert queue["outputs"]["imagegen_text_authority"] is True
-    assert queue["outputs"]["title_standard"] == "passage_pipe_topic_v1"
+    assert queue["outputs"]["title_standard"] == "tension_pipe_passage_v2"
     assert queue["outputs"]["description_standard"] == "scripture_timeline_v1"
     assert queue["outputs"]["thumbnail_standard"] == "direct_conflict_red_v1"
+    assert queue["outputs"]["thumbnail_typography_standard"] == ("integrated_extruded_3d_v1")
     assert queue["outputs"]["title_thumbnail_pairing_standard"] == "complementary_v1"
     assert queue["outputs"]["design_contract"]["maximum_lines"] == 3
     assert queue["outputs"]["design_contract"]["allowed_text_colors"] == [
@@ -295,6 +319,10 @@ def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path
         "right",
     ]
     assert queue["outputs"]["design_contract"]["paired_variants_required"] is True
+    assert queue["outputs"]["design_contract"]["typography_treatment"] == ("integrated_extruded_3d")
+    assert queue["outputs"]["design_contract"]["visible_extrusion"] is True
+    assert queue["outputs"]["design_contract"]["beveled_edges"] is True
+    assert queue["outputs"]["design_contract"]["contact_and_occlusion_shadows"] is True
     assert queue["outputs"]["design_contract"]["title_thumbnail_repetition_allowed"] is False
     assert any("personagem ou objeto dominante" in item for item in queue["instructions"])
     assert any("bitmap completo" in item for item in queue["instructions"])
@@ -306,6 +334,12 @@ def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path
     assert any("accent_color=red" in item for item in queue["instructions"])
     assert any("mesmo universo visual" in item for item in queue["instructions"])
     assert any("Style/medium: animação 3D" in item for item in queue["instructions"])
+    assert any(
+        "tipografia 3d extrudada integrada" in item.casefold() for item in queue["instructions"]
+    )
+    assert any(
+        "não use todas as palavras no mesmo tamanho" in item for item in queue["instructions"]
+    )
     assert layout.load_manifest().stages["youtube_growth"].attempts == 1
 
     write_json(layout.growth_package_staging, _package(queue))
@@ -452,6 +486,9 @@ def test_short_growth_queue_requests_composed_first_frame(tmp_path) -> None:
     assert len(queue["outputs"]["thumbnails"]) == 1
     assert queue["outputs"]["thumbnail_source_mode"] == "generated_integrated_art"
     assert queue["outputs"]["external_image_generation_required"] is True
+    assert queue["outputs"]["title_standard"] == "tension_pipe_passage_v2"
+    assert any("Tensão ou promessa concreta" in item for item in queue["instructions"])
+    assert any("strategy.promise_match" in item for item in queue["instructions"])
     assert any("frame zero" in instruction for instruction in queue["instructions"])
 
 
@@ -491,6 +528,24 @@ def test_short_growth_rejects_generic_title_without_primary_search_phrase(tmp_pa
         _validate_package(layout, generic_package, queue)
 
 
+def test_short_growth_rejects_promise_match_that_changes_opening_scene(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(tmp_path, video_format="short")
+    queue = prepare_growth_queue(layout)
+    package = _package(queue, format_name="short")
+    assert package.strategy.promise_match is not None
+    invalid_match = package.strategy.promise_match.model_copy(
+        update={"opening_scene_id": "scene-inexistente"}
+    )
+    invalid_strategy = package.strategy.model_copy(update={"promise_match": invalid_match})
+
+    with pytest.raises(ValueError, match="cena de abertura ativa"):
+        _validate_package(
+            layout,
+            package.model_copy(update={"strategy": invalid_strategy}),
+            queue,
+        )
+
+
 def test_growth_rejects_photographic_thumbnail_prompt(tmp_path) -> None:
     layout = _project_with_editorial_inputs(tmp_path, video_format="short")
     queue = prepare_growth_queue(layout)
@@ -508,6 +563,27 @@ def test_growth_rejects_photographic_thumbnail_prompt(tmp_path) -> None:
         _validate_package(
             layout,
             package.model_copy(update={"metadata": photographic_metadata}),
+            queue,
+        )
+
+
+def test_growth_rejects_prompt_without_integrated_extruded_3d_typography(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(tmp_path, video_format="short")
+    queue = prepare_growth_queue(layout)
+    package = _package(queue, format_name="short")
+    flat_metadata = package.metadata.model_copy(
+        update={
+            "thumbnail_prompt": (
+                "Visual standard: cinematic-family-3d-v1. Style/medium: animação 3D "
+                "cinematográfica familiar premium. Texto grande e legível sobre a cena."
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="tipografia 3D integrada"):
+        _validate_package(
+            layout,
+            package.model_copy(update={"metadata": flat_metadata}),
             queue,
         )
 
@@ -537,13 +613,13 @@ def test_growth_rejects_title_that_repeats_the_paired_thumbnail_text(tmp_path) -
     queue = prepare_growth_queue(layout)
     package = _package(queue)
     repeated_metadata = package.metadata.model_copy(
-        update={"title": "1 Samuel 17 | Davi Enfrenta Golias"}
+        update={"title": "Davi enfrenta Golias | 1 Samuel 17"}
     )
     repeated_design = package.strategy.thumbnail_designs[0].model_copy(
         update={
-            "text": "DAVI VS GOLIAS",
-            "accent_word": "VS",
-            "text_lines": ["DAVI VS", "GOLIAS"],
+            "text": "DAVI ENFRENTA GOLIAS",
+            "accent_word": "GOLIAS",
+            "text_lines": ["DAVI ENFRENTA", "GOLIAS"],
         }
     )
     repeated_strategy = package.strategy.model_copy(

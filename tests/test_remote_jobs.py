@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from pipeline_videos.cli import app
+from pipeline_videos.models import DEFAULT_ELEVENLABS_VOICE_ID
 from pipeline_videos.remote_jobs import (
     CodexPhaseSpec,
     RemoteCodexRun,
@@ -89,7 +90,7 @@ def test_store_supports_enqueue_cancel_retry_and_due_window(tmp_path) -> None:
     assert retried.error is None
 
 
-def test_prepare_job_project_enables_single_variant_without_human_approval(tmp_path) -> None:
+def test_prepare_job_project_enables_local_specialists_without_human_approval(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Coragem em Josué", title="Coragem em Josué"))
 
@@ -97,18 +98,22 @@ def test_prepare_job_project_enables_single_variant_without_human_approval(tmp_p
     manifest = layout.load_manifest()
 
     assert manifest.config.production.mode == "draft_one_shot"
-    assert manifest.config.production.use_subagents is False
+    assert manifest.config.production.use_subagents is True
+    assert manifest.config.production.image_workers == 3
     assert manifest.config.production.optimization_profile == "token_optimized_v1"
-    assert manifest.config.shorts_script.use_specialist_subagent is False
-    assert manifest.config.youtube_growth.use_specialist_subagent is False
+    assert manifest.config.shorts_script.use_specialist_subagent is True
+    assert manifest.config.shorts_script.narrative_standard == "retention_story_v2"
+    assert manifest.config.youtube_growth.use_specialist_subagent is True
+    assert manifest.config.youtube_growth.title_standard == "tension_pipe_passage_v2"
     assert manifest.config.youtube_growth.title_variants == 1
     assert manifest.config.youtube_growth.thumbnail_variants == 1
+    assert manifest.config.audio.voice_id == DEFAULT_ELEVENLABS_VOICE_ID
     assert manifest.config.youtube_publication.allow_automated_private_review_upload is True
     assert all(record.status.value == "pending" for record in manifest.approvals.values())
     prompt = codex_checkpoint_prompt(Path("/tmp/checkpoint.json"))
     assert "mesma sessão" in prompt
     assert "AGENTS.md" in prompt
-    assert "não crie" in prompt.casefold()
+    assert "crie exatamente os subagentes" in prompt.casefold()
 
 
 def test_long_script_phase_declares_one_functional_pacing_contract(tmp_path) -> None:
@@ -119,14 +124,20 @@ def test_long_script_phase_declares_one_functional_pacing_contract(tmp_path) -> 
     spec = _long_script_phase_spec(layout)
     task = spec.payload["task"]
 
-    assert task["creative_contract"] == {
-        "content_promise_source": "briefing.central_theme",
-        "payoff_source": "briefing.practical_application",
-        "pacing_profile": "balanced_long_v1",
-        "required_reengagements": 2,
+    assert task["creative_contract"]["narrative_standard"] == "retention_story_long_v1"
+    assert task["creative_contract"]["content_promise_source"] == "briefing.central_theme"
+    assert task["creative_contract"]["payoff_source"] == "briefing.practical_application"
+    assert task["creative_contract"]["pacing_profile"] == "long_retention_v1"
+    assert task["creative_contract"]["required_reengagements"] == 4
+    assert task["creative_contract"]["maximum_reengagement_gap_seconds"] == 120.0
+    assert task["scripture_cadence"] == {
+        "first_citation_max_seconds": 75.0,
+        "minimum_gap_seconds": 25.0,
+        "maximum_gap_seconds": 105.0,
+        "final_citation_max_distance_seconds": 120.0,
     }
-    assert any("retention_goal em toda seção" in item for item in task["instructions"])
-    assert any("trechos de preenchimento" in item for item in task["instructions"])
+    assert any("long_form_strategy" in item for item in task["instructions"])
+    assert any("cada seção acrescenta" in item for item in task["instructions"])
 
 
 def test_codex_agent_command_starts_persistent_sol_medium_session(tmp_path) -> None:
@@ -323,6 +334,51 @@ def test_shorts_narrative_spine_is_aligned_to_mapped_sections_without_codex() ->
     assert "strategy.narrative_spine.tension_question" in change
 
 
+def test_retention_story_fields_are_normalized_without_another_codex_run() -> None:
+    payload = {
+        "strategy": {
+            "content_promise": "promessa antiga",
+            "open_loop": "pergunta antiga",
+            "payoff": "payoff antigo",
+            "practical_value": "aplicação antiga",
+            "cta": "cta antigo",
+            "section_ids": [],
+            "verse_opening": {"source_id": "bpm-salmos-56-3"},
+            "retention_story": {
+                "opening_promise": "Davi ouviu passos e congelou.",
+                "central_question": "Sentir medo significava perder a fé?",
+                "payoff": "Coragem bíblica não esconde o medo.",
+                "practical_response": "Faça o próximo passo responsável.",
+                "engagement": {"spoken_text": "Inscreva-se para lembrar desse passo."},
+            },
+        },
+        "script": {
+            "sections": [
+                {
+                    "section_id": "s1",
+                    "narration": "Davi ouviu passos e congelou.",
+                    "biblical_basis": [],
+                    "claim_classification": [],
+                },
+                {"section_id": "s2", "narration": "O perigo era real."},
+            ]
+        },
+    }
+
+    normalized, change = _normalize_shorts_script_payload(payload)
+    strategy = normalized["strategy"]
+
+    assert strategy["content_promise"] == "Davi ouviu passos e congelou."
+    assert strategy["open_loop"] == "Sentir medo significava perder a fé?"
+    assert strategy["payoff"] == "Coragem bíblica não esconde o medo."
+    assert strategy["practical_value"] == "Faça o próximo passo responsável."
+    assert strategy["cta"] == "Inscreva-se para lembrar desse passo."
+    assert strategy["section_ids"] == ["s1", "s2"]
+    assert normalized["script"]["sections"][0]["biblical_basis"] == ["bpm-salmos-56-3"]
+    assert normalized["script"]["sections"][0]["claim_classification"] == ["interpretation"]
+    assert "retention_story.opening_promise" in change
+
+
 def test_remote_shorts_script_uses_sol_with_medium_reasoning_even_for_legacy_queue(
     tmp_path,
 ) -> None:
@@ -404,7 +460,7 @@ def test_shorts_correction_allows_two_checkpoints_in_the_persistent_session(tmp_
     assert _shorts_script_correction_is_available(two_corrections) is False
 
 
-def test_image_phases_receive_one_item_and_previous_staging_only(tmp_path) -> None:
+def test_remote_image_phase_delegates_two_compact_workers_in_parallel(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Coragem"))
     layout = prepare_job_project(job, projects_root=tmp_path / "projects")
@@ -436,13 +492,21 @@ def test_image_phases_receive_one_item_and_previous_staging_only(tmp_path) -> No
 
     specs = _image_phase_specs(layout)
 
-    assert len(specs) == 2
-    assert {spec.model for spec in specs} == {"gpt-5.6-sol"}
-    assert {spec.reasoning_effort for spec in specs} == {"medium"}
-    assert specs[0].payload["task"]["item"]["prompt"] == "PROMPT EXCLUSIVO UM"
-    assert "PROMPT EXCLUSIVO DOIS" not in json.dumps(specs[0].payload, ensure_ascii=False)
-    assert specs[0].payload["allowed_inputs"] == []
-    assert specs[1].payload["allowed_inputs"] == [str(specs[0].expected_outputs[0])]
+    assert len(specs) == 1
+    spec = specs[0]
+    assert spec.phase == "image_workers"
+    assert spec.model == "gpt-5.6-sol"
+    assert spec.reasoning_effort == "medium"
+    delegation = spec.payload["delegation"]
+    assert delegation["count"] == 2
+    assert delegation["max_parallel"] == 2
+    assert delegation["reasoning_effort"] == "low"
+    assert delegation["model"] == "gpt-5.6-sol"
+    assert len(spec.payload["allowed_inputs"]) == 2
+    first_job = json.loads(Path(spec.payload["allowed_inputs"][0]).read_text(encoding="utf-8"))
+    second_job = json.loads(Path(spec.payload["allowed_inputs"][1]).read_text(encoding="utf-8"))
+    assert first_job["jobs"][0]["prompt"] == "PROMPT EXCLUSIVO UM"
+    assert second_job["jobs"][0]["prompt"] == "PROMPT EXCLUSIVO DOIS"
 
 
 def test_remote_growth_requires_opening_scene_as_visual_reference(tmp_path) -> None:

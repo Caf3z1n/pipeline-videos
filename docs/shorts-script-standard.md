@@ -2,198 +2,145 @@
 
 ## Identidade editorial
 
-Todo Short começa com uma tensão humana reconhecível e chega rapidamente à Bíblia. O objetivo não é
-esconder o texto bíblico, mas mostrar nos primeiros segundos por que ele importa para quem está
-assistindo.
+Novos Shorts usam `retention_story_v2`. O objetivo é criar uma experiência bíblica de 45 a 55
+segundos que começa dentro de uma ação ou conflito, progride sem trechos neutros, usa a Bíblia como
+evidência e encerra assim que entrega o payoff e uma única ação de engajamento.
 
-O padrão principal é `human_hook_to_bible`:
+Os formatos `human_hook_to_bible` e `verse_first` continuam válidos para projetos antigos. Eles não
+são migrados implicitamente.
 
-1. **Gancho humano** — dor, pergunta, contraste ou situação cotidiana em até 2,5 segundos;
-2. **Citação bíblica** — referência falada e ao menos um versículo literal verificado;
-3. **Contexto ou conflito** — personagem, situação ou limite necessário para não ler o texto de
-   forma rasa;
-4. **Verdade central** — uma interpretação clara que resolve o gancho;
-5. **Resposta prática** — reflexão, ação ou decisão específica para hoje;
-6. **Encerramento** — uma palavra contextual para comentar e o CTA completo do canal.
+O novo padrão adapta princípios de retenção sem usar clickbait enganoso: título, thumbnail e cold
+open prometem a mesma coisa; cada beat acrescenta valor; existe uma mudança real no meio; e a
+resolução entrega exatamente o que a abertura criou como pergunta.
 
-`verse_first` continua aceito para projetos antigos, mas não é o padrão de novos Shorts.
+## Arquétipos
 
-## Citações bíblicas
+O seletor reserva um dos três arquétipos no briefing e não repete nenhum dos dois Shorts anteriores:
 
-Todo Short cita literalmente pelo menos um versículo bíblico verificado. Dê preferência a passagens
-conhecidas, curtas e fáceis de entender. Uma segunda citação só entra quando acrescentar valor real,
-caber no ritmo e possuir fonte própria verificada.
+- `conflict_first`: começa dentro de uma decisão, risco ou conflito já em andamento;
+- `counterintuitive_reveal`: mostra um detalhe bíblico que corrige uma expectativa comum;
+- `stair_step_progression`: aumenta consequência, dificuldade ou descoberta em etapas.
 
-Toda referência narrada usa as palavras `capítulo` e `versículo`. Diga **“1 Pedro, capítulo 5,
-versículo 7”**, nunca apenas “1 Pedro 5:7”. O formato compacto continua nos metadados e campos
-técnicos.
+O roteiro copia esse valor para `retention_story.archetype`. Trocar o arquétipo depois da reserva é
+erro de validação.
 
-As aspas delimitam somente o texto copiado da fonte:
+## Estrutura e tempo
 
-> Em Josué, capítulo 1, versículo 9, lemos: “Seja forte e corajoso…”
+Use como contrato:
 
-Não narre “Até aqui, o texto bíblico”, “agora vem a reflexão” nem outro rótulo de transição. A
-separação é feita pelas aspas, pelo itálico das palavras literais, pelas seções estruturadas e pela
-classificação das afirmações. Depois da citação, use uma transição natural.
+- **0–2s — cold open:** ação, detalhe ou conflito concreto; sem saudação ou explicação;
+- **2–8s — pergunta central:** aumente a tensão e deixe claro o que está em jogo;
+- **8–20s — evidência bíblica:** cite literalmente ao menos um versículo verificado;
+- **20–32s — progressão e reengajamento:** acrescente consequência, reversão ou revelação;
+- **32–45s — payoff e aplicação:** resolva a pergunta e ofereça uma ação específica;
+- **últimos 4s — CTA:** peça exatamente uma ação e encerre no callback.
 
-## Gancho humano e atenção ética
+O último beat termina entre 45 e 55 segundos. O reengajamento começa entre 40% e 60% da duração. O
+roteiro usa de 105 a 130 palavras por padrão e deve produzir de 8 a 10 cenas no perfil
+`short_retention_v2`.
 
-O gancho precisa ser o prefixo exato da primeira seção, ter no máximo 12 palavras e mirar 2,5
-segundos. Ele deve abrir uma pergunta que a verdade central realmente resolve.
+Cada `retention_beat` preenche:
 
-Técnicas permitidas, registradas em `hook_techniques`:
+- `viewer_question` e `viewer_value`;
+- `new_information`, diferente dos demais beats;
+- `visual_change`, com uma mudança visível e executável;
+- tempo crescente, função editorial e, quando aplicável, abertura ou resolução do loop.
 
-- `self_relevance`: faz o espectador se reconhecer na situação;
-- `emotional_mirroring`: nomeia uma emoção comum sem dramatização artificial;
-- `curiosity_gap` ou `open_loop`: campo técnico que abre uma pergunta específica com resposta real;
-- `contrast`: aproxima duas situações que parecem incompatíveis;
-- `specificity`: usa um detalhe concreto em vez de uma abstração;
-- `pattern_interrupt`: quebra uma expectativa sem choque gratuito.
+Reformular a mesma tese com palavras diferentes não conta como progressão.
 
-Use de uma a três técnicas por gancho. Elas servem à mensagem; não substituem conteúdo. São
-proibidos medo artificial, culpa, urgência inventada, promessa espiritual, informação escondida de
-propósito e qualquer pressão para provar fé por meio de comentário ou compartilhamento.
+## Contrato `retention_story`
 
-Exemplos de estruturas, não de bordões:
+O pacote estrutura explicitamente:
 
-- pergunta de identificação: “Você sabe o que fazer, mas o medo ainda trava você?”;
-- contraste: “Davi tinha uma promessa, mas estava escondido numa caverna.”;
-- inversão: “O lugar que parecia o fim virou o começo da mudança.”
+- seção de abertura e `opening_promise`;
+- `central_question`;
+- seção da citação e `scripture_anchor` literal;
+- duas ou mais progressões, cada uma ligada à sua seção;
+- reengajamento único;
+- payoff e resposta prática;
+- `engagement` com uma única ação;
+- `replay_bridge` ligando abertura e encerramento.
 
-Varie a construção entre vídeos e mantenha a promessa fiel ao conteúdo.
+`content_promise`, `open_loop`, `payoff`, `practical_value` e `cta` copiam os campos equivalentes do
+novo contrato. O pipeline normaliza essas duplicações antes de validar o staging.
 
-## Voz pastoral e linguagem cotidiana
+## Citação e precisão bíblica
 
-A voz deve lembrar um bom pastor ou padre conversando com uma pessoa: acolhedora, firme, simples e
-fácil de acompanhar. Não use caricatura religiosa, tom de palestra, jargão denominacional ou
-linguagem terapêutica automática.
+Todo Short cita literalmente pelo menos um versículo verificado. A referência falada usa
+`capítulo` e `versículo`:
 
-Prefira:
+> Em Salmos, capítulo 56, versículo 3, lemos: “Quando eu tiver medo, colocarei a minha confiança em
+> ti.”
 
-- frases curtas;
-- palavras frequentes no cotidiano;
-- verbos concretos;
-- perguntas que uma pessoa realmente faria;
-- imagens mentais simples;
-- transições naturais como “repara nisso”, “só que”, “então” e “talvez você pense”, apenas quando
-  combinarem com o contexto.
-
-Evite construções que soam escritas por IA ou que poderiam caber em qualquer tema, como “essa
-passagem nos convida”, “para a vida real”, “acolha a sua dor”, “nomeie o seu medo”, “a coragem nasce
-de” e “escolha um próximo passo responsável”.
-
-Leia a locução em voz alta. Reescreva qualquer frase que soe formal, publicitária, excessivamente
-lapidada ou difícil de dizer numa conversa.
-
-## Ritmo e duração
-
-Em um Short de 50 a 60 segundos, use como referência:
-
-- 0–3s: gancho humano;
-- 3–15s: entrada no contexto e citação bíblica;
-- 15–28s: conflito ou contexto;
-- 28–40s: verdade central e resolução;
-- 40–50s: reflexão ou resposta prática;
-- 50–60s: comentário e CTA.
-
-O orçamento de palavras é validado pela velocidade configurada da voz, não apenas por um intervalo
-fixo. Não acelere a leitura para salvar um roteiro longo. Se o versículo ocupar mais tempo, encurte a
-explicação sem cortar o sentido original.
-
-## Precisão e revisão bíblica
+A apresentação e a referência ficam fora das aspas; somente o texto literal fica dentro. O texto
+precisa coincidir com o `excerpt` da fonte. Não narre “Até aqui, o texto bíblico”, “agora vem a
+reflexão” ou outro rótulo editorial.
 
 Texto bíblico, contexto, interpretação e elaboração criativa continuam separados em
-`claim_classification`. Uma estrutura envolvente não autoriza transformar uma observação em promessa
-universal.
+`claim_classification`. O formato de retenção não autoriza inventar cena histórica, promessa,
+resultado espiritual ou intenção divina.
 
-Não diga que Deus causou uma dor para preparar alguém, que todo sofrimento anuncia uma promoção ou
-que o mesmo desfecho de um personagem será repetido na vida do espectador, salvo quando a fonte
-realmente sustentar essa afirmação. Preserve limites, contexto e incertezas na revisão.
+## Abertura, progressão e replay
 
-Modos de desenvolvimento:
+O `hook` é o prefixo exato da primeira seção, tem no máximo 12 palavras e termina até a meta de dois
+segundos. Prefira começar com personagem, ação, objeto, consequência ou contraste. Evite perguntas
+terapêuticas que caberiam em qualquer vídeo.
 
-- `contextual_reflection`: explica o contexto e conduz a uma reflexão;
-- `biblical_story_bridge`: usa outra cena ou personagem bíblico com fonte complementar;
-- `biblical_image_bridge`: usa uma imagem já presente na Bíblia;
-- `cross_reference_bridge`: relaciona outra citação verificada;
-- `promise_boundary`: explica o que o texto afirma e o que ele não promete.
+Use de uma a três técnicas éticas em `hook_techniques`: `specificity`, `contrast`, `curiosity_gap`,
+`open_loop`, `self_relevance`, `emotional_mirroring` ou `pattern_interrupt`.
 
-História, imagem e correlação externas exigem outra fonte bíblica verificada em
-`bridge_source_ids`.
+O `replay_bridge` registra um elemento real da abertura, o callback final e o novo significado que
+ele recebe. O callback precisa aparecer na última fala. Ele deve recompensar uma segunda exibição,
+não produzir uma frase circular artificial.
 
-## Direção visual
+## CTA de uma única ação
 
-Cada `visual_direction` descreve uma única imagem:
+`retention_story.engagement.mode` aceita:
 
-- um momento;
-- um ambiente contínuo;
-- uma ação principal;
-- um assunto dominante;
-- espaço de baixo contraste integrado ao mesmo fundo para as legendas.
+- `comment`;
+- `subscribe`;
+- `share`.
 
-Não peça vinhetas, painéis, colagem, storyboard, díptico, tríptico, tela dividida, cenas empilhadas,
-antes e depois ou uma sequência de ações na mesma imagem. A área da legenda nunca pode virar faixa
-branca, retângulo vazio ou divisor horizontal.
+O texto falado tem no máximo 12 palavras e quatro segundos. O validador rejeita qualquer combinação
+de duas ações. Não há bloco automático de curtir, comentar, inscrever-se e compartilhar.
 
-Quando uma seção tiver várias ideias, escolha o beat visual ligado ao trecho narrado ou divida a
-locução em cenas separadas.
+`comment_prompt` só existe quando o modo é `comment`. Uma palavra-chave continua permitida, mas é
+opcional. Quando usada entre aspas, o pipeline pode isolá-la na legenda e aplicar a pausa configurada.
+O comentário nunca é condição para bênção, cura, proteção, milagre ou prova de fé.
 
-## Comentário e CTA
+O CTA ocupa sozinho a última seção `closing`, contém o callback e encerra o vídeo sem resumo,
+agradecimento ou despedida posterior.
 
-Escolha uma palavra ou frase curta que nasça da resolução. Quando for uma palavra, ela funciona como
-uma palavra-síntese: expressiva, específica, com pelo menos seis letras e ligada diretamente à
-verdade central, ao payoff ou à aplicação. `REFÚGIO`, `PERSISTÊNCIA`, `CONFIANÇA`, `FIDELIDADE`,
-`ESPERANÇA`, `PERSEVERANÇA`, `RECOMEÇO`, `DESCANSO` e `CORAGEM` são referências de densidade
-semântica, não uma lista para escolha aleatória.
+## Direção visual e thumbnail
 
-Não use isoladamente respostas vagas como `BEM`, `SIM`, `AMÉM`, `EU`, `AQUI`, `PERTO`, `FÉ`, `PAZ`,
-`FORÇA` ou `FIEL`. O `fit_reason` precisa citar a palavra escolhida e explicar sua ligação concreta
-com a resolução do vídeo; dizer apenas que ela é simples não basta. Não faça uma pergunta aberta e
-depois force uma resposta diferente. O comentário nunca é condição para bênção, cura, proteção,
-milagre ou prova de fé.
+Cada `visual_direction` descreve um único momento, ambiente contínuo e ação principal. A progressão
+de 8 a 10 cenas precisa conter:
 
-Modos aceitos:
+- abertura visualmente forte e coerente com o cold open;
+- mudanças concretas de ação ou informação;
+- uma mudança visual no reengajamento;
+- payoff legível;
+- callback final para o elemento da abertura.
 
-- `keyword_reaffirmation`;
-- `next_step_commitment`;
-- `sentence_completion`;
-- `message_declaration`;
-- `community_encouragement`.
+Não peça colagem, painéis, storyboard, tela dividida ou várias ações na mesma imagem.
 
-O roteiro termina exatamente com o convite para comentar e depois:
+O sistema de thumbnail não muda: o especialista edita diretamente a imagem ativa da abertura,
+preserva `cinematic-family-3d-v1`, incorpora texto e marcação ao bitmap e usa o resultado no frame
+zero. O título do Short segue `Tensão concreta | Passagem` e a primeira fala, a cena de abertura e a
+thumbnail precisam entregar a mesma promessa estruturada em `promise_match`.
 
-> Se essa mensagem falou com você, curta o vídeo, se inscreva no canal e compartilhe com alguém que
-> precisa ouvir isso.
+## Linguagem e critérios de qualidade
 
-No convite, a resposta esperada aparece entre aspas: `escreva “CORAGEM” nos comentários`. O áudio
-insere um segundo de silêncio após a palavra ou frase, e a legenda a mantém sozinha durante a pausa.
-Termos técnicos em inglês podem existir nos campos estruturados, mas nunca entram na locução.
+Escreva em português brasileiro falado, pastoral, simples e concreto. Evite frases que soam como
+texto de IA, jargão editorial narrado e abstrações sem ação.
 
-## Contrato das fontes
+O roteiro está pronto quando:
 
-Antes de preparar o roteiro, toda citação literal precisa registrar:
-
-- `kind: biblical_text` e `verified: true`;
-- `passage`, `translation` e `excerpt` com o texto exato;
-- `author_or_publisher`, `accessed_at` e `rights_note`;
-- `source_id` presente no roteiro e na estratégia.
-
-O roteirista não reconstrói versículos de memória. O texto citado precisa coincidir com o `excerpt`
-da fonte.
-
-## Critérios de qualidade
-
-Um roteiro está pronto quando:
-
-- o gancho interessa antes de explicar;
-- a Bíblia entra imediatamente depois e contém ao menos uma citação verificada;
-- a citação é curta e clara sempre que a fonte permitir;
-- o contexto impede distorção;
-- o payoff resolve a pergunta inicial;
-- a aplicação é concreta;
-- a linguagem soa pastoral, cotidiana e natural;
-- o comentário usa uma palavra-síntese expressiva, contextual e justificada pela resolução;
-- o CTA pede curtir, inscrição e compartilhamento sem pressão;
-- cada direção visual representa somente uma cena;
-- a duração estimada cabe no alvo;
-- a revisão bíblica não possui finding `blocking` aberto.
+- começa dentro de uma situação específica e cumpre a promessa da embalagem;
+- possui duas ou mais progressões e um reengajamento real;
+- cita um versículo verificado entre 8 e 20 segundos;
+- resolve a pergunta inicial sem distorcer a passagem;
+- entrega aplicação específica, CTA único e callback;
+- produz de 8 a 10 direções de cena úteis;
+- cabe entre 45 e 55 segundos;
+- não possui finding bíblico `blocking` aberto.

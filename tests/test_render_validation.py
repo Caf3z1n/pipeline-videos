@@ -223,6 +223,12 @@ def test_functional_blur_profile_varies_by_narrative_role_and_caption_zone(tmp_p
         height=1920,
         fps=30,
         background_blur_profile="functional_caption_focus_v1",
+        background_blur_opening_sigma=0.0,
+        background_blur_scripture_sigma=1.4,
+        background_blur_reflection_sigma=3.2,
+        background_blur_payoff_sigma=1.3,
+        background_blur_closing_sigma=1.8,
+        caption_focus_blur_extra_sigma=1.0,
     )
     opening = render.SceneRenderPlan(
         scene_id="opening",
@@ -261,6 +267,34 @@ def test_functional_blur_profile_varies_by_narrative_role_and_caption_zone(tmp_p
         reflection,
         config.model_copy(update={"background_blur_profile": "none"}),
     )
+
+
+def test_default_blur_is_uniform_sigma_eight_without_duplicate_caption_zone(tmp_path) -> None:
+    config = RenderConfig(
+        width=1080,
+        height=1920,
+        fps=30,
+        background_blur_profile="functional_caption_focus_v1",
+    )
+    filters = {
+        role: render._visual_filter(
+            render.SceneRenderPlan(
+                scene_id=role,
+                order=index,
+                image_path=tmp_path / f"{role}.png",
+                frame_count=30,
+                blur_role=role,
+            ),
+            config,
+        )
+        for index, role in enumerate(
+            ("opening", "scripture", "reflection", "payoff", "closing"),
+            1,
+        )
+    }
+
+    assert all("gblur=sigma=8.000:steps=1" in value for value in filters.values())
+    assert all("split=2" not in value for value in filters.values())
 
 
 def test_functional_blur_filter_renders_with_ffmpeg(tmp_path) -> None:

@@ -5,7 +5,8 @@ import re
 import shutil
 from pathlib import Path
 
-from pipeline_videos.editorial import validate_script_editorial_policy
+from pipeline_videos.editorial import scripture_citations, validate_script_editorial_policy
+from pipeline_videos.long_form_script import validate_long_form_retention_script
 from pipeline_videos.models import (
     Briefing,
     CreativeBeat,
@@ -39,9 +40,12 @@ SHORT_BEAT_FUNCTIONS = {
     "hook": "hook",
     "open_loop": "progression",
     "stakes": "progression",
+    "progression": "progression",
     "pattern_interrupt": "reengagement",
+    "reveal": "reengagement",
     "payoff": "payoff",
     "application": "application",
+    "callback": "payoff",
     "cta": "cta",
 }
 
@@ -95,6 +99,7 @@ def build_creative_contract(
     project = layout.load_manifest()
     briefing = read_model(layout.briefing, Briefing)
     is_short = project.video_format == "short"
+    long_strategy = document.long_form_strategy if not is_short else None
     if is_short and strategy is None and layout.shorts_script_strategy.is_file():
         strategy = read_model(layout.shorts_script_strategy, ShortsScriptStrategy)
 
@@ -111,15 +116,24 @@ def build_creative_contract(
     if not section_ids:
         raise ValueError("O contrato criativo exige ao menos uma seção de roteiro.")
 
-    wpm = project.config.shorts_script.estimated_narration_wpm if is_short else 145
+    wpm = (
+        project.config.shorts_script.estimated_narration_wpm
+        if is_short
+        else project.config.long_form_script.estimated_narration_wpm
+    )
     timings = _section_timings(document, words_per_minute=wpm)
     strategy_beats: dict[str, list] = {}
     if strategy is not None:
         for beat in strategy.retention_beats:
             strategy_beats.setdefault(beat.section_id, []).append(beat)
+    long_beats = (
+        {beat.section_id: beat for beat in long_strategy.progression}
+        if long_strategy is not None
+        else {}
+    )
 
     reengagement_indexes: set[int] = set()
-    if not is_short and len(document.sections) >= 5:
+    if not is_short and long_strategy is None and len(document.sections) >= 5:
         reengagement_indexes = {
             max(1, min(len(document.sections) - 2, round((len(document.sections) - 1) * share)))
             for share in (1 / 3, 2 / 3)
@@ -137,10 +151,17 @@ def build_creative_contract(
             functions = list(dict.fromkeys(SHORT_BEAT_FUNCTIONS[beat.purpose] for beat in linked))
             start = min(beat.target_start_seconds for beat in linked)
             end = max(beat.target_end_seconds for beat in linked)
+        long_beat = long_beats.get(section.section_id)
+        if long_beat is not None:
+            functions = list(long_beat.functions)
+            start = long_beat.target_start_seconds
+            end = long_beat.target_end_seconds
         if index in reengagement_indexes and "reengagement" not in functions:
             functions.append("reengagement")
         viewer_value = (
-            linked[0].viewer_value
+            long_beat.viewer_value
+            if long_beat is not None
+            else linked[0].viewer_value
             if linked
             else section.retention_goal or section.title or section.role.replace("_", " ")
         )
@@ -159,32 +180,53 @@ def build_creative_contract(
     first_section = document.sections[0]
     closing = document.sections[-1]
     content_promise = (
-        strategy.content_promise
+        long_strategy.content_promise
+        if long_strategy is not None
+        else strategy.content_promise
         if strategy is not None
         else briefing.central_theme.strip() or document.title.strip()
     )
     opening_hook = (
-        strategy.hook if strategy is not None else _first_sentence(first_section.narration)
+        long_strategy.opening_hook
+        if long_strategy is not None
+        else strategy.hook
+        if strategy is not None
+        else _first_sentence(first_section.narration)
     )
     payoff = (
-        strategy.payoff
+        long_strategy.payoff
+        if long_strategy is not None
+        else strategy.payoff
         if strategy is not None
         else briefing.practical_application.strip()
         or closing.retention_goal
         or _first_sentence(closing.narration)
     )
     practical_application = (
-        strategy.practical_value
+        long_strategy.practical_application
+        if long_strategy is not None
+        else strategy.practical_value
         if strategy is not None
         else briefing.practical_application.strip() or payoff
     )
     target_viewer = (
-        strategy.target_viewer
+        long_strategy.target_viewer
+        if long_strategy is not None
+        else strategy.target_viewer
         if strategy is not None
         else briefing.audience.strip() or "pessoas interessadas nesta mensagem bíblica"
     )
-    pacing = (
-        CreativePacingProfile(
+    if is_short and project.config.shorts_script.narrative_standard == "retention_story_v2":
+        pacing = CreativePacingProfile(
+            profile_id="short_retention_v2",
+            default_scene_seconds=5.5,
+            opening_scene_seconds=2.0,
+            reengagement_scene_seconds=5.0,
+            contemplative_scene_seconds=6.0,
+            payoff_scene_seconds=5.5,
+        )
+    elif is_short:
+        pacing = CreativePacingProfile(
             profile_id="short_v1",
             default_scene_seconds=8.0,
             opening_scene_seconds=project.config.shorts_script.verse_visual_change_seconds,
@@ -192,8 +234,17 @@ def build_creative_contract(
             contemplative_scene_seconds=8.0,
             payoff_scene_seconds=8.0,
         )
-        if is_short
-        else CreativePacingProfile(
+    elif long_strategy is not None:
+        pacing = CreativePacingProfile(
+            profile_id="long_retention_v1",
+            default_scene_seconds=10.0,
+            opening_scene_seconds=6.0,
+            reengagement_scene_seconds=7.0,
+            contemplative_scene_seconds=14.0,
+            payoff_scene_seconds=9.0,
+        )
+    else:
+        pacing = CreativePacingProfile(
             profile_id="balanced_long_v1",
             default_scene_seconds=12.0,
             opening_scene_seconds=10.0,
@@ -201,7 +252,6 @@ def build_creative_contract(
             contemplative_scene_seconds=16.0,
             payoff_scene_seconds=13.0,
         )
-    )
     return CreativeContract(
         input_hash=input_hash,
         format="short" if is_short else "long_form",
@@ -211,8 +261,34 @@ def build_creative_contract(
         payoff=payoff,
         practical_application=practical_application,
         main_passage=briefing.main_passage,
+        narrative_standard=(
+            long_strategy.standard
+            if long_strategy is not None
+            else project.config.shorts_script.narrative_standard
+            if is_short
+            else "legacy"
+        ),
+        central_question=(
+            long_strategy.central_question
+            if long_strategy is not None
+            else strategy.open_loop
+            if strategy is not None
+            else ""
+        ),
+        callback=long_strategy.callback if long_strategy is not None else "",
+        engagement_action=(long_strategy.engagement.action if long_strategy is not None else None),
+        scripture_citation_timestamps=[
+            citation.estimated_start_seconds
+            for citation in scripture_citations(document, words_per_minute=wpm)
+        ],
         source_ids=list(
-            dict.fromkeys(strategy.source_ids if strategy is not None else document.source_ids)
+            dict.fromkeys(
+                long_strategy.source_ids
+                if long_strategy is not None
+                else strategy.source_ids
+                if strategy is not None
+                else document.source_ids
+            )
         ),
         section_ids=section_ids,
         claims_to_avoid=briefing.claims_to_avoid,
@@ -317,12 +393,26 @@ def import_script(layout: ProjectLayout, source: Path, *, force: bool = False) -
             policy=project.config.editorial_policy,
             sources=sources,
         )
+        briefing = read_model(layout.briefing, Briefing)
+        if project.video_format != "short":
+            validate_long_form_retention_script(
+                document,
+                target_duration_seconds=project.target_duration_seconds,
+                config=project.config.long_form_script,
+                sources=sources,
+                briefing=briefing,
+            )
         previous = _archive_current_script(layout)
         if previous is not None:
             document.version = previous.version + 1
         words = tokenize_words(document.narration_text())
         document.word_count = len(words)
-        document.estimated_duration_seconds = round(len(words) / 145 * 60, 2)
+        wpm = (
+            project.config.shorts_script.estimated_narration_wpm
+            if project.video_format == "short"
+            else project.config.long_form_script.estimated_narration_wpm
+        )
+        document.estimated_duration_seconds = round(len(words) / wpm * 60, 2)
         write_json(layout.script, document)
         write_text(layout.narration, document.narration_text())
         ensure_creative_contract(layout, document)
@@ -356,6 +446,15 @@ def save_script(
         policy=project.config.editorial_policy,
         sources=sources,
     )
+    briefing = read_model(layout.briefing, Briefing)
+    if project.video_format != "short":
+        validate_long_form_retention_script(
+            document,
+            target_duration_seconds=project.target_duration_seconds,
+            config=project.config.long_form_script,
+            sources=sources,
+            briefing=briefing,
+        )
     invalidate(
         layout,
         stages=(
@@ -379,7 +478,12 @@ def save_script(
         document.version = previous.version + 1
     words = tokenize_words(document.narration_text())
     document.word_count = len(words)
-    document.estimated_duration_seconds = round(len(words) / 145 * 60, 2)
+    wpm = (
+        project.config.shorts_script.estimated_narration_wpm
+        if project.video_format == "short"
+        else project.config.long_form_script.estimated_narration_wpm
+    )
+    document.estimated_duration_seconds = round(len(words) / wpm * 60, 2)
     input_hash = sha256_value(document.model_dump(mode="json"))
     write_json(layout.script, document)
     write_text(layout.narration, document.narration_text())

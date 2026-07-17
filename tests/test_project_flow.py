@@ -46,27 +46,43 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     assert manifest.config.youtube_growth.thumbnail_reference_mode == "opening_scene_edit_v1"
     assert manifest.config.youtube_growth.title_variants == 1
     assert manifest.config.youtube_growth.thumbnail_variants == 1
-    assert manifest.config.youtube_growth.title_standard == "passage_pipe_topic_v1"
+    assert manifest.config.youtube_growth.title_standard == "tension_pipe_passage_v2"
     assert manifest.config.youtube_growth.description_standard == "scripture_timeline_v1"
     assert manifest.config.youtube_growth.thumbnail_standard == "direct_conflict_red_v1"
+    assert manifest.config.youtube_growth.thumbnail_typography_standard == (
+        "integrated_extruded_3d_v1"
+    )
     assert manifest.config.youtube_growth.title_thumbnail_pairing_standard == "complementary_v1"
     assert manifest.config.youtube_publication.allow_automated_private_review_upload is True
     assert manifest.config.editorial_policy.standard == "scripture_rich_ptbr_v1"
     assert manifest.config.editorial_policy.require_literal_scripture_citations is True
-    assert manifest.config.editorial_policy.require_quoted_comment_response is True
+    assert manifest.config.editorial_policy.require_quoted_comment_response is False
+    assert manifest.config.long_form_script.enabled is True
+    assert manifest.config.long_form_script.narrative_standard == "retention_story_long_v1"
+    assert manifest.config.long_form_script.first_scripture_citation_max_seconds == 75.0
+    assert manifest.config.long_form_script.maximum_scripture_citation_gap_seconds == 105.0
+    assert manifest.config.long_form_script.maximum_reengagement_gap_seconds == 120.0
     assert manifest.config.captions.vertical_position == "center"
-    assert manifest.config.captions.isolate_quoted_comment_response is True
-    assert manifest.config.captions.comment_response_hold_seconds == 1.0
-    assert manifest.config.audio.comment_response_silence_seconds == 1.0
+    assert manifest.config.captions.isolate_quoted_comment_response is False
+    assert manifest.config.captions.comment_response_hold_seconds == 0.0
+    assert manifest.config.audio.comment_response_silence_seconds == 0.0
     assert manifest.config.render.transition_style == "cinematic_mix"
     assert manifest.config.render.motion_style == "smooth_pendulum"
     assert manifest.config.render.background_blur_profile == "functional_caption_focus_v1"
+    assert manifest.config.render.background_blur_opening_sigma == 8.0
+    assert manifest.config.render.background_blur_scripture_sigma == 8.0
+    assert manifest.config.render.background_blur_reflection_sigma == 8.0
+    assert manifest.config.render.background_blur_payoff_sigma == 8.0
+    assert manifest.config.render.background_blur_closing_sigma == 8.0
+    assert manifest.config.render.caption_focus_blur_extra_sigma == 0.0
     assert manifest.config.render.background_music_path is None
     assert manifest.config.music.enabled is True
     assert manifest.config.music.selection_mode == "random"
     assert manifest.stages["music"].status == StageStatus.PENDING
     assert manifest.config.captions.font_family == "Montserrat ExtraBold"
     assert manifest.config.captions.variant == "active_card_v2"
+    assert manifest.config.captions.word_arrival_animation is True
+    assert manifest.config.audio.voice_id == "wKukuyYdIlElkaj9zEQG"
     assert (layout.root / "visual/fonts/files/Montserrat-ExtraBold.ttf").is_file()
     assert (layout.root / "visual/fonts/OFL-Montserrat.txt").is_file()
     assert manifest.stages["briefing"].status == StageStatus.COMPLETED
@@ -124,9 +140,19 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.render.short_cover_enabled is True
     assert manifest.config.render.short_cover_duration_seconds == pytest.approx(1 / 30)
     assert manifest.config.render.background_blur_profile == "functional_caption_focus_v1"
+    assert manifest.config.render.background_blur_opening_sigma == 8.0
+    assert manifest.config.render.background_blur_scripture_sigma == 8.0
+    assert manifest.config.render.background_blur_reflection_sigma == 8.0
+    assert manifest.config.render.background_blur_payoff_sigma == 8.0
+    assert manifest.config.render.background_blur_closing_sigma == 8.0
+    assert manifest.config.render.caption_focus_blur_extra_sigma == 0.0
     assert manifest.config.youtube_growth.title_variants == 1
     assert manifest.config.youtube_growth.thumbnail_variants == 1
     assert manifest.config.youtube_growth.thumbnail_reference_mode == "opening_scene_edit_v1"
+    assert manifest.config.youtube_growth.title_standard == "tension_pipe_passage_v2"
+    assert manifest.config.youtube_growth.thumbnail_typography_standard == (
+        "integrated_extruded_3d_v1"
+    )
     assert manifest.config.images.height > manifest.config.images.width
     assert manifest.config.images.visual_standard_id == "cinematic-family-3d-v1"
     assert manifest.config.images.enforce_visual_standard is True
@@ -143,6 +169,8 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.captions.layout_width_scale == 0.68
     assert manifest.config.captions.max_words_per_line == 3
     assert manifest.config.captions.highlight_card_radius == 24
+    assert manifest.config.captions.word_arrival_animation is True
+    assert manifest.config.audio.voice_id == "wKukuyYdIlElkaj9zEQG"
     assert (layout.root / manifest.config.captions.font_file).is_file()
     assert manifest.config.production.mode == "draft_one_shot"
     assert manifest.config.production.use_subagents is True
@@ -152,10 +180,18 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.production.worker_context_policy == "compact_only"
     assert manifest.config.shorts_script.enabled is True
     assert manifest.config.shorts_script.use_specialist_subagent is True
-    assert manifest.config.shorts_script.narrative_standard == "human_hook_to_bible"
+    assert manifest.config.shorts_script.narrative_standard == "retention_story_v2"
     assert manifest.config.shorts_script.require_verified_scripture is True
-    assert "curta o vídeo" in manifest.config.shorts_script.final_subscribe_cta
-    assert "compartilhe" in manifest.config.shorts_script.final_subscribe_cta
+    assert manifest.config.shorts_script.min_words == 105
+    assert manifest.config.shorts_script.max_words == 130
+    assert manifest.config.shorts_script.require_comment_prompt is False
+    assert manifest.config.shorts_script.require_subscribe_cta is False
+    assert manifest.config.shorts_script.cta_max_words == 12
+    assert manifest.config.shorts_script.cta_max_seconds == 4.0
+    assert manifest.config.editorial_policy.require_quoted_comment_response is False
+    assert manifest.config.captions.isolate_quoted_comment_response is False
+    assert manifest.config.captions.comment_response_hold_seconds == 0.0
+    assert manifest.config.audio.comment_response_silence_seconds == 0.0
     assert manifest.config.shorts_script.verse_visual_change_seconds == 5.5
     assert manifest.stages["shorts_script"].status == StageStatus.PENDING
 

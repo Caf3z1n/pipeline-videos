@@ -6,6 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 
 from pipeline_videos.models import EditorialPolicyConfig, ScriptDocument, SourceLibrary
+from pipeline_videos.utils import tokenize_words
 
 _ENGLISH_EDITORIAL_JARGON = (
     "open loop",
@@ -34,6 +35,8 @@ _COMMENT_RESPONSE_RE = re.compile(
 class ScriptureCitation:
     section_id: str
     quote: str
+    word_offset: int = 0
+    estimated_start_seconds: float = 0.0
 
 
 def _normalized(value: str) -> str:
@@ -46,24 +49,35 @@ def quoted_comment_response(value: str) -> str | None:
     return " ".join(match.group("response").split()) if match else None
 
 
-def scripture_citations(document: ScriptDocument) -> list[ScriptureCitation]:
+def scripture_citations(
+    document: ScriptDocument,
+    *,
+    words_per_minute: int = 145,
+) -> list[ScriptureCitation]:
     citations: list[ScriptureCitation] = []
+    word_cursor = 0
     for section in document.sections:
-        if "biblical_text" not in section.claim_classification:
-            continue
-        for match in _QUOTED_TEXT_RE.finditer(section.narration):
-            prefix = section.narration[max(0, match.start() - 180) : match.start()]
-            if (
-                re.search(r"\bcapítulo\s+\d+\b", prefix, flags=re.IGNORECASE)
-                and re.search(r"\bversículos?\s+\d+\b", prefix, flags=re.IGNORECASE)
-                and re.search(r"\b(?:lemos|diz|declara)\s*:\s*$", prefix, flags=re.IGNORECASE)
-            ):
-                citations.append(
-                    ScriptureCitation(
-                        section_id=section.section_id,
-                        quote=" ".join(match.group("quote").split()),
+        if "biblical_text" in section.claim_classification:
+            for match in _QUOTED_TEXT_RE.finditer(section.narration):
+                prefix = section.narration[max(0, match.start() - 180) : match.start()]
+                if (
+                    re.search(r"\bcapítulo\s+\d+\b", prefix, flags=re.IGNORECASE)
+                    and re.search(r"\bversículos?\s+\d+\b", prefix, flags=re.IGNORECASE)
+                    and re.search(r"\b(?:lemos|diz|declara)\s*:\s*$", prefix, flags=re.IGNORECASE)
+                ):
+                    offset = word_cursor + len(tokenize_words(section.narration[: match.start()]))
+                    citations.append(
+                        ScriptureCitation(
+                            section_id=section.section_id,
+                            quote=" ".join(match.group("quote").split()),
+                            word_offset=offset,
+                            estimated_start_seconds=round(
+                                offset / words_per_minute * 60,
+                                2,
+                            ),
+                        )
                     )
-                )
+        word_cursor += len(tokenize_words(section.narration))
     return citations
 
 

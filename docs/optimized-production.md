@@ -34,13 +34,13 @@ valida e importa roteiro, lote de imagens e crescimento de forma serializada.
 
 ## Produção remota
 
-Na VPS, o fluxo e os contratos são os mesmos. A única diferença é a orquestração criativa:
+Na VPS, o fluxo, os contratos e a orquestração criativa são os mesmos:
 
-- uma sessão persistente do agente principal por job;
-- modelo `gpt-5.6-sol`;
-- raciocínio `medium`;
-- nenhum subagente;
-- imagens processadas sequencialmente;
+- uma sessão persistente do coordenador por job;
+- coordenador e especialistas em `gpt-5.6-sol`;
+- coordenador em `medium`, roteirista em `high`, imagens em `low` e crescimento em `medium`;
+- exatamente um roteirista, até dois workers de imagem e exatamente um especialista de crescimento;
+- imagens processadas em até dois lotes paralelos com staging separado;
 - exatamente um título e uma thumbnail.
 
 O executor inicia a sessão uma vez e usa `codex exec resume` nos checkpoints seguintes. Áudio,
@@ -56,6 +56,18 @@ seguras são aplicadas deterministicamente; uma falha restante permite uma únic
 encerrar.
 
 O contrato editorial completo está em [Padrão de roteiro de Shorts](shorts-script-standard.md).
+
+## Roteiro de vídeo longo
+
+Projetos longos novos usam `retention_story_long_v1`. O `ScriptDocument` inclui
+`long_form_strategy`, com um beat por seção, âncoras para todas as citações, reengajamentos
+proporcionais à duração, payoff no quarto final, aplicação, callback e uma única ação de CTA.
+
+O fluxo remoto produz e valida esse contrato antes de importar roteiro e revisão. No fluxo local, o
+agente principal segue [Padrão de roteiro para vídeos longos](long-form-script-standard.md) e importa
+o JSON estruturado com `import-script`. O validador rejeita duração insuficiente, abertura genérica,
+trechos sem valor novo, citações agrupadas, intervalos bíblicos excessivos, reengajamentos escassos
+e encerramento com mais de uma ação.
 
 ## Imagens
 
@@ -89,6 +101,5 @@ proporcional silencioso.
 - um único escritor por projeto;
 - imports e montagem final serializados;
 - projetos diferentes podem rodar em paralelo;
-- subagentes locais escrevem somente em staging;
-- o agente remoto não cria subagentes;
+- subagentes locais e remotos escrevem somente em staging;
 - nunca publicar, agendar, aprovar ou alterar faturamento sem autorização persistida.

@@ -254,6 +254,8 @@ def _functional_blur_filter(plan: SceneRenderPlan, config: RenderConfig) -> str 
     height = max(2, round(config.height * config.caption_focus_height_ratio))
     height = min(height, config.height - top)
     background_filter = f"gblur=sigma={base_sigma:.3f}:steps=1" if base_sigma > 0 else "null"
+    if config.caption_focus_blur_extra_sigma <= 0:
+        return background_filter
     focus_filter = f"gblur=sigma={focus_sigma:.3f}:steps=1"
     return (
         "split=2[blur_background][caption_focus];"

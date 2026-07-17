@@ -1,6 +1,8 @@
 import subprocess
 from datetime import date
 
+import pytest
+
 from pipeline_videos.models import (
     ApprovalStatus,
     Briefing,
@@ -9,14 +11,16 @@ from pipeline_videos.models import (
     VerseCandidate,
     VerseCatalog,
     VerseUsageIndex,
+    VerseUsageRecord,
 )
-from pipeline_videos.storage import read_model, write_json
+from pipeline_videos.storage import read_json, read_model, write_json
 from pipeline_videos.verse_selection import (
     build_usage_index,
     create_auto_short,
     load_verse_catalog,
     reference_tokens,
     references_overlap,
+    select_retention_archetype,
     select_unused_verse,
 )
 
@@ -102,15 +106,21 @@ def test_auto_short_reserves_different_verses_and_populates_verified_source(tmp_
     manifest = first.load_manifest()
     assert briefing.main_passage == first_candidate.reference
     assert briefing.bible_translation == "Bíblia Portuguesa Mundial (BPM)"
-    assert "curta o vídeo" in briefing.call_to_action
-    assert "compartilhe" in briefing.call_to_action
+    assert "exatamente uma ação" in briefing.call_to_action
+    assert briefing.retention_archetype in first_candidate.retention_archetypes
+    assert briefing.human_conflict == first_candidate.human_conflict
+    assert briefing.central_question == first_candidate.central_question
+    assert briefing.visual_progression == first_candidate.visual_progression
+    assert briefing.possible_reveal == first_candidate.possible_reveal
+    assert briefing.title_seed == first_candidate.title_seed
     assert sources.entries[0].verified is True
     assert sources.entries[0].excerpt == first_candidate.verse_text
     assert "Domínio público" in (sources.entries[0].rights_note or "")
     assert manifest.video_format == "short"
     assert manifest.stages["briefing"].status == StageStatus.COMPLETED
     assert manifest.approvals["briefing"].status == ApprovalStatus.PENDING
-    assert manifest.config.shorts_script.narrative_standard == "human_hook_to_bible"
+    assert manifest.config.shorts_script.narrative_standard == "retention_story_v2"
+    assert manifest.config.youtube_growth.title_standard == "tension_pipe_passage_v2"
     assert manifest.config.images.visual_standard_id == "cinematic-family-3d-v1"
     assert (tmp_path / "verse-usage.json").is_file()
     assert first.root != second.root
@@ -164,6 +174,52 @@ def test_selector_prefers_short_familiar_clear_verse_when_other_factors_match() 
     assert selected.candidate_id == "concise"
 
 
+def test_retention_archetype_does_not_repeat_either_of_last_two_shorts() -> None:
+    candidate = VerseCandidate(
+        candidate_id="candidate",
+        source_id="source",
+        reference="Salmos 1:1",
+        context_reference="Salmos 1:1",
+        book="Salmos",
+        testament="old",
+        translation="BPM",
+        verse_text="Confie em Deus hoje.",
+        source_url="https://example.invalid",
+        accessed_at="2026-07-16",
+        rights_note="Domínio público",
+        title="Título",
+        slug="candidate",
+        central_theme="Tema",
+        practical_application="Aplicação",
+        retention_archetypes=["conflict_first", "counterintuitive_reveal"],
+    )
+    usage = VerseUsageIndex(
+        generated_at="2026-07-16T12:00:00Z",
+        records=[
+            VerseUsageRecord(
+                project_id="first",
+                project_path="shorts/first",
+                video_format="short",
+                status="used",
+                retention_archetype="conflict_first",
+                created_at="2026-07-16T10:00:00Z",
+            ),
+            VerseUsageRecord(
+                project_id="second",
+                project_path="shorts/second",
+                video_format="short",
+                status="used",
+                retention_archetype="counterintuitive_reveal",
+                created_at="2026-07-16T11:00:00Z",
+            ),
+        ],
+    )
+
+    selected = select_retention_archetype(candidate, usage)
+
+    assert selected == "stair_step_progression"
+
+
 def test_usage_scan_includes_complementary_sources_and_script_basis(tmp_path) -> None:
     layout, candidate, _ = create_auto_short(
         projects_dir=tmp_path,
@@ -209,3 +265,30 @@ def test_usage_scan_includes_complementary_sources_and_script_basis(tmp_path) ->
         "Mateus 5:9",
         "João 14:27",
     }
+
+
+def test_usage_scan_accepts_legacy_manifest_fields(tmp_path) -> None:
+    layout, candidate, _ = create_auto_short(
+        projects_dir=tmp_path,
+        project_date=date(2026, 7, 14),
+    )
+    manifest = read_json(layout.manifest)
+    manifest["config"]["production"]["manual_image_batch_size"] = 10
+    manifest["config"]["youtube_growth"]["reuse_scene_images_for_thumbnails"] = False
+    write_json(layout.manifest, manifest)
+
+    usage = build_usage_index(tmp_path)
+
+    record = next(item for item in usage.records if item.project_id == layout.root.name)
+    assert record.main_passage == candidate.reference
+    selected, _ = select_unused_verse(load_verse_catalog(), usage)
+    assert selected.reference != candidate.reference
+
+
+def test_usage_scan_blocks_selection_when_project_json_is_invalid(tmp_path) -> None:
+    project = tmp_path / "shorts" / "broken-project"
+    project.mkdir(parents=True)
+    (project / "project.json").write_text("{invalid", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="seleção foi bloqueada para evitar repetição"):
+        build_usage_index(tmp_path)

@@ -1,4 +1,5 @@
 name = "biblical_reviewer"
+model = "gpt-5.6-sol"
 description = "Revisa roteiro bíblico e relata bloqueios antes da produção one-shot."
 model_reasoning_effort = "high"
 nickname_candidates = ["Bereia", "Esdras", "Lucas"]
@@ -8,4 +9,3 @@ Não invente referências, citações ou contexto histórico.
 Classifique achados e devolva um resumo estruturado ao agente principal.
 Trabalhe em modo somente leitura: apenas o agente principal grava a revisão e altera o estado.
 """
-

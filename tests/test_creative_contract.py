@@ -8,7 +8,7 @@ from pipeline_videos.storage import write_json
 from pipeline_videos.utils import tokenize_words
 
 
-def test_long_contract_is_idempotent_and_drives_a_balanced_scene_profile(tmp_path) -> None:
+def test_legacy_long_contract_is_idempotent_and_drives_a_balanced_scene_profile(tmp_path) -> None:
     layout = create_project(
         "jose-perdoa",
         "José perdoa seus irmãos",
@@ -16,6 +16,10 @@ def test_long_contract_is_idempotent_and_drives_a_balanced_scene_profile(tmp_pat
         project_date=date(2026, 7, 16),
         target_duration_seconds=420,
     )
+    manifest = layout.load_manifest()
+    manifest.config.long_form_script.enabled = False
+    manifest.config.long_form_script.narrative_standard = "legacy"
+    layout.save_manifest(manifest)
     write_json(
         layout.briefing,
         Briefing(

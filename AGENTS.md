@@ -9,6 +9,7 @@
 5. A pasta do vídeo é a fonte de verdade; o chat é auxiliar.
 6. Para criar, retomar ou renderizar vídeo, leia `docs/optimized-production.md`.
 7. Para roteiro de Short, leia também `docs/shorts-script-standard.md`.
+8. Para roteiro de vídeo longo, leia também `docs/long-form-script-standard.md`.
 
 ## Organização
 
@@ -45,7 +46,9 @@
 - Não diga “o texto fala/diz/registra”. Prefira “a Bíblia diz” ou “Em Livro, capítulo X,
   versículo Y, lemos:”.
 - Em vídeo longo, use citações literais verificadas distribuídas pela narrativa: alvo de 0,8 a 1,2
-  por minuto; dez minutos exigem de oito a doze citações.
+  por minuto; dez minutos exigem de oito a doze citações. No padrão novo, a primeira entra até 75
+  segundos, o intervalo máximo é de 105 segundos e a parte final não fica mais de 120 segundos sem
+  âncora bíblica; não agrupe versículos apenas para cumprir quantidade.
 
 ## Produção otimizada
 
@@ -84,12 +87,16 @@
 
 ## Contratos dos especialistas
 
-- O roteirista de Shorts produz gancho humano imediato, curiosidade honesta, contexto rápido,
-  citação bíblica, resolução, aplicação, palavra específica para comentar e CTA completo, conforme
-  `docs/shorts-script-standard.md`.
-- Crie exatamente um `youtube_growth_specialist` local quando `youtube/growth-queue.json` estiver
-  pendente, com raciocínio médio. Na VPS, o agente principal persistente executa a mesma fila sem
-  criar subagente. Nenhum dos dois publica nem promete CTR/alcance.
+- O roteirista de Shorts novos usa `retention_story_v2`: cold open concreto, progressão,
+  citação literal entre 8 e 20 segundos, reengajamento, payoff, aplicação, callback e exatamente
+  uma ação de CTA em até quatro segundos, conforme `docs/shorts-script-standard.md`.
+- O roteirista de vídeos longos novos usa `retention_story_long_v1`: conflito e promessa em até 20
+  segundos, pergunta central, progressão por movimentos, reengajamentos proporcionais à duração,
+  citações literais periódicas, payoff no quarto final, aplicação, callback e exatamente uma ação
+  de CTA em até dez segundos, conforme `docs/long-form-script-standard.md`.
+- Crie exatamente um `youtube_growth_specialist` quando `youtube/growth-queue.json` estiver
+  pendente, localmente ou na VPS, com raciocínio médio. Nenhum especialista publica nem promete
+  CTR/alcance.
 - Em projetos novos de qualquer formato, inclusive Shorts, o especialista gera exatamente uma
   combinação título+thumbnail com `imagegen`. Ele edita diretamente a imagem ativa da abertura,
   declarada na fila como referência obrigatória. Texto, palavra vermelha e
@@ -97,12 +104,17 @@
   luz, profundidade e composição. Não existe compositor local nem fallback de pacote legado.
 - Thumbnails usam conflito visual simples, emoção legível, assunto dominante, espaço negativo e de
   duas a cinco palavras; setas e marcações exigem alvo narrativo real.
-- Títulos novos seguem `Passagem principal | Tema principal`. A descrição abre com resumo curto e,
-  em vídeos longos, traz timeline das citações iniciada exatamente por `00:00 - Abertura`.
-- O especialista cria exatamente um par título+thumbnail. O título carrega referência, tema e busca; a frase da
-  capa acrescenta tensão, decisão, contraste ou consequência. A capa nunca repete a frase temática
-  situada depois de `|` no título, embora possa compartilhar nome próprio ou uma palavra-chave
-  necessária.
+- A tipografia padrão das thumbnails é `integrated_extruded_3d_v1`: letras extrudadas com volume
+  espesso visível, bordas chanfradas, textura material, highlights, sombras de contato/oclusão e
+  perspectiva coerentes com a cena. A palavra dominante usa escala muito maior; palavra vermelha e
+  seta/X/sublinhado/pincel preservam o mesmo tratamento 3D. Nunca use texto plano, adesivo ou overlay.
+- Shorts e vídeos longos novos seguem `Tensão concreta | Passagem`. A descrição abre com resumo
+  curto e, em vídeos longos,
+  traz timeline das citações iniciada exatamente por `00:00 - Abertura`.
+- O especialista cria exatamente um par título+thumbnail. O título carrega referência, tensão e
+  busca; a frase da capa acrescenta decisão, contraste ou consequência. No padrão
+  `tension_pipe_passage_v2`, a capa não repete a tensão situada antes de `|`; projetos legados com
+  passagem primeiro continuam sem repetir a frase temática depois de `|`.
 - Thumbnails novas usam conflito/personagem reconhecível, destaque vermelho e ao menos uma seta, X,
   sublinhado ou pincel com alvo real; evite frases abstratas quando o confronto for mais forte.
 - Planeje espaço negativo real e tente não cobrir rosto, corpo, ação principal ou o alvo narrativo.
@@ -127,17 +139,21 @@
   escrita de estado continuam serializadas; dentro da lane de imagens, workers podem gerar em
   paralelo com staging separado.
 
-## Produção remota econômica
+## Produção remota com paridade local
 
-- O executor remoto inicia uma única sessão persistente do agente principal por job e a retoma em
-  seleção editorial, roteiro, imagens sequenciais e crescimento. Cada checkpoint lê somente seu
-  JSON compacto e os `allowed_inputs`.
+- O executor remoto inicia uma sessão persistente do coordenador por job e a retoma nos checkpoints.
+  Cada Short tem sua própria sessão raiz. O coordenador cria exatamente os mesmos especialistas do
+  fluxo local, sempre com `fork_turns=none` e contexto compacto.
 - Áudio, música, legendas, imports, render, validação, upload e agendamento são determinísticos e
   não devem ser entregues ao Codex. Hooks remotos apenas medem eventos/tamanhos e não escrevem em
   `stdout`.
-- O fluxo remoto usa obrigatoriamente `gpt-5.6-sol`, raciocínio médio e nenhum subagente. Respeite
-  as mesmas filas e staging paths do fluxo local, faça `imagegen` sequencialmente e importe cada
-  lote uma única vez.
+- Coordenador e especialistas usam obrigatoriamente `gpt-5.6-sol`. O coordenador usa raciocínio
+  médio; `shorts_script_specialist`, alto; cada `image_worker`, baixo; e
+  `youtube_growth_specialist`, médio. Use até dois workers de imagem em paralelo e importe o lote
+  uma única vez.
+- Agendas diárias materializam um ou dois jobs independentes por data e slot. Cada ocorrência deve
+  ter `not_before`, upload inicial privado, `publication_mode=scheduled` e `publish_at` explícito
+  com fuso. A materialização é idempotente e nunca reutiliza a sessão raiz de outro Short.
 - Gere exatamente um título e uma thumbnail integrada. Edite a imagem ativa da abertura com
   `imagegen`; não gere a composição a partir de texto apenas. Em Shorts, essa mesma arte ocupa exatamente
   o primeiro frame; em vídeos longos, ela é enviada pela API como thumbnail personalizada.
@@ -145,6 +161,8 @@
   desenho de personagem, paleta e iluminação das cenas. No remoto, use obrigatoriamente a
   imagem produzida para a cena de abertura como referência visual e interrompa a etapa se ela ainda
   não existir; nunca improvise fotografia, fotorrealismo ou live action.
+- Local e remoto usam `integrated_extruded_3d_v1` para o texto da capa, com o mesmo volume, bevel,
+  material, luz, perspectiva, sombra e hierarquia por escala definidos na fila de crescimento.
 - `render-review` funciona em produções locais e remotas, usa os ativos ativos em qualidade final e
   nunca registra aprovação humana. Um candidato assim pode ser enviado automaticamente somente como
   `private`, quando a política do projeto permitir e a validação técnica estiver concluída.
@@ -163,10 +181,14 @@
 - Final aprovado V4: resolução completa, H.264, CRF 12, preset `slow`, supersampling 3.
 - Movimento: `smooth_pendulum`, zoom 1,02×–1,105×, pan 0,32.
 - Transições: `cinematic_mix`, 0,38 s.
-- Blur funcional: abertura nítida; citação bíblica leve; reflexão moderada; payoff/aplicação mais
-  nítidos; faixa central atrás das legendas um pouco mais borrada; thumbnail/frame zero nítidos.
+- Blur de fundo padrão: sigma 8 uniforme em todas as cenas; em Shorts, somente o primeiro frame
+  integrado da thumbnail permanece totalmente nítido.
 - Legendas: Montserrat ExtraBold, caixa alta, escala 88%, largura 0,68, até três palavras por linha
   e card ativo vermelho `#E5484D` com raio 24, sempre centralizadas.
+- As palavras da legenda entram progressivamente com animação curta de posição, escala e opacidade,
+  preservando fonte, layout e card ativo.
+- A voz ElevenLabs padrão é `wKukuyYdIlElkaj9zEQG`; overrides explícitos do projeto continuam
+  válidos.
 - A resposta pedida nos comentários fica entre aspas, sozinha na legenda, e permanece visível
   durante um segundo de silêncio antes da continuação.
 - Em Shorts, a resposta pedida nos comentários deve ser uma palavra-síntese expressiva e contextual,

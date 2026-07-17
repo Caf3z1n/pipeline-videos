@@ -3,10 +3,10 @@
 Aplicação local, headless e orientada por arquivos para planejar, produzir, revisar e retomar
 vídeos bíblicos. O chat ajuda na criação; a pasta de cada vídeo é a fonte de verdade.
 
-O modo único é `draft_one_shot`: o Codex produz uma prévia completa. Localmente, pode usar
-subagentes de roteiro, imagens e crescimento; na VPS, o mesmo fluxo roda em uma única sessão
-persistente do `gpt-5.6-sol`, com raciocínio médio e sem subagentes. Depois da importação das
-imagens, o crescimento edita a imagem ativa da abertura.
+O modo único é `draft_one_shot`: o Codex produz uma prévia completa. Localmente e na VPS, cada vídeo
+usa um coordenador persistente e subagentes de roteiro, imagens e crescimento, todos em
+`gpt-5.6-sol` e com o raciocínio próprio da função. Depois da importação das imagens, o crescimento
+edita a imagem ativa da abertura.
 
 O planejamento one-shot aparece em `run --dry-run` como cinco ondas. Depois do roteiro e das
 cenas, os trabalhadores de imagem rodam enquanto o agente principal produz áudio, música e
@@ -26,12 +26,11 @@ CRF 12, preset `slow` e supersampling 3. Trabalhadores recebem arquivos compacto
 sem herdar o histórico, e o gerador cria uma capa final com texto e símbolos incorporados. Título
 e thumbnail formam uma única combinação complementar em todos os modos novos.
 
-O padrão editorial de projetos novos mantém toda a locução em português, exige citações bíblicas
-literais verificadas distribuídas na narrativa (de 0,8 a 1,2 por minuto), centraliza as legendas e
-isola entre aspas a resposta pedida nos comentários, seguida por um segundo de silêncio. Títulos
-seguem `Passagem principal | Tema principal`; descrições longas recebem uma timeline bíblica iniciada
-por `00:00 - Abertura`. Nas capas, a palavra de impacto e o elemento narrativo usam vermelho, com
-seta, X, sublinhado ou pincel apontando para algo real da cena.
+O padrão editorial mantém toda a locução em português e exige citações bíblicas literais
+verificadas. Shorts e vídeos longos novos usam `Tensão concreta | Passagem` e CTA de uma única
+ação. Longos recebem também uma timeline bíblica iniciada por `00:00 - Abertura`. Nas capas, a
+palavra de impacto e o elemento narrativo usam vermelho, com seta, X, sublinhado ou pincel apontando
+para algo real da cena.
 
 Depois de roteiro e revisão, o caminho recomendado é:
 
@@ -124,9 +123,10 @@ eles são reutilizados. Consulte [Áudio manual local](docs/local-manual-audio.m
 
 ### Produção remota sob demanda
 
-Na VPS, o mesmo pipeline local roda com um único agente principal persistente. O executor inicia
-`codex exec` uma vez e usa `codex exec resume` para seleção editorial, roteiro, imagens sequenciais
-e título+thumbnail. O modelo é fixo em `gpt-5.6-sol`, com raciocínio médio e multi-agent desativado.
+Na VPS, o mesmo pipeline local roda com um coordenador persistente por job. O executor inicia
+`codex exec` uma vez e usa `codex exec resume`; o coordenador delega roteiro, até dois lotes de
+imagens e crescimento aos mesmos especialistas locais. Todos usam `gpt-5.6-sol`, com raciocínio
+alto, baixo e médio conforme a função.
 
 Cada checkpoint recebe um JSON compacto. Áudio, música, legendas, imports, render, validação e upload
 rodam diretamente no Python. O status soma o uso por checkpoint e registra também o identificador
@@ -144,6 +144,13 @@ uv run pipeline-videos remote list
 uv run pipeline-videos remote status <JOB_ID>
 uv run pipeline-videos remote cancel <JOB_ID>
 uv run pipeline-videos remote retry <JOB_ID>
+
+# Agenda diária idempotente de um ou dois Shorts, sempre em sessões separadas.
+uv run pipeline-videos remote schedule-create --name madrugada `
+  --production-time 01:00 --production-time 03:00 `
+  --publication-time 12:00 --publication-time 19:00 `
+  --publish-days-after 1 --authorize-external --authorize-public-schedule
+uv run pipeline-videos remote schedule-list
 ```
 
 Instalação, estados da fila, segurança dos segredos e serviço systemd estão em
@@ -156,14 +163,13 @@ referências complementares, fontes e bases bíblicas do roteiro. `projects/vers
 como cache legível; a autoridade de coordenação é `content-registry.json` no repositório Git bare
 descrito em [Produção remota](docs/remote-production.md). A reserva é commitada antes da criação.
 
-O projeto já nasce com o padrão `human_hook_to_bible`: gancho humano curto, entrada imediata na
-Bíblia, citação literal verificada, contexto ou conflito bíblico, verdade central, aplicação e
-encerramento. A voz é pastoral, simples e cotidiana. O seletor favorece versículos conhecidos,
-curtos e claros sem abrir mão de ineditismo, variedade e contexto. Há cinco opções seguras de
-convite para comentar, CTA final com curtir, inscrição e compartilhamento, revisão bíblica
-obrigatória e o padrão visual de animação `cinematic-family-3d-v1`. O briefing é concluído pelo seletor
-automático, mas sua aprovação humana continua pendente. Para escolher a duração, use
-`new-short --duration 60`.
+O projeto já nasce com `retention_story_v2`: cold open de até dois segundos, conflito concreto,
+citação literal entre 8 e 20 segundos, progressão, reengajamento, payoff, aplicação e CTA de uma
+única ação. O seletor considera potencial narrativo, reserva `conflict_first`,
+`counterintuitive_reveal` ou `stair_step_progression` e evita repetir os dois últimos formatos. O
+briefing recebe pergunta central, progressão visual, possível revelação e semente de título. A voz
+continua pastoral, simples e cotidiana; a revisão bíblica e o padrão visual
+`cinematic-family-3d-v1` permanecem obrigatórios. A aprovação humana do briefing continua pendente.
 
 O comando manual continua disponível quando você quiser definir explicitamente o tema:
 
@@ -217,25 +223,33 @@ uv run pipeline-videos script shorts-import davi-e-golias
 
 O `shorts-check-staging` é somente leitura e devolve, de uma vez, todos os erros detectáveis do
 pacote. O especialista deve corrigir o lote completo antes do único import. O import também
-sincroniza deterministicamente `strategy.open_loop` com a pergunta de tensão da espinha narrativa,
-eliminando uma divergência redundante sem reescrever o staging.
+sincroniza deterministicamente os campos duplicados sem reescrever o staging: `open_loop` nos
+formatos legados e promessa, pergunta, payoff, aplicação e CTA em `retention_story_v2`.
 
 O roteiro anterior é arquivado em `script/versions/`. O mapa de retenção fica em
-`script/retention-strategy.json`. Vídeos longos e fluxos manuais continuam aceitando importação
-direta. Toda importação também deriva `script/creative-contract.json` sem chamada externa: promessa,
-gancho, payoff, função de cada seção, componentes críticos e perfil de ritmo passam a ser reutilizados
-por cenas, crescimento e validação, em vez de serem decididos novamente.
+`script/retention-strategy.json`. Vídeos longos continuam aceitando importação direta, mas projetos
+novos exigem `ScriptDocument.long_form_strategy` com o contrato de retenção e a cadência bíblica.
+Toda importação também deriva `script/creative-contract.json` sem chamada externa: promessa, gancho,
+payoff, função de cada seção, componentes críticos e perfil de ritmo passam a ser reutilizados por
+cenas, crescimento e validação, em vez de serem decididos novamente.
 
-Novos Shorts seguem o padrão editorial `human_hook_to_bible`: começam com uma dor, pergunta ou
-contraste reconhecível em até 2,5 segundos; entram imediatamente no contexto bíblico e citam ao menos
-um versículo literal verificado, preferencialmente conhecido, curto e claro; depois entregam
-contexto ou conflito, verdade central, resposta prática e encerramento comunitário. O roteirista
-escolhe entre cinco formatos de convite para comentar de acordo com a mensagem e sempre termina com
-o CTA fixo de curtir, se inscrever e compartilhar. A ponte pode usar contexto, outra história
-bíblica, imagem presente na Bíblia,
-correlação com outro versículo ou explicação dos limites de uma promessa. O contrato completo e um
-exemplo baseado em Josué 1:9 estão em
+Novos Shorts seguem `retention_story_v2`: começam dentro de uma ação ou conflito em até dois
+segundos, sustentam uma pergunta específica, inserem a citação verificada entre 8 e 20 segundos e
+fazem o valor crescer até um reengajamento entre 40% e 60% da duração. O payoff resolve a abertura,
+a aplicação é concreta e o encerramento pede somente comentar, inscrever-se ou compartilhar, em até
+quatro segundos. Um callback verbal ou visual retoma a abertura sem criar loop artificial. Os
+formatos `human_hook_to_bible` e `verse_first` continuam válidos nos projetos que já os armazenam.
+O contrato completo está em
 [docs/shorts-script-standard.md](docs/shorts-script-standard.md).
+
+Vídeos longos novos seguem `retention_story_long_v1`: entram no conflito em até vinte segundos,
+declaram promessa e pergunta central, avançam por movimentos com informação nova e distribuem
+reengajamentos conforme a duração. O alvo bíblico permanece entre 0,8 e 1,2 citações literais por
+minuto, mas o validador também exige cadência: primeira citação até 75 segundos, intervalo de 25 a
+105 segundos entre âncoras e uma citação próxima da parte final. O payoff fica no quarto final, a
+aplicação é específica, o callback retoma a abertura e exatamente uma ação de CTA encerra o vídeo.
+O contrato completo está em
+[docs/long-form-script-standard.md](docs/long-form-script-standard.md).
 
 Nas locuções, referências são sempre verbalizadas com `capítulo` e `versículo`: “Josué, capítulo
 1, versículo 9”. O formato compacto `Josué 1:9` permanece apenas nos campos técnicos e metadados.
@@ -246,7 +260,8 @@ aparecem em itálico; referência, paráfrase e reflexão permanecem sem itálic
 narrador fica fora das aspas; somente o versículo literal é delimitado: `Em Josué, capítulo 1,
 versículo 9, lemos: “texto do versículo.”`
 
-O roteiro pode ser um JSON estruturado ou texto com parágrafos:
+Projetos longos novos exigem o JSON estruturado com `long_form_strategy`. Texto com parágrafos
+continua disponível para projetos legados:
 
 ```powershell
 uv run pipeline-videos import-script salmo-121 .\meu-roteiro.json
@@ -267,9 +282,10 @@ uv run pipeline-videos build-scenes salmo-121
 uv run pipeline-videos build-scenes salmo-121 --target-seconds 8
 ```
 
-Sem override, Shorts preservam o corte rápido existente e longos usam o perfil
-`balanced_long_v1`: abertura e reengajamentos mais rápidos, progressão regular e planos mais longos
-somente em reflexão contemplativa com função declarada.
+Sem override, Shorts preservam o corte rápido existente e longos novos usam o perfil
+`long_retention_v1`: abertura em planos de aproximadamente seis segundos, reengajamentos em sete,
+progressão regular em dez e planos mais longos somente em reflexão contemplativa com função
+declarada. Projetos longos anteriores preservam `balanced_long_v1`.
 
 O prompt de cada cena guarda separadamente perfil de estilo, paleta, continuidade, descrição,
 enquadramento, emoção e restrições negativas. Trocar a paleta não altera o estilo-base:
@@ -383,8 +399,8 @@ descrição única, palavras-chave, intenção de busca, hipótese de CTR e just
 `youtube/seo-strategy.json`. O agente principal valida e importa o pacote; o subagente não altera
 `project.json`, aprovações ou ativos em uso.
 
-Na VPS, a mesma combinação é processada pelo agente principal persistente, sem subagente de
-crescimento. O contrato visual e a complementaridade entre título e capa permanecem iguais.
+Na VPS, a mesma combinação é processada pelo `youtube_growth_specialist`, com contexto compacto e
+raciocínio médio. O contrato visual e a complementaridade entre título e capa permanecem iguais.
 
 Nos projetos novos, todas as opções de título começam pela passagem principal, uma barra vertical e
 o tema reconhecível do vídeo. A descrição abre com resumo curto e, em vídeos longos, recebe uma
@@ -422,6 +438,13 @@ importador apenas normaliza dimensões e formato, sem aplicar texto com Pillow. 
 válida é mantida mesmo se houver deriva visual ou imperfeição; nova tentativa automática ocorre
 somente quando `moderation_blocked` não produz imagem. Projetos legados continuam compatíveis com
 reutilização de cenas e composição local. Em Shorts, a capa ocupa exatamente o frame zero.
+
+A tipografia integrada segue `integrated_extruded_3d_v1`: as letras são modeladas como objetos 3D
+da própria cena, com extrusão espessa, bordas chanfradas, textura material, highlights, sombras de
+contato/oclusão e perspectiva coerentes com a câmera e a iluminação. A palavra dominante recebe
+escala muito maior, enquanto a palavra vermelha e a marcação narrativa mantêm o mesmo volume e
+profundidade. O validador rejeita prompts sem esses marcadores para evitar texto plano, adesivo ou
+overlay genérico nas próximas thumbnails.
 
 As regras seguem as orientações oficiais de [títulos e thumbnails](https://support.google.com/youtube/answer/12340300),
 [descrições](https://support.google.com/youtube/answer/12948449),
@@ -517,10 +540,10 @@ e o cache individual. Bases visuais equivalentes de rascunho/final são comparti
 atômica. Quando a configuração da prévia é idêntica à do final, o arquivo é copiado sem uma segunda
 recodificação completa.
 
-Projetos novos usam blur funcional no fundo: abertura nítida, citação bíblica com blur leve,
-reflexão com blur moderado e payoff/aplicação novamente mais nítidos. A faixa central atrás das
-legendas recebe um pouco mais de blur. A thumbnail sobreposta no frame zero permanece totalmente
-nítida.
+Projetos novos usam blur uniforme com sigma 8 em todo o fundo. Nos Shorts, a thumbnail sobreposta
+no frame zero permanece totalmente nítida; a partir do primeiro quadro narrativo, o mesmo blur é
+aplicado a todas as cenas. As legendas `active_card_v2` entram progressivamente, palavra por palavra,
+com animação curta de posição, escala e opacidade, sem alterar tipografia, card ou sincronização.
 
 Nos Shorts novos, o gerador cria uma capa final e ela ocupa o frame zero. Em versículos longos, o
 construtor

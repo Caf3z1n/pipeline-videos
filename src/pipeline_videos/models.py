@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+DEFAULT_ELEVENLABS_VOICE_ID = "wKukuyYdIlElkaj9zEQG"
+
 
 class PipelineModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
@@ -90,12 +92,12 @@ class RenderConfig(PipelineModel):
     short_cover_duration_seconds: float = Field(default=1 / 30, ge=1 / 30, le=3.0)
     short_cover_transition_seconds: float = Field(default=0.0, ge=0.0, le=1.0)
     background_blur_profile: Literal["none", "functional_caption_focus_v1"] = "none"
-    background_blur_opening_sigma: float = Field(default=0.0, ge=0.0, le=12.0)
-    background_blur_scripture_sigma: float = Field(default=1.4, ge=0.0, le=12.0)
-    background_blur_reflection_sigma: float = Field(default=3.2, ge=0.0, le=12.0)
-    background_blur_payoff_sigma: float = Field(default=1.3, ge=0.0, le=12.0)
-    background_blur_closing_sigma: float = Field(default=1.8, ge=0.0, le=12.0)
-    caption_focus_blur_extra_sigma: float = Field(default=1.0, ge=0.0, le=6.0)
+    background_blur_opening_sigma: float = Field(default=8.0, ge=0.0, le=12.0)
+    background_blur_scripture_sigma: float = Field(default=8.0, ge=0.0, le=12.0)
+    background_blur_reflection_sigma: float = Field(default=8.0, ge=0.0, le=12.0)
+    background_blur_payoff_sigma: float = Field(default=8.0, ge=0.0, le=12.0)
+    background_blur_closing_sigma: float = Field(default=8.0, ge=0.0, le=12.0)
+    caption_focus_blur_extra_sigma: float = Field(default=0.0, ge=0.0, le=6.0)
     caption_focus_top_ratio: float = Field(default=0.28, ge=0.0, le=0.8)
     caption_focus_height_ratio: float = Field(default=0.44, gt=0.0, le=1.0)
 
@@ -142,11 +144,14 @@ class CaptionStyle(PipelineModel):
     context_label_margin_top: int = Field(default=210, ge=40, le=500)
     isolate_quoted_comment_response: bool = False
     comment_response_hold_seconds: float = Field(default=0.0, ge=0.0, le=3.0)
+    word_arrival_animation: bool = True
+    word_arrival_duration_ms: int = Field(default=120, ge=40, le=400)
+    word_arrival_rise_px: int = Field(default=22, ge=0, le=100)
 
 
 class AudioConfig(PipelineModel):
     provider: Literal["mock", "elevenlabs", "local_manual"] = "elevenlabs"
-    voice_id: str | None = None
+    voice_id: str | None = DEFAULT_ELEVENLABS_VOICE_ID
     model_id: str = "eleven_flash_v2_5"
     output_format: str = "mp3_44100_128"
     language_code: str = "pt"
@@ -186,9 +191,15 @@ class YouTubeGrowthConfig(PipelineModel):
     thumbnail_variants: int = Field(default=1, ge=1, le=3)
     thumbnail_generation_mode: Literal["integrated_imagegen_v1"] = "integrated_imagegen_v1"
     thumbnail_reference_mode: Literal["opening_scene_edit_v1"] = "opening_scene_edit_v1"
-    title_standard: Literal["passage_pipe_topic_v1"] = "passage_pipe_topic_v1"
+    title_standard: Literal[
+        "passage_pipe_topic_v1",
+        "tension_pipe_passage_v2",
+    ] = "passage_pipe_topic_v1"
     description_standard: Literal["scripture_timeline_v1"] = "scripture_timeline_v1"
     thumbnail_standard: Literal["direct_conflict_red_v1"] = "direct_conflict_red_v1"
+    thumbnail_typography_standard: Literal["integrated_extruded_3d_v1"] = (
+        "integrated_extruded_3d_v1"
+    )
     title_thumbnail_pairing_standard: Literal["complementary_v1"] = "complementary_v1"
 
 
@@ -213,6 +224,39 @@ class EditorialPolicyConfig(PipelineModel):
         return self
 
 
+class LongFormScriptConfig(PipelineModel):
+    enabled: bool = False
+    narrative_standard: Literal["legacy", "retention_story_long_v1"] = "legacy"
+    estimated_narration_wpm: int = Field(default=145, ge=120, le=180)
+    minimum_duration_ratio: float = Field(default=0.85, ge=0.7, le=1.0)
+    maximum_duration_ratio: float = Field(default=1.12, ge=1.0, le=1.35)
+    opening_hook_max_words: int = Field(default=38, ge=12, le=60)
+    opening_target_max_seconds: float = Field(default=20.0, ge=8.0, le=35.0)
+    first_scripture_citation_max_seconds: float = Field(default=75.0, ge=30.0, le=120.0)
+    minimum_scripture_citation_gap_seconds: float = Field(default=25.0, ge=0.0, le=60.0)
+    maximum_scripture_citation_gap_seconds: float = Field(default=105.0, ge=60.0, le=180.0)
+    final_scripture_citation_max_distance_seconds: float = Field(default=120.0, ge=45.0, le=240.0)
+    maximum_reengagement_gap_seconds: float = Field(default=120.0, ge=60.0, le=180.0)
+    payoff_start_minimum_ratio: float = Field(default=0.75, ge=0.6, le=0.9)
+    cta_max_words: int = Field(default=24, ge=8, le=40)
+    cta_max_seconds: float = Field(default=10.0, ge=4.0, le=15.0)
+    require_callback: bool = True
+    require_visual_direction: bool = True
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> LongFormScriptConfig:
+        if self.maximum_duration_ratio < self.minimum_duration_ratio:
+            raise ValueError("maximum_duration_ratio deve ser maior ou igual ao mínimo")
+        if (
+            self.maximum_scripture_citation_gap_seconds
+            <= self.minimum_scripture_citation_gap_seconds
+        ):
+            raise ValueError(
+                "maximum_scripture_citation_gap_seconds deve ser maior que o intervalo mínimo"
+            )
+        return self
+
+
 class YouTubePublicationConfig(PipelineModel):
     category_id: str = "22"
     default_language: str = "pt-BR"
@@ -228,20 +272,30 @@ class ShortsScriptConfig(PipelineModel):
     enabled: bool = True
     use_specialist_subagent: bool = True
     specialist_role: Literal["shorts_script_specialist"] = "shorts_script_specialist"
-    min_words: int = Field(default=95, ge=60, le=180)
-    max_words: int = Field(default=125, ge=80, le=200)
+    min_words: int = Field(default=105, ge=60, le=180)
+    max_words: int = Field(default=130, ge=80, le=200)
     hook_max_words: int = Field(default=12, ge=4, le=24)
-    hook_target_seconds: float = Field(default=2.5, ge=1.0, le=4.0)
-    narrative_standard: Literal["human_hook_to_bible", "verse_first"] = "human_hook_to_bible"
+    hook_target_seconds: float = Field(default=2.0, ge=1.0, le=4.0)
+    narrative_standard: Literal[
+        "retention_story_v2",
+        "human_hook_to_bible",
+        "verse_first",
+    ] = "retention_story_v2"
     require_literal_verse_opening: bool = False
     require_verified_scripture: bool = True
     verse_opening_max_seconds: float = Field(default=12.0, ge=4.0, le=15.0)
+    scripture_citation_min_start_seconds: float = Field(default=8.0, ge=0.0, le=15.0)
     scripture_citation_max_end_seconds: float = Field(default=20.0, ge=6.0, le=30.0)
     verse_visual_change_seconds: float = Field(default=5.5, ge=3.5, le=8.0)
     minimum_retention_beats: int = Field(default=5, ge=3, le=10)
-    require_comment_prompt: bool = True
+    minimum_progression_beats: int = Field(default=2, ge=2, le=5)
+    retention_target_min_seconds: float = Field(default=45.0, ge=30.0, le=60.0)
+    retention_target_max_seconds: float = Field(default=55.0, ge=35.0, le=60.0)
+    require_comment_prompt: bool = False
     comment_response_max_words: int = Field(default=8, ge=1, le=12)
-    require_subscribe_cta: bool = True
+    require_subscribe_cta: bool = False
+    cta_max_words: int = Field(default=12, ge=4, le=16)
+    cta_max_seconds: float = Field(default=4.0, ge=2.0, le=6.0)
     estimated_narration_wpm: int = Field(default=145, ge=120, le=180)
     duration_tolerance_seconds: float = Field(default=2.0, ge=0.0, le=5.0)
     final_subscribe_cta: Literal[
@@ -259,6 +313,12 @@ class ShortsScriptConfig(PipelineModel):
     def validate_word_range(self) -> ShortsScriptConfig:
         if self.max_words < self.min_words:
             raise ValueError("max_words deve ser maior ou igual a min_words")
+        if self.retention_target_max_seconds < self.retention_target_min_seconds:
+            raise ValueError("retention_target_max_seconds deve ser maior ou igual ao mínimo")
+        if self.scripture_citation_max_end_seconds <= self.scripture_citation_min_start_seconds:
+            raise ValueError(
+                "scripture_citation_max_end_seconds deve ser posterior ao início mínimo"
+            )
         return self
 
 
@@ -278,6 +338,7 @@ class ProjectConfig(PipelineModel):
     images: ImageConfig = Field(default_factory=ImageConfig)
     music: MusicConfig = Field(default_factory=MusicConfig)
     shorts_script: ShortsScriptConfig = Field(default_factory=ShortsScriptConfig)
+    long_form_script: LongFormScriptConfig = Field(default_factory=LongFormScriptConfig)
     youtube_growth: YouTubeGrowthConfig = Field(default_factory=YouTubeGrowthConfig)
     youtube_publication: YouTubePublicationConfig = Field(default_factory=YouTubePublicationConfig)
     production: ProductionConfig = Field(default_factory=ProductionConfig)
@@ -319,6 +380,19 @@ class Briefing(PipelineModel):
     claims_to_avoid: list[str] = Field(default_factory=list)
     visual_notes: list[str] = Field(default_factory=list)
     call_to_action: str = ""
+    retention_archetype: (
+        Literal[
+            "conflict_first",
+            "counterintuitive_reveal",
+            "stair_step_progression",
+        ]
+        | None
+    ) = None
+    human_conflict: str = ""
+    central_question: str = ""
+    visual_progression: list[str] = Field(default_factory=list)
+    possible_reveal: str = ""
+    title_seed: str = ""
 
 
 class SourceEntry(PipelineModel):
@@ -376,6 +450,25 @@ class VerseCandidate(PipelineModel):
     interpretation_limits: list[str] = Field(default_factory=list)
     claims_to_avoid: list[str] = Field(default_factory=list)
     visual_notes: list[str] = Field(default_factory=list)
+    retention_archetypes: list[
+        Literal[
+            "conflict_first",
+            "counterintuitive_reveal",
+            "stair_step_progression",
+        ]
+    ] = Field(
+        default_factory=lambda: [
+            "conflict_first",
+            "counterintuitive_reveal",
+            "stair_step_progression",
+        ]
+    )
+    human_conflict: str = ""
+    central_question: str = ""
+    visual_progression: list[str] = Field(default_factory=list)
+    possible_reveal: str = ""
+    title_seed: str = ""
+    retention_potential_score: float = Field(default=0.5, ge=0.0, le=1.0)
     selection_weight: float = 1.0
     familiarity_score: float = Field(default=0.5, ge=0.0, le=1.0)
     clarity_score: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -411,6 +504,16 @@ class VerseUsageRecord(PipelineModel):
     normalized_topic: str | None = None
     themes: list[str] = Field(default_factory=list)
     characters: list[str] = Field(default_factory=list)
+    retention_archetype: (
+        Literal[
+            "conflict_first",
+            "counterintuitive_reveal",
+            "stair_step_progression",
+        ]
+        | None
+    ) = None
+    hook_family: str | None = None
+    engagement_mode: Literal["comment", "subscribe", "share"] | None = None
     created_at: str
     updated_at: str | None = None
 
@@ -422,6 +525,107 @@ class VerseUsageIndex(PipelineModel):
     schema_version: Literal["1.0"] = "1.0"
     generated_at: str
     records: list[VerseUsageRecord] = Field(default_factory=list)
+
+
+class LongFormRetentionBeat(PipelineModel):
+    beat_id: str
+    section_id: str
+    functions: list[
+        Literal[
+            "hook",
+            "progression",
+            "reengagement",
+            "contemplation",
+            "payoff",
+            "application",
+            "cta",
+        ]
+    ] = Field(min_length=1)
+    viewer_value: str
+    new_information: str
+    target_start_seconds: float = Field(ge=0.0)
+    target_end_seconds: float = Field(gt=0.0)
+    visual_progression: str
+
+    @model_validator(mode="after")
+    def validate_timing_and_value(self) -> LongFormRetentionBeat:
+        if self.target_end_seconds <= self.target_start_seconds:
+            raise ValueError("O fim do beat longo deve ser posterior ao início")
+        if not all(
+            value.strip()
+            for value in (self.beat_id, self.section_id, self.viewer_value, self.new_information)
+        ):
+            raise ValueError("Cada beat longo precisa acrescentar valor e informação")
+        if not self.visual_progression.strip():
+            raise ValueError("Cada beat longo precisa declarar progressão visual")
+        return self
+
+
+class LongFormScriptureAnchor(PipelineModel):
+    source_id: str
+    reference: str
+    section_id: str
+    target_start_seconds: float = Field(ge=0.0)
+    narrative_purpose: str
+
+
+class LongFormEngagementPlan(PipelineModel):
+    action: Literal["comment", "subscribe", "share"]
+    spoken_text: str
+    payoff_connection: str
+
+
+class LongFormScriptStrategy(PipelineModel):
+    standard: Literal["retention_story_long_v1"] = "retention_story_long_v1"
+    archetype: Literal[
+        "conflict_first",
+        "counterintuitive_reveal",
+        "stair_step_progression",
+    ]
+    target_viewer: str
+    viewer_need: str
+    content_promise: str
+    central_question: str
+    opening_hook: str
+    opening_conflict: str
+    progression: list[LongFormRetentionBeat] = Field(min_length=3)
+    scripture_anchors: list[LongFormScriptureAnchor] = Field(min_length=1)
+    payoff: str
+    practical_application: str
+    callback: str
+    engagement: LongFormEngagementPlan
+    source_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_story_contract(self) -> LongFormScriptStrategy:
+        required = (
+            self.target_viewer,
+            self.viewer_need,
+            self.content_promise,
+            self.central_question,
+            self.opening_hook,
+            self.opening_conflict,
+            self.payoff,
+            self.practical_application,
+            self.callback,
+            self.engagement.spoken_text,
+            self.engagement.payoff_connection,
+        )
+        if not all(value.strip() for value in required):
+            raise ValueError("A estratégia longa não pode ter movimentos narrativos vazios")
+        beat_ids = [beat.beat_id for beat in self.progression]
+        if len(set(beat_ids)) != len(beat_ids):
+            raise ValueError("beat_id precisa ser único na estratégia longa")
+        section_ids = [beat.section_id for beat in self.progression]
+        if len(set(section_ids)) != len(section_ids):
+            raise ValueError("Cada seção precisa ter exatamente um beat na estratégia longa")
+        functions = {function for beat in self.progression for function in beat.functions}
+        required_functions = {"hook", "progression", "payoff", "application", "cta"}
+        if not required_functions.issubset(functions):
+            raise ValueError(
+                "A estratégia longa precisa declarar gancho, progressão, payoff, aplicação e CTA"
+            )
+        return self
 
 
 class ScriptSection(PipelineModel):
@@ -447,13 +651,19 @@ class ScriptDocument(PipelineModel):
     estimated_duration_seconds: float = 0
     source_ids: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    long_form_strategy: LongFormScriptStrategy | None = None
 
     def narration_text(self) -> str:
         return "\n\n".join(section.narration.strip() for section in self.sections).strip()
 
 
 class CreativePacingProfile(PipelineModel):
-    profile_id: Literal["balanced_long_v1", "short_v1"]
+    profile_id: Literal[
+        "balanced_long_v1",
+        "long_retention_v1",
+        "short_v1",
+        "short_retention_v2",
+    ]
     default_scene_seconds: float = Field(gt=0.0)
     opening_scene_seconds: float = Field(gt=0.0)
     reengagement_scene_seconds: float = Field(gt=0.0)
@@ -501,6 +711,17 @@ class CreativeContract(PipelineModel):
     payoff: str
     practical_application: str
     main_passage: str
+    narrative_standard: Literal[
+        "legacy",
+        "retention_story_long_v1",
+        "retention_story_v2",
+        "human_hook_to_bible",
+        "verse_first",
+    ] = "legacy"
+    central_question: str = ""
+    callback: str = ""
+    engagement_action: Literal["comment", "subscribe", "share"] | None = None
+    scripture_citation_timestamps: list[float] = Field(default_factory=list)
     source_ids: list[str] = Field(default_factory=list)
     section_ids: list[str]
     claims_to_avoid: list[str] = Field(default_factory=list)
@@ -799,6 +1020,9 @@ class YouTubeThumbnailDesign(PipelineModel):
     safe_margin_x_ratio: float = Field(default=0.06, ge=0.04, le=0.18)
     safe_margin_y_ratio: float = Field(default=0.06, ge=0.04, le=0.18)
     texture: Literal["none", "subtle_grain"] = "subtle_grain"
+    typography_treatment: Literal["integrated_extruded_3d"] = "integrated_extruded_3d"
+    typography_hierarchy: Literal["dominant_keyword_scale"] = "dominant_keyword_scale"
+    typography_material: Literal["scene_lit_text_material"] = "scene_lit_text_material"
     narrative_element: Literal["none", "arrow", "x", "underline", "brush"] = "none"
     narrative_element_anchor: Literal[
         "top_left",
@@ -843,6 +1067,14 @@ class YouTubeThumbnailDesign(PipelineModel):
         return self
 
 
+class YouTubePromiseMatch(PipelineModel):
+    content_promise: str
+    opening_line: str
+    opening_scene_id: str
+    title_delivery: str
+    thumbnail_delivery: str
+
+
 class YouTubeGrowthStrategy(PipelineModel):
     format: Literal["long_form", "short"]
     target_viewer: str
@@ -854,6 +1086,7 @@ class YouTubeGrowthStrategy(PipelineModel):
     title_rationale: str
     thumbnail_rationale: str
     title_thumbnail_complement: str
+    promise_match: YouTubePromiseMatch | None = None
     source_ids: list[str] = Field(default_factory=list)
     section_ids: list[str] = Field(default_factory=list)
     thumbnail_designs: list[YouTubeThumbnailDesign] = Field(default_factory=list, max_length=3)
@@ -879,7 +1112,16 @@ class YouTubeGrowthPackage(PipelineModel):
 class ShortsRetentionBeat(PipelineModel):
     section_id: str
     purpose: Literal[
-        "hook", "open_loop", "stakes", "pattern_interrupt", "payoff", "application", "cta"
+        "hook",
+        "open_loop",
+        "stakes",
+        "progression",
+        "pattern_interrupt",
+        "reveal",
+        "payoff",
+        "application",
+        "callback",
+        "cta",
     ]
     viewer_question: str
     viewer_value: str
@@ -888,6 +1130,8 @@ class ShortsRetentionBeat(PipelineModel):
     pattern_interrupt: str | None = None
     opens_loop: str | None = None
     resolves_loop: str | None = None
+    new_information: str | None = None
+    visual_change: str | None = None
 
     @model_validator(mode="after")
     def validate_timing(self) -> ShortsRetentionBeat:
@@ -903,7 +1147,14 @@ class ShortsVerseOpening(PipelineModel):
     quote_mode: Literal["literal", "paraphrase"] = "literal"
     lead_in: str
     verse_text: str
+    target_start_seconds: float = Field(default=0.0, ge=0.0, le=30.0)
     target_end_seconds: float = Field(gt=0.0, le=30.0)
+
+    @model_validator(mode="after")
+    def validate_timing(self) -> ShortsVerseOpening:
+        if self.target_end_seconds <= self.target_start_seconds:
+            raise ValueError("target_end_seconds deve ser posterior a target_start_seconds")
+        return self
 
 
 class ShortsNarrativeSpine(PipelineModel):
@@ -941,6 +1192,53 @@ class ShortsCommentPrompt(PipelineModel):
     fit_reason: str
 
 
+class ShortsEngagementPlan(PipelineModel):
+    mode: Literal["comment", "subscribe", "share"]
+    spoken_text: str
+    objective: str
+    fit_reason: str
+    target_start_seconds: float = Field(ge=0.0)
+    target_end_seconds: float = Field(gt=0.0)
+
+    @model_validator(mode="after")
+    def validate_timing(self) -> ShortsEngagementPlan:
+        if self.target_end_seconds <= self.target_start_seconds:
+            raise ValueError("target_end_seconds deve ser posterior a target_start_seconds")
+        return self
+
+
+class ShortsReplayBridge(PipelineModel):
+    mode: Literal["verbal_callback", "visual_callback", "verbal_and_visual"]
+    opening_element: str
+    closing_callback: str
+    added_meaning: str
+
+
+class ShortsRetentionStory(PipelineModel):
+    pattern: Literal["retention_story_v2"] = "retention_story_v2"
+    archetype: Literal[
+        "conflict_first",
+        "counterintuitive_reveal",
+        "stair_step_progression",
+    ]
+    opening_section_id: str
+    scripture_section_id: str
+    progression_section_ids: list[str] = Field(min_length=2, max_length=5)
+    reengagement_section_id: str
+    payoff_section_id: str
+    cta_section_id: str
+    opening_promise: str
+    central_question: str
+    progression: list[str] = Field(min_length=2, max_length=5)
+    reengagement: str
+    scripture_anchor: str
+    payoff: str
+    practical_response: str
+    engagement: ShortsEngagementPlan
+    replay_bridge: ShortsReplayBridge
+    source_ids: list[str] = Field(default_factory=list)
+
+
 class ShortsScriptStrategy(PipelineModel):
     target_viewer: str
     viewer_need: str
@@ -969,6 +1267,7 @@ class ShortsScriptStrategy(PipelineModel):
     verse_opening: ShortsVerseOpening | None = None
     additional_scriptures: list[ShortsVerseOpening] = Field(default_factory=list)
     narrative_spine: ShortsNarrativeSpine | None = None
+    retention_story: ShortsRetentionStory | None = None
     open_loop: str
     payoff: str
     practical_value: str

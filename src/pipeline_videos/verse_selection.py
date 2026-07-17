@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import re
 import socket
@@ -43,6 +42,11 @@ from pipeline_videos.utils import relative_posix, sha256_value, tokenize_words, 
 DEFAULT_VERSE_CATALOG = REPO_ROOT / "config" / "bible" / "shorts-verse-catalog.json"
 VERSE_USAGE_FILENAME = "verse-usage.json"
 REGISTRY_ENVIRONMENT_ENV = "PIPELINE_VIDEOS_CONTENT_REGISTRY_ENVIRONMENT"
+RETENTION_ARCHETYPES = (
+    "conflict_first",
+    "counterintuitive_reveal",
+    "stair_step_progression",
+)
 
 BOOK_ALIASES = {
     "genesis": "genesis",
@@ -141,20 +145,55 @@ def load_verse_catalog(path: Path = DEFAULT_VERSE_CATALOG) -> VerseCatalog:
     return read_model(path, VerseCatalog)
 
 
+def _json_object(path: Path) -> dict[str, object]:
+    value = read_json(path)
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} precisa conter um objeto JSON.")
+    return value
+
+
+def _json_list(value: object, *, field: str) -> list[object]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{field} precisa conter uma lista.")
+    return value
+
+
 def _project_references(layout: ProjectLayout) -> list[str]:
     references: list[str] = []
     if layout.briefing.is_file():
-        data = read_json(layout.briefing)
+        data = _json_object(layout.briefing)
         references.extend(
-            [str(data.get("main_passage", "")), *data.get("complementary_references", [])]
+            [
+                str(data.get("main_passage", "")),
+                *(
+                    str(item)
+                    for item in _json_list(
+                        data.get("complementary_references"),
+                        field=f"{layout.briefing}: complementary_references",
+                    )
+                ),
+            ]
         )
     if layout.sources.is_file():
-        data = read_json(layout.sources)
-        references.extend(str(item.get("passage", "")) for item in data.get("entries", []))
+        data = _json_object(layout.sources)
+        for item in _json_list(data.get("entries"), field=f"{layout.sources}: entries"):
+            if not isinstance(item, dict):
+                raise ValueError(f"{layout.sources}: cada fonte precisa ser um objeto.")
+            references.append(str(item.get("passage", "")))
     if layout.script.is_file():
-        data = read_json(layout.script)
-        for section in data.get("sections", []):
-            references.extend(str(item) for item in section.get("biblical_basis", []))
+        data = _json_object(layout.script)
+        for section in _json_list(data.get("sections"), field=f"{layout.script}: sections"):
+            if not isinstance(section, dict):
+                raise ValueError(f"{layout.script}: cada seção precisa ser um objeto.")
+            references.extend(
+                str(item)
+                for item in _json_list(
+                    section.get("biblical_basis"),
+                    field=f"{layout.script}: biblical_basis",
+                )
+            )
     return list(dict.fromkeys(item.strip() for item in references if str(item).strip()))
 
 
@@ -169,11 +208,42 @@ def build_usage_index(
     for manifest_path in sorted(root.glob("*/*/project.json")):
         layout = ProjectLayout(manifest_path.parent)
         try:
-            manifest = layout.load_manifest()
+            manifest = _json_object(manifest_path)
+            project_id = str(manifest.get("project_id") or manifest_path.parent.name).strip()
+            video_format = str(manifest.get("video_format", "")).strip()
+            created_at = str(manifest.get("created_at", "")).strip()
+            title = str(manifest.get("title") or project_id).strip()
+            if not project_id or video_format not in {"landscape", "short"} or not created_at:
+                raise ValueError("project_id, video_format e created_at são obrigatórios.")
             references = _project_references(layout)
-            briefing = read_model(layout.briefing, Briefing)
-        except (ValueError, FileNotFoundError, json.JSONDecodeError):
-            continue
+            briefing = _json_object(layout.briefing) if layout.briefing.is_file() else {}
+        except (ValueError, FileNotFoundError, TypeError) as exc:
+            raise RuntimeError(
+                f"Não foi possível indexar {manifest_path.parent}. "
+                "A seleção foi bloqueada para evitar repetição."
+            ) from exc
+        main_passage = str(briefing.get("main_passage", "")).strip() or None
+        topic = str(briefing.get("central_theme") or title).strip()
+        retention_archetype = str(briefing.get("retention_archetype") or "").strip() or None
+        if retention_archetype not in RETENTION_ARCHETYPES:
+            retention_archetype = None
+        hook_family = retention_archetype
+        engagement_mode = None
+        if layout.shorts_script_strategy.is_file():
+            strategy = _json_object(layout.shorts_script_strategy)
+            retention_story = strategy.get("retention_story")
+            if isinstance(retention_story, dict):
+                retention_archetype = (
+                    str(retention_story.get("archetype") or "").strip() or retention_archetype
+                )
+                if retention_archetype not in RETENTION_ARCHETYPES:
+                    retention_archetype = None
+                hook_family = retention_archetype
+                engagement = retention_story.get("engagement")
+                if isinstance(engagement, dict):
+                    engagement_mode = str(engagement.get("mode") or "").strip() or None
+                    if engagement_mode not in {"comment", "subscribe", "share"}:
+                        engagement_mode = None
         tokens = sorted(
             {token for reference in references for token in reference_tokens(reference)}
         )
@@ -184,21 +254,21 @@ def build_usage_index(
         ]
         records.append(
             VerseUsageRecord(
-                registry_id=f"{registry_environment()}:{manifest.project_id}",
+                registry_id=f"{registry_environment()}:{project_id}",
                 environment=registry_environment(),
-                project_id=manifest.project_id,
+                project_id=project_id,
                 project_path=manifest_path.parent.relative_to(root).as_posix(),
-                video_format=manifest.video_format,
+                video_format=video_format,
                 status="used" if layout.script.is_file() else "reserved",
                 references=references,
                 normalized_references=tokens,
-                main_passage=briefing.main_passage or None,
-                topic=briefing.central_theme or manifest.title,
-                normalized_topic=_plain(briefing.central_theme or manifest.title),
+                main_passage=main_passage,
+                topic=topic,
+                normalized_topic=_plain(topic),
                 themes=list(
                     dict.fromkeys(
                         [
-                            briefing.central_theme or manifest.title,
+                            topic,
                             *(theme for item in matched for theme in item.themes),
                         ]
                     )
@@ -206,7 +276,10 @@ def build_usage_index(
                 characters=list(
                     dict.fromkeys(name for item in matched for name in item.characters)
                 ),
-                created_at=manifest.created_at,
+                retention_archetype=retention_archetype,
+                hook_family=hook_family,
+                engagement_mode=engagement_mode,
+                created_at=created_at,
             )
         )
     return VerseUsageIndex(generated_at=utc_now(), records=records)
@@ -282,6 +355,7 @@ def _reservation_record(
     *,
     project_id: str,
     video_format: Literal["landscape", "short"],
+    retention_archetype: str | None = None,
 ) -> VerseUsageRecord:
     category = "shorts" if video_format == "short" else "videos-longos"
     now = utc_now()
@@ -303,6 +377,8 @@ def _reservation_record(
         normalized_topic=_plain(candidate.central_theme),
         themes=list(dict.fromkeys([candidate.central_theme, *candidate.themes])),
         characters=candidate.characters,
+        retention_archetype=retention_archetype,
+        hook_family=retention_archetype,
         created_at=now,
         updated_at=now,
     )
@@ -315,6 +391,7 @@ def reserve_project_candidates(
     video_format: Literal["landscape", "short"],
     candidates: list[VerseCandidate],
     catalog: VerseCatalog | None = None,
+    retention_archetype: str | None = None,
 ) -> VerseUsageIndex:
     if not candidates:
         raise ValueError("Informe ao menos uma passagem para reservar.")
@@ -350,6 +427,7 @@ def reserve_project_candidates(
             main,
             project_id=project_id,
             video_format=video_format,
+            retention_archetype=retention_archetype,
         )
         references = list(
             dict.fromkeys(
@@ -399,6 +477,39 @@ def reserve_project_candidates(
         return merged
 
 
+def select_retention_archetype(
+    candidate: VerseCandidate,
+    usage: VerseUsageIndex,
+) -> str:
+    """Choose a preferred format without repeating either of the last two Shorts."""
+    preferred = [
+        archetype
+        for archetype in candidate.retention_archetypes
+        if archetype in RETENTION_ARCHETYPES
+    ]
+    if not preferred:
+        preferred = list(RETENTION_ARCHETYPES)
+    recent = sorted(
+        (record for record in usage.records if record.video_format == "short"),
+        key=lambda item: item.created_at,
+        reverse=True,
+    )
+    last_two = {record.retention_archetype for record in recent[:2] if record.retention_archetype}
+    fresh = [archetype for archetype in preferred if archetype not in last_two]
+    if fresh:
+        return fresh[0]
+    global_fresh = [archetype for archetype in RETENTION_ARCHETYPES if archetype not in last_two]
+    if global_fresh:
+        return global_fresh[0]
+    frequencies = Counter(
+        record.retention_archetype for record in recent if record.retention_archetype in preferred
+    )
+    return min(
+        preferred,
+        key=lambda archetype: (frequencies[archetype], preferred.index(archetype)),
+    )
+
+
 def select_unused_verse(
     catalog: VerseCatalog, usage: VerseUsageIndex
 ) -> tuple[VerseCandidate, float]:
@@ -446,6 +557,13 @@ def select_unused_verse(
             brevity_bonus = -12
         score += candidate.familiarity_score * 20
         score += candidate.clarity_score * 16
+        score += candidate.retention_potential_score * 20
+        if candidate.human_conflict.strip() and candidate.central_question.strip():
+            score += 6
+        if len(candidate.visual_progression) >= 2:
+            score += 6
+        if candidate.possible_reveal.strip():
+            score += 4
         score += brevity_bonus
         score -= recent_books[book_token] * 16
         score -= sum(recent_themes[theme] for theme in candidate.themes) * 7
@@ -495,48 +613,62 @@ def create_auto_video(
 
         def select_and_reserve(
             usage: VerseUsageIndex,
-        ) -> tuple[VerseUsageIndex, tuple[VerseCandidate, float, VerseUsageIndex]]:
+        ) -> tuple[
+            VerseUsageIndex,
+            tuple[VerseCandidate, float, VerseUsageIndex, str | None],
+        ]:
             candidate, score = select_unused_verse(catalog, usage)
+            retention_archetype = (
+                select_retention_archetype(candidate, usage) if video_format == "short" else None
+            )
             predicted_id = project_directory_name(candidate.slug, project_date=project_date)
             reservation = _reservation_record(
                 candidate,
                 project_id=predicted_id,
                 video_format=video_format,
+                retention_archetype=retention_archetype,
             )
             updated = merge_usage_indexes(
                 usage,
                 VerseUsageIndex(generated_at=utc_now(), records=[reservation]),
             )
-            return updated, (candidate, score, usage)
+            return updated, (candidate, score, usage, retention_archetype)
 
         if shared_registry_enabled():
 
             def mutate(
                 raw: dict[str, object],
-            ) -> tuple[dict[str, object], tuple[VerseCandidate, float, VerseUsageIndex]]:
+            ) -> tuple[
+                dict[str, object],
+                tuple[VerseCandidate, float, VerseUsageIndex, str | None],
+            ]:
                 shared = VerseUsageIndex.model_validate(raw)
                 updated, result = select_and_reserve(merge_usage_indexes(shared, local))
                 return updated.model_dump(mode="json"), result
 
-            candidate, score, before = update_shared_registry(
+            candidate, score, before, retention_archetype = update_shared_registry(
                 mutate,
                 message="registry: reserve automatic passage",
             )
         else:
-            reserved, (candidate, score, before) = select_and_reserve(local)
+            reserved, (candidate, score, before, retention_archetype) = select_and_reserve(local)
             write_json(root / VERSE_USAGE_FILENAME, reserved)
+        project_title = (
+            candidate.title_seed.strip() or candidate.title
+            if video_format == "short"
+            else candidate.title
+        )
         layout = create_project(
             candidate.slug,
-            candidate.title,
+            project_title,
             projects_dir=root,
             target_duration_seconds=target_duration_seconds,
             video_format=video_format,
             project_date=project_date,
             production_mode=production_mode,
         )
-        manifest = layout.load_manifest()
         briefing = Briefing(
-            title=candidate.title,
+            title=project_title,
             main_passage=candidate.reference,
             central_theme=candidate.central_theme,
             practical_application=candidate.practical_application,
@@ -554,8 +686,8 @@ def create_auto_video(
             visual_notes=candidate.visual_notes,
             call_to_action=(
                 (
-                    "Escolher um convite natural para comentar uma palavra específica e finalizar "
-                    f"exatamente com: {manifest.config.shorts_script.final_subscribe_cta}"
+                    "Escolher exatamente uma ação natural — comentar, inscrever-se ou "
+                    "compartilhar — integrada ao payoff, em até doze palavras e quatro segundos."
                 )
                 if video_format == "short"
                 else (
@@ -563,6 +695,12 @@ def create_auto_video(
                     "natural, sem promessas espirituais ou pressão para engajamento."
                 )
             ),
+            retention_archetype=retention_archetype,
+            human_conflict=candidate.human_conflict,
+            central_question=candidate.central_question,
+            visual_progression=candidate.visual_progression,
+            possible_reveal=candidate.possible_reveal,
+            title_seed=candidate.title_seed,
         )
         sources = SourceLibrary(
             entries=[
@@ -610,6 +748,8 @@ def create_auto_video(
                 "verse_word_count": len(tokenize_words(candidate.verse_text)),
                 "familiarity_score": candidate.familiarity_score,
                 "clarity_score": candidate.clarity_score,
+                "retention_potential_score": candidate.retention_potential_score,
+                "retention_archetype": retention_archetype,
                 "catalog_id": catalog.catalog_id,
                 "usage_records_considered": len(before.records),
                 "development_modes": candidate.preferred_development_modes,

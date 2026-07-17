@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import time
 from pathlib import Path
 from typing import Annotated
 
@@ -15,7 +16,14 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from pipeline_videos.models import ApprovalStatus, ImageManifest, Palette, StageStatus, StyleProfile
+from pipeline_videos.models import (
+    DEFAULT_ELEVENLABS_VOICE_ID,
+    ApprovalStatus,
+    ImageManifest,
+    Palette,
+    StageStatus,
+    StyleProfile,
+)
 from pipeline_videos.project import (
     DEFAULT_PALETTE,
     DEFAULT_STYLE,
@@ -188,6 +196,139 @@ def remote_work_once(
     typer.echo(json.dumps(payload, ensure_ascii=False))
 
 
+def _daily_time(value: str) -> time:
+    try:
+        parsed = time.fromisoformat(value)
+    except ValueError as exc:
+        raise typer.BadParameter(f"Horário inválido: {value}. Use HH:MM.") from exc
+    if parsed.tzinfo is not None or parsed.second or parsed.microsecond:
+        raise typer.BadParameter(f"Horário inválido: {value}. Use HH:MM sem fuso.")
+    return parsed
+
+
+@remote_app.command("schedule-create")
+def remote_schedule_create(
+    name: Annotated[str, typer.Option("--name")],
+    production_times: Annotated[
+        list[str],
+        typer.Option("--production-time", help="Repita uma ou duas vezes; formato HH:MM."),
+    ],
+    publication_times: Annotated[
+        list[str], typer.Option("--publication-time", help="Um horário público para cada Short.")
+    ],
+    publish_days_after: Annotated[int, typer.Option("--publish-days-after", min=0, max=30)] = 1,
+    timezone: Annotated[str, typer.Option("--timezone")] = "America/Sao_Paulo",
+    duration_seconds: Annotated[int, typer.Option("--duration", min=30, max=180)] = 50,
+    enabled: Annotated[bool, typer.Option("--enabled/--disabled")] = True,
+    authorize_external: Annotated[bool, typer.Option("--authorize-external")] = False,
+    authorize_public_schedule: Annotated[bool, typer.Option("--authorize-public-schedule")] = False,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Cria uma agenda idempotente de um ou dois Shorts por dia."""
+    from pipeline_videos.remote_jobs import RemoteJobStore
+    from pipeline_videos.remote_schedules import (
+        DailyShortSlot,
+        RemoteScheduleStore,
+        schedule_summary,
+    )
+
+    if len(production_times) not in {1, 2}:
+        raise typer.BadParameter("Informe um ou dois horários de produção.")
+    if len(publication_times) != len(production_times):
+        raise typer.BadParameter("Informe um horário de publicação para cada produção.")
+    slots = [
+        DailyShortSlot(
+            production_time=_daily_time(production_value),
+            publication_time=_daily_time(publication_value),
+            publication_day_offset=publish_days_after,
+        )
+        for production_value, publication_value in zip(
+            production_times, publication_times, strict=True
+        )
+    ]
+    job_store = RemoteJobStore(jobs_dir)
+    schedule = RemoteScheduleStore(job_store.root).create(
+        name=name,
+        slots=slots,
+        timezone=timezone,
+        duration_seconds=duration_seconds,
+        enabled=enabled,
+        external_services_authorized=authorize_external,
+        public_scheduling_authorized=authorize_public_schedule,
+    )
+    typer.echo(json.dumps(schedule_summary(schedule), ensure_ascii=False))
+
+
+@remote_app.command("schedule-list")
+def remote_schedule_list(
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Lista agendas diárias sem criar jobs."""
+    from pipeline_videos.remote_jobs import RemoteJobStore
+    from pipeline_videos.remote_schedules import RemoteScheduleStore, schedule_summary
+
+    job_store = RemoteJobStore(jobs_dir)
+    schedules = RemoteScheduleStore(job_store.root).list()
+    typer.echo(json.dumps([schedule_summary(item) for item in schedules], ensure_ascii=False))
+
+
+def _set_remote_schedule_enabled(schedule_id: str, jobs_dir: Path | None, enabled: bool) -> None:
+    from pipeline_videos.remote_jobs import RemoteJobStore
+    from pipeline_videos.remote_schedules import RemoteScheduleStore, schedule_summary
+
+    job_store = RemoteJobStore(jobs_dir)
+    schedule = RemoteScheduleStore(job_store.root).set_enabled(schedule_id, enabled)
+    typer.echo(json.dumps(schedule_summary(schedule), ensure_ascii=False))
+
+
+@remote_app.command("schedule-enable")
+def remote_schedule_enable(
+    schedule_id: str,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Ativa uma agenda diária existente."""
+    _set_remote_schedule_enabled(schedule_id, jobs_dir, True)
+
+
+@remote_app.command("schedule-disable")
+def remote_schedule_disable(
+    schedule_id: str,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Pausa uma agenda sem cancelar jobs já materializados."""
+    _set_remote_schedule_enabled(schedule_id, jobs_dir, False)
+
+
+@remote_app.command("schedule-delete")
+def remote_schedule_delete(
+    schedule_id: str,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Remove uma agenda sem cancelar jobs já materializados."""
+    from pipeline_videos.remote_jobs import RemoteJobStore
+    from pipeline_videos.remote_schedules import RemoteScheduleStore, schedule_summary
+
+    job_store = RemoteJobStore(jobs_dir)
+    schedule = RemoteScheduleStore(job_store.root).delete(schedule_id)
+    typer.echo(json.dumps(schedule_summary(schedule), ensure_ascii=False))
+
+
+@remote_app.command("schedule-materialize")
+def remote_schedule_materialize(
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Materializa uma vez os jobs de hoje; chamadas repetidas são idempotentes."""
+    from pipeline_videos.remote_jobs import RemoteJobStore, job_summary
+    from pipeline_videos.remote_schedules import RemoteScheduleStore, materialize_daily_schedules
+
+    job_store = RemoteJobStore(jobs_dir)
+    jobs = materialize_daily_schedules(
+        store=job_store,
+        schedule_store=RemoteScheduleStore(job_store.root),
+    )
+    typer.echo(json.dumps([job_summary(job) for job in jobs], ensure_ascii=False))
+
+
 def _print_orchestration_plan(
     layout: ProjectLayout,
     *,
@@ -263,10 +404,11 @@ def doctor() -> None:
         "CONFIGURADA" if os.getenv("ELEVENLABS_API_KEY") else "OPCIONAL",
         "valor não exibido" if os.getenv("ELEVENLABS_API_KEY") else "mock disponível para testes",
     )
+    configured_voice = os.getenv("ELEVENLABS_VOICE_ID")
     table.add_row(
         "ElevenLabs voice",
-        "CONFIGURADA" if os.getenv("ELEVENLABS_VOICE_ID") else "PENDENTE",
-        os.getenv("ELEVENLABS_VOICE_ID", "defina localmente antes do TTS real"),
+        "CONFIGURADA" if configured_voice else "PADRÃO",
+        configured_voice or DEFAULT_ELEVENLABS_VOICE_ID,
     )
     image_status, image_detail = _codex_image_generation_status()
     table.add_row("Imagem Codex", image_status, image_detail)
@@ -393,7 +535,8 @@ def resume_prompt(
     projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
 ) -> None:
     layout = _project(project, projects_dir)
-    config = layout.load_manifest().config
+    manifest = layout.load_manifest()
+    config = manifest.config
     manual_audio = config.audio.provider == "local_manual"
     audio_instruction = (
         "Quando a etapa de áudio ficar pendente, mostre ao usuário todo o conteúdo de "
@@ -403,11 +546,23 @@ def resume_prompt(
         if manual_audio
         else ""
     )
+    script_standard = (
+        "`docs/shorts-script-standard.md`"
+        if manifest.video_format == "short"
+        else "`docs/long-form-script-standard.md`"
+    )
+    long_script_instruction = (
+        "Para vídeo longo novo, produza um ScriptDocument com long_form_strategy completo, valide "
+        "a cadência das citações e importe o roteiro antes de construir cenas. "
+        if manifest.video_format != "short"
+        else ""
+    )
     prompt = f"""Retome o projeto em `{layout.root}`. Leia `AGENTS.md`,
-`docs/optimized-production.md` e depois `project.json`. Execute
+`docs/optimized-production.md`, {script_standard} e depois `project.json`. Execute
 `uv run pipeline-videos status "{project}"` e retome com
 `uv run pipeline-videos autopilot "{project}"`
 {"sem --allow-external" if manual_audio else "com --allow-external"}. {audio_instruction}
+{long_script_instruction}
 Quando houver filas externas,
 crie apenas os papéis declarados, sempre com `fork_turns=none`: cada image_worker recebe somente
 seu `images/jobs/image-worker-N.json`, e o youtube_growth_specialist recebe somente

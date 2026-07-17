@@ -274,6 +274,7 @@ def _scene_from_chunk(
     *,
     high_impact_opening: bool = False,
     opening_anchor: bool = False,
+    retention_reset: bool = False,
 ) -> Scene:
     subject, environment, function = ROLE_DIRECTIONS[section.role]
     if section.visual_direction:
@@ -289,11 +290,12 @@ def _scene_from_chunk(
         "closing": "paz e continuidade",
     }[section.role]
     if high_impact_opening:
+        is_vertical = canvas_height > canvas_width
         role = "imagem-âncora e base da capa" if opening_anchor else "continuação visual dinâmica"
         subject = (
-            f"{subject}. {role} da abertura do Short: um único personagem, objeto ou símbolo "
+            f"{subject}. {role} da abertura do vídeo: um único personagem, objeto ou símbolo "
             "dominante, fiel ao trecho narrado neste quadro, com gesto ou emoção "
-            "legível em celular; acabamento especialmente caprichado, limpo e intencional"
+            "imediatamente legível; acabamento especialmente caprichado, limpo e intencional"
         )
         shot = (
             (
@@ -301,10 +303,16 @@ def _scene_from_chunk(
                 "45% a 65% do quadro, conflito visual simples, luz direcional forte e espaço "
                 "negativo limpo no terço superior, sem bloquear a faixa central das legendas"
             )
+            if opening_anchor and is_vertical
+            else (
+                "composição horizontal de alto impacto, plano médio ou close, assunto dominante "
+                "no primeiro ou segundo terço, conflito visual simples, luz direcional forte e "
+                "espaço negativo real para a futura thumbnail"
+            )
             if opening_anchor
             else (
                 f"{SHOTS[index % len(SHOTS)]}, variação clara de escala e ângulo em relação ao "
-                "primeiro quadro, ação ou símbolo diferente e leitura imediata em celular"
+                "primeiro quadro, ação ou símbolo diferente e leitura imediata"
             )
         )
         emotional_intent = (
@@ -316,6 +324,13 @@ def _scene_from_chunk(
             if opening_anchor
             else f"mudança visual dentro da abertura para sustentar retenção; {function}"
         )
+    elif retention_reset:
+        shot = (
+            f"{SHOTS[(index + 2) % len(SHOTS)]}, mudança deliberada de escala, direção de olhar "
+            "ou profundidade em relação ao movimento anterior"
+        )
+        emotional_intent += "; renovação clara de curiosidade sem choque gratuito"
+        function = f"reengajamento visual por nova informação ou reversão; {function}"
     if section.on_screen_emphasis:
         emotional_intent += f"; ênfase visual em {section.on_screen_emphasis}"
     prompt = assemble_prompt(
@@ -391,10 +406,18 @@ def build_scenes(
     try:
         recurring = _continuity_lines(continuity)
         scenes: list[Scene] = []
+        contract_beats = {beat.section_id: beat for beat in contract.beats}
         for section_index, section in enumerate(script.sections):
             high_impact_opening = (
-                project.video_format == "short" and section_index == 0 and section.role == "opening"
+                section_index == 0
+                and section.role == "opening"
+                and (
+                    project.video_format == "short"
+                    or project.config.long_form_script.narrative_standard
+                    == "retention_story_long_v1"
+                )
             )
+            retention_reset = "reengagement" in contract_beats[section.section_id].functions
             section_seconds = _scene_seconds_for_section(
                 contract,
                 section,
@@ -403,7 +426,15 @@ def build_scenes(
             section_target_words = (
                 max(
                     8,
-                    round(145 / 60 * project.config.shorts_script.verse_visual_change_seconds),
+                    round(
+                        145
+                        / 60
+                        * (
+                            project.config.shorts_script.verse_visual_change_seconds
+                            if project.video_format == "short"
+                            else section_seconds
+                        )
+                    ),
                 )
                 if high_impact_opening
                 else max(8, round(145 / 60 * section_seconds))
@@ -426,10 +457,22 @@ def build_scenes(
                         render_config.height,
                         high_impact_opening=high_impact_opening,
                         opening_anchor=high_impact_opening and chunk_index == 0,
+                        retention_reset=retention_reset,
                     )
                 )
         if not scenes:
             raise ValueError("O roteiro não produziu nenhuma cena.")
+        if (
+            project.video_format == "short"
+            and project.config.shorts_script.narrative_standard == "retention_story_v2"
+            and target_scene_seconds is None
+            and layout.shorts_script_strategy.is_file()
+            and not 8 <= len(scenes) <= 10
+        ):
+            raise ValueError(
+                "retention_story_v2 precisa produzir de 8 a 10 cenas; "
+                f"o roteiro atual produziu {len(scenes)}."
+            )
         manifest = SceneManifest(
             script_version=script.version,
             style_profile_id=style.style_id,

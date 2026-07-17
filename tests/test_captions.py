@@ -151,9 +151,26 @@ def test_ass_can_render_uppercase_active_word_on_background_card() -> None:
     assert any("FÉ" in event for event in base_events)
     assert any("PERMANECE" in event for event in active_events)
     assert all(r"\p1" in event and r"\1a&H00&" in event and " b " in event for event in card_events)
-    base_positions = [re.search(r"\\pos\(\d+,\d+\)", event).group() for event in base_events]
-    active_positions = [re.search(r"\\pos\(\d+,\d+\)", event).group() for event in active_events]
+    assert [event.split(",", 3)[1] for event in base_events] == [
+        "0:00:00.00",
+        "0:00:00.20",
+        "0:00:00.50",
+    ]
+    assert all(r"\move" in event and r"\fad" in event and r"\t(" in event for event in base_events)
+    assert all(r"\move" in event for event in card_events)
+    base_positions = [re.search(r"\\move\([^)]*\)", event).group() for event in base_events]
+    active_positions = [re.search(r"\\move\([^)]*\)", event).group() for event in active_events]
     assert base_positions == active_positions
+
+
+def test_active_card_word_arrival_can_be_disabled_for_legacy_projects() -> None:
+    words = _words([("A", 0.0, 0.2), ("fé", 0.2, 0.5), ("permanece", 0.5, 0.9)])
+    style = CaptionStyle(variant="active_card_v2", word_arrival_animation=False)
+    content = render_ass(words, group_word_timings(words, style), style, width=1080, height=1920)
+    base_events = [line for line in content.splitlines() if line.startswith("Dialogue: 1,")]
+
+    assert len({event.split(",", 3)[1] for event in base_events}) == 1
+    assert all(r"\pos" in event and r"\move" not in event for event in base_events)
 
 
 def test_active_card_layout_can_compensate_for_font_metric_width() -> None:

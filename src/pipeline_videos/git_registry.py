@@ -29,7 +29,7 @@ class RegistryConflictError(RuntimeError):
 
 
 def shared_registry_enabled() -> bool:
-    return os.getenv(REGISTRY_MODE_ENV, "local").strip().casefold() == "git"
+    return os.getenv(REGISTRY_MODE_ENV, "git").strip().casefold() == "git"
 
 
 def _git(
@@ -58,7 +58,11 @@ def _git(
 
 
 def _registry_settings() -> tuple[str, str, str]:
-    remote = os.getenv(REGISTRY_REMOTE_ENV, "origin").strip() or "origin"
+    remote = os.getenv(REGISTRY_REMOTE_ENV, "").strip()
+    if not remote:
+        raise RegistryUnavailableError(
+            f"{REGISTRY_REMOTE_ENV} é obrigatório quando o registro Git está ativo."
+        )
     reference = os.getenv(REGISTRY_REF_ENV, DEFAULT_REGISTRY_REF).strip()
     path = os.getenv(REGISTRY_PATH_ENV, DEFAULT_REGISTRY_PATH).strip()
     if not reference.startswith("refs/heads/"):
