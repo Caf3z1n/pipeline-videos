@@ -16,7 +16,9 @@ from pipeline_videos.models import (
 from pipeline_videos.storage import read_json, read_model, write_json
 from pipeline_videos.verse_selection import (
     build_usage_index,
+    catalog_capacity_summary,
     create_auto_short,
+    eligible_main_candidate_ids,
     load_verse_catalog,
     reference_tokens,
     references_overlap,
@@ -174,6 +176,109 @@ def test_selector_prefers_short_familiar_clear_verse_when_other_factors_match() 
     assert selected.candidate_id == "concise"
 
 
+def test_expansion_bank_is_loaded_with_verified_unique_candidates() -> None:
+    catalog = load_verse_catalog()
+
+    assert len(catalog.candidates) >= 70
+    assert len({candidate.candidate_id for candidate in catalog.candidates}) == len(
+        catalog.candidates
+    )
+    assert all(candidate.verse_text.strip() for candidate in catalog.candidates)
+    assert all("Domínio público" in candidate.rights_note for candidate in catalog.candidates)
+
+
+def test_main_passage_eligibility_is_scoped_by_format_and_ignores_supporting_refs() -> None:
+    catalog = load_verse_catalog()
+    first, second = catalog.candidates[:2]
+    usage = VerseUsageIndex(
+        generated_at="2026-07-17T00:00:00Z",
+        records=[
+            VerseUsageRecord(
+                project_id="long-1",
+                project_path="videos-longos/long-1",
+                video_format="landscape",
+                status="used",
+                main_passage=first.reference,
+                references=[first.reference, second.reference],
+                supporting_references=[second.reference],
+                created_at="2026-07-17T00:00:00Z",
+            )
+        ],
+    )
+
+    short_eligible = eligible_main_candidate_ids(catalog, usage, video_format="short")
+    long_eligible = eligible_main_candidate_ids(catalog, usage, video_format="landscape")
+
+    assert first.candidate_id in short_eligible
+    assert second.candidate_id in short_eligible
+    assert first.candidate_id not in long_eligible
+    assert second.candidate_id in long_eligible
+
+
+def test_selector_starts_new_cycle_after_all_main_passages_were_used() -> None:
+    candidate = load_verse_catalog().candidates[0]
+    catalog = VerseCatalog(
+        catalog_id="single",
+        translation=candidate.translation,
+        publisher="eBible.org",
+        source_url="https://example.invalid",
+        rights_note=candidate.rights_note,
+        accessed_at=candidate.accessed_at,
+        candidates=[candidate],
+    )
+    usage = VerseUsageIndex(
+        generated_at="2026-07-17T00:00:00Z",
+        records=[
+            VerseUsageRecord(
+                project_id="short-old",
+                project_path="shorts/short-old",
+                video_format="short",
+                status="used",
+                main_passage=candidate.reference,
+                references=[candidate.reference],
+                created_at="2026-01-01T00:00:00Z",
+            )
+        ],
+    )
+
+    selected, _ = select_unused_verse(catalog, usage, video_format="short")
+    capacity = catalog_capacity_summary(catalog, usage, video_format="short")
+
+    assert selected.candidate_id == candidate.candidate_id
+    assert capacity["selection_cycle"] == 2
+    assert capacity["available_in_cycle"] == 1
+
+
+def test_selector_never_reuses_main_passage_reserved_by_active_job() -> None:
+    candidate = load_verse_catalog().candidates[0]
+    catalog = VerseCatalog(
+        catalog_id="single",
+        translation=candidate.translation,
+        publisher="eBible.org",
+        source_url="https://example.invalid",
+        rights_note=candidate.rights_note,
+        accessed_at=candidate.accessed_at,
+        candidates=[candidate],
+    )
+    usage = VerseUsageIndex(
+        generated_at="2026-07-17T00:00:00Z",
+        records=[
+            VerseUsageRecord(
+                project_id="short-active",
+                project_path="shorts/short-active",
+                video_format="short",
+                status="reserved",
+                main_passage=candidate.reference,
+                references=[candidate.reference],
+                created_at="2026-07-17T00:00:00Z",
+            )
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="reservadas por jobs ativos"):
+        select_unused_verse(catalog, usage, video_format="short")
+
+
 def test_retention_archetype_does_not_repeat_either_of_last_two_shorts() -> None:
     candidate = VerseCandidate(
         candidate_id="candidate",
@@ -259,12 +364,8 @@ def test_usage_scan_includes_complementary_sources_and_script_basis(tmp_path) ->
 
     catalog = load_verse_catalog()
     selected, _ = select_unused_verse(catalog, usage)
-    assert selected.reference not in {
-        candidate.reference,
-        "Romanos 12:21",
-        "Mateus 5:9",
-        "João 14:27",
-    }
+    assert record.supporting_references
+    assert selected.reference != candidate.reference
 
 
 def test_usage_scan_accepts_legacy_manifest_fields(tmp_path) -> None:

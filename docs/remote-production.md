@@ -69,6 +69,12 @@ visibilidade inicial `private`. Agendamento exige também `publication_mode=sche
 arquivos ao GitHub ou aos logs. O registro compartilhado de conteúdo permanece em
 `shared/content-registry.git` e guarda somente metadados editoriais sem roteiro, mídia ou segredo.
 
+Antes de criar um projeto automático, o worker carrega o catálogo base e o banco curado de expansão
+BPM. A capacidade é calculada por formato e somente passagens principais do mesmo formato consomem
+o ciclo. Referências complementares de vídeos longos não reduzem o estoque de Shorts. Se todas as
+passagens já foram usadas, o próximo ciclo é aberto automaticamente; uma passagem ainda reservada
+por outro job nunca é reutilizada.
+
 O timer systemd chama `pipeline-videos remote work-once` a cada minuto:
 
 ```bash

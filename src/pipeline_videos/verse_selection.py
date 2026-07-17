@@ -40,6 +40,7 @@ from pipeline_videos.storage import (
 from pipeline_videos.utils import relative_posix, sha256_value, tokenize_words, utc_now
 
 DEFAULT_VERSE_CATALOG = REPO_ROOT / "config" / "bible" / "shorts-verse-catalog.json"
+DEFAULT_VERSE_EXPANSION_BANK = REPO_ROOT / "config" / "bible" / "shorts-verse-expansion-bank.json"
 VERSE_USAGE_FILENAME = "verse-usage.json"
 REGISTRY_ENVIRONMENT_ENV = "PIPELINE_VIDEOS_CONTENT_REGISTRY_ENVIRONMENT"
 RETENTION_ARCHETYPES = (
@@ -59,18 +60,26 @@ BOOK_ALIASES = {
     "salmos": "salmos",
     "proverbios": "proverbios",
     "isaias": "isaias",
+    "jeremias": "jeremias",
     "lamentacoes": "lamentacoes",
     "miqueias": "miqueias",
+    "habacuque": "habacuque",
     "mateus": "mateus",
+    "marcos": "marcos",
     "lucas": "lucas",
     "joao": "joao",
+    "atos": "atos",
     "romanos": "romanos",
+    "1 corintios": "1-corintios",
+    "i corintios": "1-corintios",
     "2 corintios": "2-corintios",
     "ii corintios": "2-corintios",
     "galatas": "galatas",
     "efesios": "efesios",
     "filipenses": "filipenses",
     "colossenses": "colossenses",
+    "1 tessalonicenses": "1-tessalonicenses",
+    "i tessalonicenses": "1-tessalonicenses",
     "2 timoteo": "2-timoteo",
     "ii timoteo": "2-timoteo",
     "hebreus": "hebreus",
@@ -79,6 +88,7 @@ BOOK_ALIASES = {
     "i pedro": "1-pedro",
     "1 joao": "1-joao",
     "i joao": "1-joao",
+    "apocalipse": "apocalipse",
 }
 BOOK_PATTERN = "|".join(sorted((re.escape(item) for item in BOOK_ALIASES), key=len, reverse=True))
 REFERENCE_RE = re.compile(
@@ -141,8 +151,39 @@ def references_overlap(first: str, second: str) -> bool:
     return False
 
 
-def load_verse_catalog(path: Path = DEFAULT_VERSE_CATALOG) -> VerseCatalog:
-    return read_model(path, VerseCatalog)
+def load_verse_catalog(
+    path: Path = DEFAULT_VERSE_CATALOG,
+    *,
+    include_expansion_bank: bool = True,
+) -> VerseCatalog:
+    catalog = read_model(path, VerseCatalog)
+    if (
+        not include_expansion_bank
+        or path.resolve() != DEFAULT_VERSE_CATALOG.resolve()
+        or not DEFAULT_VERSE_EXPANSION_BANK.is_file()
+    ):
+        return catalog
+    expansion = read_model(DEFAULT_VERSE_EXPANSION_BANK, VerseCatalog)
+    if expansion.translation != catalog.translation or expansion.rights_note != catalog.rights_note:
+        raise ValueError("O banco de expansão precisa usar a mesma tradução e os mesmos direitos.")
+    candidates = list(catalog.candidates)
+    known_ids = {candidate.candidate_id for candidate in candidates}
+    known_references = {
+        token for candidate in candidates for token in reference_tokens(candidate.reference)
+    }
+    for candidate in expansion.candidates:
+        tokens = reference_tokens(candidate.reference)
+        if candidate.candidate_id in known_ids or tokens & known_references:
+            continue
+        candidates.append(candidate)
+        known_ids.add(candidate.candidate_id)
+        known_references.update(tokens)
+    return catalog.model_copy(
+        update={
+            "catalog_id": f"{catalog.catalog_id}+{expansion.catalog_id}",
+            "candidates": candidates,
+        }
+    )
 
 
 def _json_object(path: Path) -> dict[str, object]:
@@ -223,6 +264,11 @@ def build_usage_index(
                 "A seleção foi bloqueada para evitar repetição."
             ) from exc
         main_passage = str(briefing.get("main_passage", "")).strip() or None
+        supporting_references = [
+            reference
+            for reference in references
+            if main_passage is None or not references_overlap(reference, main_passage)
+        ]
         topic = str(briefing.get("central_theme") or title).strip()
         retention_archetype = str(briefing.get("retention_archetype") or "").strip() or None
         if retention_archetype not in RETENTION_ARCHETYPES:
@@ -261,6 +307,7 @@ def build_usage_index(
                 video_format=video_format,
                 status="used" if layout.script.is_file() else "reserved",
                 references=references,
+                supporting_references=supporting_references,
                 normalized_references=tokens,
                 main_passage=main_passage,
                 topic=topic,
@@ -295,10 +342,14 @@ def merge_usage_indexes(*indexes: VerseUsageIndex) -> VerseUsageIndex:
                 merged[key] = record
                 continue
             references = list(dict.fromkeys([*current.references, *record.references]))
+            supporting_references = list(
+                dict.fromkeys([*current.supporting_references, *record.supporting_references])
+            )
             merged[key] = record.model_copy(
                 update={
                     "status": "used" if "used" in {current.status, record.status} else "reserved",
                     "references": references,
+                    "supporting_references": supporting_references,
                     "normalized_references": sorted(
                         {token for reference in references for token in reference_tokens(reference)}
                     ),
@@ -369,6 +420,7 @@ def _reservation_record(
         video_format=video_format,
         status="reserved",
         references=references,
+        supporting_references=[],
         normalized_references=sorted(
             {token for reference in references for token in reference_tokens(reference)}
         ),
@@ -401,26 +453,25 @@ def reserve_project_candidates(
     registry_id = f"{environment}:{project_id}"
 
     def reserve(usage: VerseUsageIndex) -> VerseUsageIndex:
-        other_references = [
-            reference
+        other_main_passages = [
+            record.main_passage
             for record in usage.records
             if record.registry_id != registry_id
-            for reference in record.references
+            and record.video_format == video_format
+            and record.main_passage
         ]
         repeated = next(
             (
-                candidate.reference
-                for candidate in candidates
-                if any(
-                    references_overlap(candidate.reference, reference)
-                    for reference in other_references
-                )
+                reference
+                for reference in other_main_passages
+                if references_overlap(candidates[0].reference, reference)
             ),
             None,
         )
         if repeated:
             raise RuntimeError(
-                f"A passagem {repeated} foi reservada por outro projeto durante a seleção."
+                f"A passagem principal {candidates[0].reference} foi reservada por outro "
+                f"projeto {video_format} durante a seleção."
             )
         main = candidates[0]
         reservation = _reservation_record(
@@ -436,9 +487,17 @@ def reserve_project_candidates(
                 for reference in (candidate.reference, candidate.context_reference)
             )
         )
+        supporting_references = list(
+            dict.fromkeys(
+                reference
+                for candidate in candidates[1:]
+                for reference in (candidate.reference, candidate.context_reference)
+            )
+        )
         reservation = reservation.model_copy(
             update={
                 "references": references,
+                "supporting_references": supporting_references,
                 "normalized_references": sorted(
                     {token for reference in references for token in reference_tokens(reference)}
                 ),
@@ -510,33 +569,90 @@ def select_retention_archetype(
     )
 
 
-def select_unused_verse(
-    catalog: VerseCatalog, usage: VerseUsageIndex
-) -> tuple[VerseCandidate, float]:
-    used_references = [reference for record in usage.records for reference in record.references]
-    used_topics = {
-        record.normalized_topic or _plain(record.topic or "")
-        for record in usage.records
-        if record.normalized_topic or record.topic
+def _main_candidate_usage(
+    catalog: VerseCatalog,
+    usage: VerseUsageIndex,
+    *,
+    video_format: Literal["landscape", "short"],
+) -> tuple[dict[str, int], set[str]]:
+    counts = {candidate.candidate_id: 0 for candidate in catalog.candidates}
+    reserved: set[str] = set()
+    for record in usage.records:
+        if record.video_format != video_format or not record.main_passage:
+            continue
+        for candidate in catalog.candidates:
+            if not references_overlap(candidate.reference, record.main_passage):
+                continue
+            counts[candidate.candidate_id] += 1
+            if record.status == "reserved":
+                reserved.add(candidate.candidate_id)
+            break
+    return counts, reserved
+
+
+def catalog_capacity_summary(
+    catalog: VerseCatalog,
+    usage: VerseUsageIndex,
+    *,
+    video_format: Literal["landscape", "short"],
+) -> dict[str, int | str]:
+    counts, reserved = _main_candidate_usage(catalog, usage, video_format=video_format)
+    minimum_usage = min(counts.values(), default=0)
+    available = sum(
+        count == minimum_usage and candidate_id not in reserved
+        for candidate_id, count in counts.items()
+    )
+    return {
+        "video_format": video_format,
+        "catalog_candidates": len(catalog.candidates),
+        "selection_cycle": minimum_usage + 1,
+        "available_in_cycle": available,
+        "reserved_main_passages": len(reserved),
     }
+
+
+def eligible_main_candidate_ids(
+    catalog: VerseCatalog,
+    usage: VerseUsageIndex,
+    *,
+    video_format: Literal["landscape", "short"],
+) -> set[str]:
+    counts, reserved = _main_candidate_usage(catalog, usage, video_format=video_format)
+    minimum_usage = min(counts.values(), default=0)
+    return {
+        candidate_id
+        for candidate_id, count in counts.items()
+        if count == minimum_usage and candidate_id not in reserved
+    }
+
+
+def select_unused_verse(
+    catalog: VerseCatalog,
+    usage: VerseUsageIndex,
+    *,
+    video_format: Literal["landscape", "short"] = "short",
+) -> tuple[VerseCandidate, float]:
+    counts, reserved = _main_candidate_usage(catalog, usage, video_format=video_format)
+    minimum_usage = min(counts.values(), default=0)
     available = [
         candidate
         for candidate in catalog.candidates
-        if _plain(candidate.central_theme) not in used_topics
-        and not any(
-            references_overlap(candidate.reference, reference) for reference in used_references
-        )
+        if counts[candidate.candidate_id] == minimum_usage
+        and candidate.candidate_id not in reserved
     ]
     if not available:
-        raise RuntimeError("O catálogo de versículos para Shorts foi esgotado.")
+        raise RuntimeError(
+            "Todas as passagens principais deste formato estão reservadas por jobs ativos."
+        )
 
-    recent = sorted(usage.records, key=lambda item: item.created_at, reverse=True)[:8]
+    format_records = [record for record in usage.records if record.video_format == video_format]
+    recent = sorted(format_records, key=lambda item: item.created_at, reverse=True)[:8]
     recent_books = Counter(
         token.split("|", 1)[0] for record in recent for token in record.normalized_references
     )
     recent_themes = Counter(theme for record in recent for theme in record.themes)
     testament_counts = Counter()
-    for record in usage.records:
+    for record in format_records:
         for candidate in catalog.candidates:
             if record.main_passage and references_overlap(candidate.reference, record.main_passage):
                 testament_counts[candidate.testament] += 1
@@ -568,6 +684,7 @@ def select_unused_verse(
         score -= recent_books[book_token] * 16
         score -= sum(recent_themes[theme] for theme in candidate.themes) * 7
         score -= testament_counts[candidate.testament] * 2
+        score -= counts[candidate.candidate_id] * 250
         scored.append((score, -order, candidate))
     score, _, selected = max(scored, key=lambda item: (item[0], item[1]))
     return selected, round(score, 2)
@@ -617,7 +734,11 @@ def create_auto_video(
             VerseUsageIndex,
             tuple[VerseCandidate, float, VerseUsageIndex, str | None],
         ]:
-            candidate, score = select_unused_verse(catalog, usage)
+            candidate, score = select_unused_verse(
+                catalog,
+                usage,
+                video_format=video_format,
+            )
             retention_archetype = (
                 select_retention_archetype(candidate, usage) if video_format == "short" else None
             )

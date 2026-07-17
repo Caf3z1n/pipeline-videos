@@ -157,11 +157,23 @@ Instalação, estados da fila, segurança dos segredos e serviço systemd estão
 [Produção remota](docs/remote-production.md).
 
 Esse comando consulta o catálogo bíblico local em domínio público, combina o histórico das pastas
-com o registro Git compartilhado, escolhe um versículo-base inédito com variedade de livro e tema,
+e o banco curado de expansão BPM com o registro Git compartilhado, escolhe um versículo-base com
+variedade de livro e tema,
 e preenche automaticamente `briefing.json` e `sources.json`. A varredura inclui passagem principal,
 referências complementares, fontes e bases bíblicas do roteiro. `projects/verse-usage.json` continua
 como cache legível; a autoridade de coordenação é `content-registry.json` no repositório Git bare
 descrito em [Produção remota](docs/remote-production.md). A reserva é commitada antes da criação.
+
+Passagens principais são controladas por formato: um uso principal em vídeo longo não esgota o
+estoque dos Shorts, e citações complementares de longos não bloqueiam nenhum futuro tema principal.
+O banco de expansão é carregado automaticamente antes da seleção. Quando todas as passagens
+principais de um formato completam um ciclo, o seletor inicia outro pela passagem menos utilizada,
+sem reutilizar referências ainda reservadas por jobs ativos. Consulte a capacidade sem reservar:
+
+```powershell
+uv run pipeline-videos catalog status --format short
+uv run pipeline-videos catalog status --format long
+```
 
 O projeto já nasce com `retention_story_v2`: cold open de até dois segundos, conflito concreto,
 citação literal entre 8 e 20 segundos, progressão, reengajamento, payoff, aplicação e CTA de uma

@@ -458,10 +458,10 @@ def _available_verse_candidates(
     layout: ProjectLayout,
     *,
     projects_root: Path,
-) -> tuple[list[VerseCandidate], str | None]:
+) -> tuple[list[VerseCandidate], str | None, set[str]]:
     from pipeline_videos.verse_selection import (
+        eligible_main_candidate_ids,
         load_verse_catalog,
-        references_overlap,
         sync_shared_usage,
     )
 
@@ -479,20 +479,20 @@ def _available_verse_candidates(
         None,
     )
     usage = sync_shared_usage(projects_root, catalog=catalog)
-    project_id = layout.load_manifest().project_id
-    used_elsewhere = [
-        reference
-        for record in usage.records
-        if record.project_id != project_id
-        for reference in record.references
-    ]
-    available = [
-        candidate
-        for candidate in catalog.candidates
-        if candidate.candidate_id == current_main
-        or not any(references_overlap(candidate.reference, used) for used in used_elsewhere)
-    ]
-    return available, current_main
+    project = layout.load_manifest()
+    main_eligible = eligible_main_candidate_ids(
+        catalog,
+        usage,
+        video_format=project.video_format,
+    )
+    if current_main:
+        main_eligible.add(current_main)
+    available = (
+        [candidate for candidate in catalog.candidates if candidate.candidate_id in main_eligible]
+        if project.video_format == "short"
+        else list(catalog.candidates)
+    )
+    return available, current_main, main_eligible
 
 
 def _editorial_context_ready(layout: ProjectLayout) -> bool:
@@ -534,7 +534,10 @@ def _editorial_sources_phase_spec(
     from pipeline_videos.editorial import citation_target_range
 
     project = layout.load_manifest()
-    candidates, current_main = _available_verse_candidates(layout, projects_root=projects_root)
+    candidates, current_main, main_eligible = _available_verse_candidates(
+        layout,
+        projects_root=projects_root,
+    )
     desired_count = 1
     if project.video_format != "short":
         desired_count, _ = citation_target_range(
@@ -553,6 +556,7 @@ def _editorial_sources_phase_spec(
             "video_format": job.request.video_format,
             "desired_candidate_count": desired_count,
             "required_main_candidate_id": current_main,
+            "main_eligible_candidate_ids": sorted(main_eligible),
             "candidates": [
                 {
                     "candidate_id": candidate.candidate_id,
@@ -582,6 +586,7 @@ def _editorial_sources_phase_spec(
             "instructions": [
                 "Escolha somente candidate_id fornecido; nunca invente passagem ou texto.",
                 "Mantenha required_main_candidate_id como principal quando ele estiver preenchido.",
+                "Escolha o principal somente entre main_eligible_candidate_ids.",
                 "Selecione exatamente desired_candidate_count IDs distintos contando o principal.",
                 "Prefira passagens complementares coerentes, sem transformar promessa em garantia.",
                 f"Grave apenas JSON válido em {output}.",
@@ -640,12 +645,17 @@ def _import_editorial_source_selection(
     )
 
     selection = read_json(selection_path)
-    candidates, current_main = _available_verse_candidates(layout, projects_root=projects_root)
+    candidates, current_main, main_eligible = _available_verse_candidates(
+        layout,
+        projects_root=projects_root,
+    )
     by_id = {candidate.candidate_id: candidate for candidate in candidates}
     main_id = str(selection.get("main_candidate_id", ""))
     supporting = [str(item) for item in selection.get("supporting_candidate_ids", [])]
     if current_main and main_id != current_main:
         raise ValueError("A seleção remota tentou trocar a passagem principal já reservada.")
+    if main_id not in main_eligible:
+        raise ValueError("A passagem principal não está elegível no ciclo atual deste formato.")
     selected_ids = list(dict.fromkeys([main_id, *supporting]))
     project = layout.load_manifest()
     desired_count = 1

@@ -12,6 +12,12 @@ projetos como fonte de verdade. Local e VPS fazem push fast-forward: em concorr�
 rejeitado recarrega o JSON e repete a seleção antes de criar o projeto. Indisponibilidade bloqueia a
 seleção em vez de usar um cache local possivelmente divergente.
 
+O registro distingue passagem principal de referências complementares e mantém ciclos separados
+para `short` e `landscape`. Somente outra passagem principal do mesmo formato participa do bloqueio
+de repetição; citações de apoio de vídeos longos podem reaparecer e continuam disponíveis como tema
+principal de Short. O catálogo base é ampliado pelo banco curado BPM antes da seleção. Ao completar
+todo o conjunto, um novo ciclo começa pela menor frequência de uso, preservando reservas ativas.
+
 ```mermaid
 flowchart LR
     B["Briefing e fontes"] --> S["Roteiro versionado"]

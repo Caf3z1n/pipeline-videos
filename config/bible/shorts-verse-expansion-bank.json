@@ -1,0 +1,2267 @@
+{
+  "schema_version": "1.0",
+  "catalog_id": "shorts-bpm-public-domain-expansion-v1",
+  "translation": "Bíblia Portuguesa Mundial (BPM)",
+  "publisher": "eBible.org",
+  "source_url": "https://ebible.org/details.php?id=porbrbsl",
+  "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+  "accessed_at": "2026-07-17",
+  "candidates": [
+    {
+      "candidate_id": "bpm-genesis-50-20",
+      "source_id": "bpm-genesis-50-20",
+      "reference": "Gênesis 50:20",
+      "context_reference": "Gênesis 50:15-21",
+      "book": "Gênesis",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Quanto a vocês, vocês planejaram o mal contra mim, mas Deus o planejou para o bem, para conservar muitas pessoas vivas, como está acontecendo hoje.",
+      "source_url": "https://ebible.org/porbrbsl/GEN50.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Quando o mal não recebe a palavra final",
+      "slug": "genesis-50-20-providencia",
+      "central_theme": "Providência e responsabilidade.",
+      "practical_application": "Reconhecer a dor sem chamar o mal de bem e escolher uma resposta fiel.",
+      "themes": [
+        "providencia",
+        "e",
+        "responsabilidade"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Quando o mal não recebe a palavra final",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-deuteronomio-6-5",
+      "source_id": "bpm-deuteronomio-6-5",
+      "reference": "Deuteronômio 6:5",
+      "context_reference": "Deuteronômio 6:4-9",
+      "book": "Deuteronômio",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Você amará o SENHOR, seu Deus, de todo o seu coração, de toda a sua alma e de todas as suas forças.",
+      "source_url": "https://ebible.org/porbrbsl/DEU06.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Amar a Deus por inteiro",
+      "slug": "deuteronomio-6-5-amor",
+      "central_theme": "Amor a deus na vida cotidiana.",
+      "practical_application": "Reordenar uma decisão concreta para amar a Deus com toda a vida.",
+      "themes": [
+        "amor",
+        "a",
+        "deus",
+        "na",
+        "vida",
+        "cotidiana"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Amar a Deus por inteiro",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-salmos-23-1",
+      "source_id": "bpm-salmos-23-1",
+      "reference": "Salmos 23:1",
+      "context_reference": "Salmos 23:1-4",
+      "book": "Salmos",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Um Salmo de Davi. O SENHOR é o meu pastor; nada me faltará.",
+      "source_url": "https://ebible.org/porbrbsl/PSA023.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "O cuidado de Deus no caminho",
+      "slug": "salmos-23-1-cuidado",
+      "central_theme": "Cuidado de deus.",
+      "practical_application": "Identificar onde a ansiedade tenta assumir o controle e confiar o próximo passo a Deus.",
+      "themes": [
+        "cuidado",
+        "de",
+        "deus"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "O cuidado de Deus no caminho",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-salmos-27-1",
+      "source_id": "bpm-salmos-27-1",
+      "reference": "Salmos 27:1",
+      "context_reference": "Salmos 27:1-5",
+      "book": "Salmos",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "De Davi. O SENHOR é a minha luz e a minha salvação. A quem temerei? O SENHOR é a fortaleza da minha vida. De quem terei medo?",
+      "source_url": "https://ebible.org/porbrbsl/PSA027.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Quando o medo perde o comando",
+      "slug": "salmos-27-1-confianca",
+      "central_theme": "Confiança em meio ao medo.",
+      "practical_application": "Nomear o medo sem entregar a ele a direção das escolhas.",
+      "themes": [
+        "confianca",
+        "em",
+        "meio",
+        "ao",
+        "medo"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Quando o medo perde o comando",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-salmos-46-1",
+      "source_id": "bpm-salmos-46-1",
+      "reference": "Salmos 46:1",
+      "context_reference": "Salmos 46:1-3",
+      "book": "Salmos",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Para o mestre de música. Dos filhos de Corá. De acordo com Alamote. Deus é o nosso refúgio e fortaleza, socorro bem presente na angústia.",
+      "source_url": "https://ebible.org/porbrbsl/PSA046.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Refúgio quando tudo parece instável",
+      "slug": "salmos-46-1-refugio",
+      "central_theme": "Refúgio em deus.",
+      "practical_application": "Buscar em Deus estabilidade antes de reagir ao caos.",
+      "themes": [
+        "refugio",
+        "em",
+        "deus"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Refúgio quando tudo parece instável",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-salmos-91-1",
+      "source_id": "bpm-salmos-91-1",
+      "reference": "Salmos 91:1",
+      "context_reference": "Salmos 91:1-4",
+      "book": "Salmos",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Aquele que habita no esconderijo do Altíssimo descansará à sombra do Todo-Poderoso.",
+      "source_url": "https://ebible.org/porbrbsl/PSA091.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Permanecer perto de Deus",
+      "slug": "salmos-91-1-comunhao",
+      "central_theme": "Comunhão e proteção.",
+      "practical_application": "Cultivar presença e oração sem transformar a passagem em promessa de ausência de sofrimento.",
+      "themes": [
+        "comunhao",
+        "e",
+        "protecao"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Permanecer perto de Deus",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-salmos-121-1-2",
+      "source_id": "bpm-salmos-121-1-2",
+      "reference": "Salmos 121:1-2",
+      "context_reference": "Salmos 121:1-4",
+      "book": "Salmos",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Um Cântico de Subidas. Levantarei os meus olhos para os montes. De onde vem o meu socorro? O meu socorro vem do SENHOR, que fez o céu e a terra.",
+      "source_url": "https://ebible.org/porbrbsl/PSA121.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "De onde vem o socorro",
+      "slug": "salmos-121-1-2-socorro",
+      "central_theme": "Socorro de deus.",
+      "practical_application": "Trocar a autossuficiência por uma busca concreta do auxílio de Deus.",
+      "themes": [
+        "socorro",
+        "de",
+        "deus"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "De onde vem o socorro",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-salmos-139-23-24",
+      "source_id": "bpm-salmos-139-23-24",
+      "reference": "Salmos 139:23-24",
+      "context_reference": "Salmos 139:23-24",
+      "book": "Salmos",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Sonda-me, ó Deus, e conhece o meu coração. Prova-me, e conhece os meus pensamentos. Vê se há em mim algum caminho mau, e guia-me pelo caminho eterno.",
+      "source_url": "https://ebible.org/porbrbsl/PSA139.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "A coragem de pedir exame",
+      "slug": "salmos-139-23-24-arrependimento",
+      "central_theme": "Arrependimento e direção.",
+      "practical_application": "Abrir uma área da vida à correção de Deus e responder com honestidade.",
+      "themes": [
+        "arrependimento",
+        "e",
+        "direcao"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "A coragem de pedir exame",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-proverbios-4-23",
+      "source_id": "bpm-proverbios-4-23",
+      "reference": "Provérbios 4:23",
+      "context_reference": "Provérbios 4:20-27",
+      "book": "Provérbios",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Guarde o seu coração com toda a diligência, pois dele procedem as fontes da vida.",
+      "source_url": "https://ebible.org/porbrbsl/PRO04.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "O que você permite criar raízes",
+      "slug": "proverbios-4-23-cuidado",
+      "central_theme": "Cuidado com o coração.",
+      "practical_application": "Observar o que tem alimentado pensamentos e decisões e estabelecer um limite saudável.",
+      "themes": [
+        "cuidado",
+        "com",
+        "o",
+        "coracao"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "O que você permite criar raízes",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-proverbios-16-3",
+      "source_id": "bpm-proverbios-16-3",
+      "reference": "Provérbios 16:3",
+      "context_reference": "Provérbios 16:1-9",
+      "book": "Provérbios",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Consagre ao SENHOR tudo o que você faz, e os seus planos serão bem-sucedidos.",
+      "source_url": "https://ebible.org/porbrbsl/PRO16.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Entregar os planos antes de avançar",
+      "slug": "proverbios-16-3-planos",
+      "central_theme": "Planos submetidos a deus.",
+      "practical_application": "Apresentar a Deus um plano real e aceitar correção de rota.",
+      "themes": [
+        "planos",
+        "submetidos",
+        "a",
+        "deus"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Entregar os planos antes de avançar",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-proverbios-17-17",
+      "source_id": "bpm-proverbios-17-17",
+      "reference": "Provérbios 17:17",
+      "context_reference": "Provérbios 17:17",
+      "book": "Provérbios",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "O amigo ama em todos os momentos; e um irmão nasce para a hora da adversidade.",
+      "source_url": "https://ebible.org/porbrbsl/PRO17.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "A amizade que permanece na adversidade",
+      "slug": "proverbios-17-17-amizade",
+      "central_theme": "Amizade e lealdade.",
+      "practical_application": "Praticar presença fiel com alguém que atravessa um momento difícil.",
+      "themes": [
+        "amizade",
+        "e",
+        "lealdade"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "A amizade que permanece na adversidade",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-isaias-40-31",
+      "source_id": "bpm-isaias-40-31",
+      "reference": "Isaías 40:31",
+      "context_reference": "Isaías 40:27-31",
+      "book": "Isaías",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "mas aqueles que esperam no SENHOR renovarão as suas forças. Eles subirão com asas como águias. Eles correrão, e não se cansarão. Eles caminharão, e não desfalecerão.",
+      "source_url": "https://ebible.org/porbrbsl/ISA40.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Força renovada para continuar",
+      "slug": "isaias-40-31-esperanca",
+      "central_theme": "Esperança perseverante.",
+      "practical_application": "Esperar em Deus sem abandonar as responsabilidades do presente.",
+      "themes": [
+        "esperanca",
+        "perseverante"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Força renovada para continuar",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-isaias-43-2",
+      "source_id": "bpm-isaias-43-2",
+      "reference": "Isaías 43:2",
+      "context_reference": "Isaías 43:1-3",
+      "book": "Isaías",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Quando você passar pelas águas, eu estarei com você, e pelos rios, eles não o submergirão. Quando você andar pelo fogo, não se queimará, e a chama não o abrasará.",
+      "source_url": "https://ebible.org/porbrbsl/ISA43.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Deus presente no meio da travessia",
+      "slug": "isaias-43-2-presenca",
+      "central_theme": "Presença de deus no sofrimento.",
+      "practical_application": "Atravessar a dificuldade com apoio, prudência e consciência da presença de Deus.",
+      "themes": [
+        "presenca",
+        "de",
+        "deus",
+        "no",
+        "sofrimento"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Deus presente no meio da travessia",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-jeremias-29-11",
+      "source_id": "bpm-jeremias-29-11",
+      "reference": "Jeremias 29:11",
+      "context_reference": "Jeremias 29:10-14",
+      "book": "Jeremias",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Pois eu sei os pensamentos que tenho a respeito de vocês”, diz o SENHOR, “pensamentos de paz, e não de mal, para dar a vocês esperança e um futuro.",
+      "source_url": "https://ebible.org/porbrbsl/JER29.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Esperança dentro de uma espera longa",
+      "slug": "jeremias-29-11-esperanca",
+      "central_theme": "Esperança no exílio.",
+      "practical_application": "Preservar esperança sem transformar a promessa dada aos exilados em garantia imediata pessoal.",
+      "themes": [
+        "esperanca",
+        "no",
+        "exilio"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Esperança dentro de uma espera longa",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-lamentacoes-3-22-23",
+      "source_id": "bpm-lamentacoes-3-22-23",
+      "reference": "Lamentações 3:22-23",
+      "context_reference": "Lamentações 3:19-26",
+      "book": "Lamentações",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "É por causa das bondades do SENHOR que não somos consumidos, porque as suas misericórdias não falham. Elas se renovam a cada manhã. Grande é a sua fidelidade.",
+      "source_url": "https://ebible.org/porbrbsl/LAM03.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Misericórdias novas em dias difíceis",
+      "slug": "lamentacoes-3-22-23-misericordia",
+      "central_theme": "Misericórdia e fidelidade.",
+      "practical_application": "Reconhecer uma evidência concreta da misericórdia de Deus mesmo durante a dor.",
+      "themes": [
+        "misericordia",
+        "e",
+        "fidelidade"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Misericórdias novas em dias difíceis",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-miqueias-7-8",
+      "source_id": "bpm-miqueias-7-8",
+      "reference": "Miqueias 7:8",
+      "context_reference": "Miqueias 7:7-9",
+      "book": "Miqueias",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Não se regozije contra mim, meu inimigo. Quando eu cair, eu irei me levantar. Quando eu sentar na escuridão, Yahweh será uma luz para mim.",
+      "source_url": "https://ebible.org/porbrbsl/MIC07.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Levantar depois da queda",
+      "slug": "miqueias-7-8-recomeco",
+      "central_theme": "Recomeço e esperança.",
+      "practical_application": "Assumir a queda, buscar restauração e dar um passo responsável de recomeço.",
+      "themes": [
+        "recomeco",
+        "e",
+        "esperanca"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Levantar depois da queda",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-habacuque-3-17-18",
+      "source_id": "bpm-habacuque-3-17-18",
+      "reference": "Habacuque 3:17-18",
+      "context_reference": "Habacuque 3:17-19",
+      "book": "Habacuque",
+      "testament": "old",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Pois ainda que a figueira não floresça, nem haja fruto nas videiras, o trabalho da oliveira falhe, os campos não produzam alimento, os rebanhos sejam cortados do aprisco, e não haja gado nos currais, ainda assim eu me alegrarei no SENHOR. Eu exultarei no Deus da minha salvação!",
+      "source_url": "https://ebible.org/porbrbsl/HAB03.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Alegria quando as circunstâncias falham",
+      "slug": "habacuque-3-17-18-fe",
+      "central_theme": "Fé sem negação da perda.",
+      "practical_application": "Distinguir alegria em Deus de negação emocional ou passividade diante da perda.",
+      "themes": [
+        "fe",
+        "sem",
+        "negacao",
+        "da",
+        "perda"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Alegria quando as circunstâncias falham",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-mateus-6-33",
+      "source_id": "bpm-mateus-6-33",
+      "reference": "Mateus 6:33",
+      "context_reference": "Mateus 6:25-34",
+      "book": "Mateus",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Mas busquem primeiro o Reino de Deus e a sua justiça, e todas essas coisas lhes serão acrescentadas.",
+      "source_url": "https://ebible.org/porbrbsl/MAT06.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "O que vem primeiro quando a ansiedade cresce",
+      "slug": "mateus-6-33-prioridades",
+      "central_theme": "Prioridades e ansiedade.",
+      "practical_application": "Reordenar a agenda de hoje a partir do Reino de Deus e da justiça.",
+      "themes": [
+        "prioridades",
+        "e",
+        "ansiedade"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "O que vem primeiro quando a ansiedade cresce",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-mateus-7-12",
+      "source_id": "bpm-mateus-7-12",
+      "reference": "Mateus 7:12",
+      "context_reference": "Mateus 7:7-12",
+      "book": "Mateus",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Portanto, tudo o que vocês desejam que os homens lhes façam, façam também a eles; pois esta é a lei e os profetas.",
+      "source_url": "https://ebible.org/porbrbsl/MAT07.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "A medida que você usa com os outros",
+      "slug": "mateus-7-12-empatia",
+      "central_theme": "Empatia e responsabilidade.",
+      "practical_application": "Tomar uma decisão tratando o outro com a dignidade que você gostaria de receber.",
+      "themes": [
+        "empatia",
+        "e",
+        "responsabilidade"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "A medida que você usa com os outros",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-mateus-11-29",
+      "source_id": "bpm-mateus-11-29",
+      "reference": "Mateus 11:29",
+      "context_reference": "Mateus 11:28-30",
+      "book": "Mateus",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Tomem sobre vocês o meu jugo e aprendam de mim, pois sou manso e humilde de coração; e vocês encontrarão descanso para as suas almas.",
+      "source_url": "https://ebible.org/porbrbsl/MAT11.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Aprender o ritmo de Jesus",
+      "slug": "mateus-11-29-mansidao",
+      "central_theme": "Mansidão e descanso.",
+      "practical_application": "Trocar uma carga autodestrutiva por obediência, limites e aprendizado com Jesus.",
+      "themes": [
+        "mansidao",
+        "e",
+        "descanso"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Aprender o ritmo de Jesus",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-mateus-22-37",
+      "source_id": "bpm-mateus-22-37",
+      "reference": "Mateus 22:37",
+      "context_reference": "Mateus 22:34-40",
+      "book": "Mateus",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Jesus lhe disse: “‘Ame ao Senhor, seu Deus, de todo o seu coração, de toda a sua alma e de todo o seu entendimento.’",
+      "source_url": "https://ebible.org/porbrbsl/MAT22.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "O amor que organiza todos os outros",
+      "slug": "mateus-22-37-amor",
+      "central_theme": "Amor integral a deus.",
+      "practical_application": "Avaliar qual escolha demonstra amor a Deus com mente, coração e ações.",
+      "themes": [
+        "amor",
+        "integral",
+        "a",
+        "deus"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "O amor que organiza todos os outros",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-marcos-10-27",
+      "source_id": "bpm-marcos-10-27",
+      "reference": "Marcos 10:27",
+      "context_reference": "Marcos 10:23-31",
+      "book": "Marcos",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Jesus, olhando para eles, disse: “Para os homens isso é impossível, mas não para Deus; pois para Deus todas as coisas são possíveis.”",
+      "source_url": "https://ebible.org/porbrbsl/MRK10.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Quando suas forças não bastam",
+      "slug": "marcos-10-27-dependencia",
+      "central_theme": "Dependência de deus.",
+      "practical_application": "Reconhecer limites humanos sem usar a fé como desculpa para irresponsabilidade.",
+      "themes": [
+        "dependencia",
+        "de",
+        "deus"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Quando suas forças não bastam",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-lucas-1-37",
+      "source_id": "bpm-lucas-1-37",
+      "reference": "Lucas 1:37",
+      "context_reference": "Lucas 1:26-38",
+      "book": "Lucas",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Pois nada falado por Deus é impossível.”",
+      "source_url": "https://ebible.org/porbrbsl/LUK01.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Nada é impossível para Deus",
+      "slug": "lucas-1-37-fe",
+      "central_theme": "Fé e submissão.",
+      "practical_application": "Responder a Deus com fé sem transformar a passagem em autorização para qualquer desejo pessoal.",
+      "themes": [
+        "fe",
+        "e",
+        "submissao"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Nada é impossível para Deus",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-lucas-6-31",
+      "source_id": "bpm-lucas-6-31",
+      "reference": "Lucas 6:31",
+      "context_reference": "Lucas 6:27-36",
+      "book": "Lucas",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "“Como vocês querem que as pessoas lhes façam, façam exatamente assim a elas.",
+      "source_url": "https://ebible.org/porbrbsl/LUK06.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Como tratar quem não facilita",
+      "slug": "lucas-6-31-misericordia",
+      "central_theme": "Misericórdia e reciprocidade.",
+      "practical_application": "Praticar bondade com limites e sem encobrir abuso ou injustiça.",
+      "themes": [
+        "misericordia",
+        "e",
+        "reciprocidade"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Como tratar quem não facilita",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-joao-3-16",
+      "source_id": "bpm-joao-3-16",
+      "reference": "João 3:16",
+      "context_reference": "João 3:14-18",
+      "book": "João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Porque Deus amou o mundo de tal maneira que deu o seu Filho unigênito, para que todo aquele que nele crê não pereça, mas tenha a vida eterna.",
+      "source_url": "https://ebible.org/porbrbsl/JHN03.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "O amor que Deus demonstrou",
+      "slug": "joao-3-16-amor",
+      "central_theme": "Amor e salvação.",
+      "practical_application": "Receber o amor de Deus e responder com fé que produz uma vida transformada.",
+      "themes": [
+        "amor",
+        "e",
+        "salvacao"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "O amor que Deus demonstrou",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-joao-8-12",
+      "source_id": "bpm-joao-8-12",
+      "reference": "João 8:12",
+      "context_reference": "João 8:12",
+      "book": "João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Novamente, portanto, Jesus lhes falou, dizendo: “Eu sou a luz do mundo. Aquele que me segue não andará nas trevas, mas terá a luz da vida.”",
+      "source_url": "https://ebible.org/porbrbsl/JHN08.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Luz para não caminhar no escuro",
+      "slug": "joao-8-12-direcao",
+      "central_theme": "Direção em jesus.",
+      "practical_application": "Trazer uma decisão escondida para a luz e seguir a direção de Jesus.",
+      "themes": [
+        "direcao",
+        "em",
+        "jesus"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Luz para não caminhar no escuro",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-joao-10-10",
+      "source_id": "bpm-joao-10-10",
+      "reference": "João 10:10",
+      "context_reference": "João 10:7-11",
+      "book": "João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "O ladrão vem somente para roubar, matar e destruir. Eu vim para que tenham vida, e a tenham em abundância.",
+      "source_url": "https://ebible.org/porbrbsl/JHN10.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "A diferença entre roubo e vida",
+      "slug": "joao-10-10-vida",
+      "central_theme": "Vida abundante em jesus.",
+      "practical_application": "Identificar o que destrói silenciosamente e escolher o caminho de Jesus.",
+      "themes": [
+        "vida",
+        "abundante",
+        "em",
+        "jesus"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "A diferença entre roubo e vida",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-joao-11-25",
+      "source_id": "bpm-joao-11-25",
+      "reference": "João 11:25",
+      "context_reference": "João 11:21-27",
+      "book": "João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Jesus lhe disse: “Eu sou a ressurreição e a vida. Aquele que crê em mim, ainda que morra, viverá.",
+      "source_url": "https://ebible.org/porbrbsl/JHN11.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Esperança diante da morte",
+      "slug": "joao-11-25-ressurreicao",
+      "central_theme": "Ressurreição e esperança.",
+      "practical_application": "Sustentar esperança cristã sem minimizar o luto ou apressar a dor.",
+      "themes": [
+        "ressurreicao",
+        "e",
+        "esperanca"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Esperança diante da morte",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-joao-15-5",
+      "source_id": "bpm-joao-15-5",
+      "reference": "João 15:5",
+      "context_reference": "João 15:1-8",
+      "book": "João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Eu sou a videira. Vocês são os ramos. Aquele que permanece em mim, e eu nele, esse dá muito fruto, pois sem mim vocês não podem fazer nada.",
+      "source_url": "https://ebible.org/porbrbsl/JHN15.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Fruto não nasce da desconexão",
+      "slug": "joao-15-5-permanecer",
+      "central_theme": "Permanecer em jesus.",
+      "practical_application": "Substituir ativismo vazio por comunhão e obediência consistentes.",
+      "themes": [
+        "permanecer",
+        "em",
+        "jesus"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Fruto não nasce da desconexão",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-joao-16-33",
+      "source_id": "bpm-joao-16-33",
+      "reference": "João 16:33",
+      "context_reference": "João 16:29-33",
+      "book": "João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Eu lhes disse estas coisas para que em mim vocês tenham paz. No mundo vocês têm aflições; mas tenham bom ânimo! Eu venci o mundo.”",
+      "source_url": "https://ebible.org/porbrbsl/JHN16.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Paz sem negar as aflições",
+      "slug": "joao-16-33-paz",
+      "central_theme": "Paz e perseverança.",
+      "practical_application": "Enfrentar a aflição com realismo e confiança em Jesus.",
+      "themes": [
+        "paz",
+        "e",
+        "perseveranca"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Paz sem negar as aflições",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-atos-1-8",
+      "source_id": "bpm-atos-1-8",
+      "reference": "Atos 1:8",
+      "context_reference": "Atos 1:6-9",
+      "book": "Atos",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Mas vocês receberão poder quando o Espírito Santo descer sobre vocês. E serão minhas testemunhas em Jerusalém, em toda a Judeia e Samaria, e até os confins da terra.”",
+      "source_url": "https://ebible.org/porbrbsl/ACT01.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Poder para testemunhar",
+      "slug": "atos-1-8-espirito",
+      "central_theme": "Espírito santo e missão.",
+      "practical_application": "Usar palavras e atitudes para testemunhar com fidelidade, não para buscar prestígio.",
+      "themes": [
+        "espirito",
+        "santo",
+        "e",
+        "missao"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Poder para testemunhar",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-romanos-5-8",
+      "source_id": "bpm-romanos-5-8",
+      "reference": "Romanos 5:8",
+      "context_reference": "Romanos 5:6-11",
+      "book": "Romanos",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Mas Deus demonstra o seu próprio amor para conosco, pelo fato de que, enquanto ainda éramos pecadores, Cristo morreu por nós.",
+      "source_url": "https://ebible.org/porbrbsl/ROM05.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Amados antes de merecer",
+      "slug": "romanos-5-8-graca",
+      "central_theme": "Graça e reconciliação.",
+      "practical_application": "Abandonar a tentativa de merecer o amor de Deus e responder com gratidão.",
+      "themes": [
+        "graca",
+        "e",
+        "reconciliacao"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Amados antes de merecer",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-romanos-8-28",
+      "source_id": "bpm-romanos-8-28",
+      "reference": "Romanos 8:28",
+      "context_reference": "Romanos 8:26-30",
+      "book": "Romanos",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Sabemos que todas as coisas cooperam para o bem daqueles que amam a Deus, daqueles que são chamados segundo o seu propósito.",
+      "source_url": "https://ebible.org/porbrbsl/ROM08.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Deus trabalha sem chamar o mal de bem",
+      "slug": "romanos-8-28-providencia",
+      "central_theme": "Providência no sofrimento.",
+      "practical_application": "Confiar na ação de Deus sem romantizar perdas ou injustiças.",
+      "themes": [
+        "providencia",
+        "no",
+        "sofrimento"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Deus trabalha sem chamar o mal de bem",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-romanos-12-2",
+      "source_id": "bpm-romanos-12-2",
+      "reference": "Romanos 12:2",
+      "context_reference": "Romanos 12:1-2",
+      "book": "Romanos",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Não se conformem com este mundo, mas sejam transformados pela renovação da sua mente, para que possam comprovar qual é a boa, agradável e perfeita vontade de Deus.",
+      "source_url": "https://ebible.org/porbrbsl/ROM12.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "A mudança começa na mente",
+      "slug": "romanos-12-2-renovacao",
+      "central_theme": "Renovação e discernimento.",
+      "practical_application": "Questionar um padrão automático e substituí-lo por uma escolha coerente com Deus.",
+      "themes": [
+        "renovacao",
+        "e",
+        "discernimento"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "A mudança começa na mente",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-romanos-15-13",
+      "source_id": "bpm-romanos-15-13",
+      "reference": "Romanos 15:13",
+      "context_reference": "Romanos 15:7-13",
+      "book": "Romanos",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Ora, que o Deus da esperança os encha de toda alegria e paz na fé, para que vocês transbordem de esperança no poder do Espírito Santo.",
+      "source_url": "https://ebible.org/porbrbsl/ROM15.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Esperança que transborda",
+      "slug": "romanos-15-13-esperanca",
+      "central_theme": "Esperança pelo espírito.",
+      "practical_application": "Alimentar esperança por meio da confiança em Deus e de ações coerentes.",
+      "themes": [
+        "esperanca",
+        "pelo",
+        "espirito"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Esperança que transborda",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-1-corintios-10-13",
+      "source_id": "bpm-1-corintios-10-13",
+      "reference": "1 Coríntios 10:13",
+      "context_reference": "1 Coríntios 10:12-14",
+      "book": "1 Coríntios",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Nenhuma tentação sobreveio a vocês, senão a que é comum aos homens. E Deus é fiel; ele não permitirá que vocês sejam tentados além do que podem suportar, mas com a tentação também providenciará uma saída, para que a possam suportar.",
+      "source_url": "https://ebible.org/porbrbsl/1CO10.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "A saída no meio da tentação",
+      "slug": "1-corintios-10-13-tentacao",
+      "central_theme": "Tentação e responsabilidade.",
+      "practical_application": "Identificar antecipadamente uma saída concreta e pedir ajuda antes da queda.",
+      "themes": [
+        "tentacao",
+        "e",
+        "responsabilidade"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "A saída no meio da tentação",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-1-corintios-13-4-5",
+      "source_id": "bpm-1-corintios-13-4-5",
+      "reference": "1 Coríntios 13:4-5",
+      "context_reference": "1 Coríntios 13:1-7",
+      "book": "1 Coríntios",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "O amor é paciente e é bondoso. O amor não inveja. O amor não se vangloria, não se orgulha, não se comporta de maneira inadequada, não busca os seus próprios interesses, não se irrita, não leva em conta o mal;",
+      "source_url": "https://ebible.org/porbrbsl/1CO13.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "O amor aparece no comportamento",
+      "slug": "1-corintios-13-4-5-amor",
+      "central_theme": "Amor paciente e responsável.",
+      "practical_application": "Transformar uma qualidade do amor em uma atitude observável hoje.",
+      "themes": [
+        "amor",
+        "paciente",
+        "e",
+        "responsavel"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "O amor aparece no comportamento",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-1-corintios-16-14",
+      "source_id": "bpm-1-corintios-16-14",
+      "reference": "1 Coríntios 16:14",
+      "context_reference": "1 Coríntios 16:13-14",
+      "book": "1 Coríntios",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Que tudo o que vocês fizerem seja feito com amor.",
+      "source_url": "https://ebible.org/porbrbsl/1CO16.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Firmeza sem perder o amor",
+      "slug": "1-corintios-16-14-coragem",
+      "central_theme": "Coragem e amor.",
+      "practical_application": "Agir com firmeza mantendo respeito, verdade e amor.",
+      "themes": [
+        "coragem",
+        "e",
+        "amor"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Firmeza sem perder o amor",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-2-corintios-4-8-9",
+      "source_id": "bpm-2-corintios-4-8-9",
+      "reference": "2 Coríntios 4:8-9",
+      "context_reference": "2 Coríntios 4:7-12",
+      "book": "2 Coríntios",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Somos pressionados de todos os lados, mas não esmagados; perplexos, mas não desesperados; perseguidos, mas não desamparados; abatidos, mas não destruídos;",
+      "source_url": "https://ebible.org/porbrbsl/2CO04.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Pressionados, mas não abandonados",
+      "slug": "2-corintios-4-8-9-resiliencia",
+      "central_theme": "Resiliência e presença de deus.",
+      "practical_application": "Buscar apoio e perseverar sem fingir que a pressão não existe.",
+      "themes": [
+        "resiliencia",
+        "e",
+        "presenca",
+        "de",
+        "deus"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Pressionados, mas não abandonados",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-2-corintios-5-17",
+      "source_id": "bpm-2-corintios-5-17",
+      "reference": "2 Coríntios 5:17",
+      "context_reference": "2 Coríntios 5:14-21",
+      "book": "2 Coríntios",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Portanto, se alguém está em Cristo, é uma nova criação. As coisas antigas já passaram. Eis que, todas as coisas se tornaram novas.",
+      "source_url": "https://ebible.org/porbrbsl/2CO05.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Uma nova vida começa em Cristo",
+      "slug": "2-corintios-5-17-nova",
+      "central_theme": "Nova criação.",
+      "practical_application": "Romper com um padrão antigo por meio de arrependimento e prática renovada.",
+      "themes": [
+        "nova",
+        "criacao"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Uma nova vida começa em Cristo",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-2-corintios-12-9",
+      "source_id": "bpm-2-corintios-12-9",
+      "reference": "2 Coríntios 12:9",
+      "context_reference": "2 Coríntios 12:7-10",
+      "book": "2 Coríntios",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Ele me disse: “A minha graça é suficiente para você, pois o meu poder se aperfeiçoa na fraqueza.” Portanto, de boa vontade me gloriarei ainda mais nas minhas fraquezas, para que o poder de Cristo arme sua tenda sobre mim.",
+      "source_url": "https://ebible.org/porbrbsl/2CO12.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Graça suficiente na fraqueza",
+      "slug": "2-corintios-12-9-graca",
+      "central_theme": "Graça e limites humanos.",
+      "practical_application": "Receber ajuda e depender da graça sem glorificar sofrimento evitável.",
+      "themes": [
+        "graca",
+        "e",
+        "limites",
+        "humanos"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Graça suficiente na fraqueza",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-galatas-5-22-23",
+      "source_id": "bpm-galatas-5-22-23",
+      "reference": "Gálatas 5:22-23",
+      "context_reference": "Gálatas 5:16-25",
+      "book": "Gálatas",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Mas o fruto do Espírito é amor, alegria, paz, paciência, benignidade, bondade, fé, mansidão e domínio próprio. Contra tais coisas não há lei.",
+      "source_url": "https://ebible.org/porbrbsl/GAL05.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "O fruto que revela a raiz",
+      "slug": "galatas-5-22-23-fruto",
+      "central_theme": "Fruto do espírito.",
+      "practical_application": "Escolher uma prática que cultive um aspecto do fruto do Espírito.",
+      "themes": [
+        "fruto",
+        "do",
+        "espirito"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "O fruto que revela a raiz",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-efesios-2-8-9",
+      "source_id": "bpm-efesios-2-8-9",
+      "reference": "Efésios 2:8-9",
+      "context_reference": "Efésios 2:1-10",
+      "book": "Efésios",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "pois pela graça vocês foram salvos por meio da fé, e isso não vem de vocês; é dom de Deus, não de obras, para que ninguém se glorie.",
+      "source_url": "https://ebible.org/porbrbsl/EPH02.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Salvos pela graça, não pelo desempenho",
+      "slug": "efesios-2-8-9-graca",
+      "central_theme": "Graça e fé.",
+      "practical_application": "Parar de negociar mérito com Deus e viver boas obras como resposta, não pagamento.",
+      "themes": [
+        "graca",
+        "e",
+        "fe"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Salvos pela graça, não pelo desempenho",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-efesios-4-32",
+      "source_id": "bpm-efesios-4-32",
+      "reference": "Efésios 4:32",
+      "context_reference": "Efésios 4:25-32",
+      "book": "Efésios",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "E sejam bondosos uns para com os outros, compassivos, perdoando-se mutuamente, assim como Deus também os perdoou em Cristo.",
+      "source_url": "https://ebible.org/porbrbsl/EPH04.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Bondade que não apaga a verdade",
+      "slug": "efesios-4-32-perdao",
+      "central_theme": "Perdão e compaixão.",
+      "practical_application": "Praticar compaixão e perdão com verdade, prudência e limites.",
+      "themes": [
+        "perdao",
+        "e",
+        "compaixao"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Bondade que não apaga a verdade",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-efesios-6-10",
+      "source_id": "bpm-efesios-6-10",
+      "reference": "Efésios 6:10",
+      "context_reference": "Efésios 6:10-18",
+      "book": "Efésios",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Finalmente, fortaleçam-se no Senhor e na força do seu poder.",
+      "source_url": "https://ebible.org/porbrbsl/EPH06.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Força para permanecer firme",
+      "slug": "efesios-6-10-forca",
+      "central_theme": "Força no senhor.",
+      "practical_application": "Preparar-se espiritualmente para uma pressão real sem demonizar pessoas.",
+      "themes": [
+        "forca",
+        "no",
+        "senhor"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Força para permanecer firme",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-filipenses-4-6-7",
+      "source_id": "bpm-filipenses-4-6-7",
+      "reference": "Filipenses 4:6-7",
+      "context_reference": "Filipenses 4:4-9",
+      "book": "Filipenses",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Não andem ansiosos por coisa alguma, mas em tudo, pela oração e súplica com ações de graças, que os seus pedidos sejam conhecidos diante de Deus. E a paz de Deus, que excede todo o entendimento, guardará os seus corações e os seus pensamentos em Cristo Jesus.",
+      "source_url": "https://ebible.org/porbrbsl/PHP04.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Ansiedade levada à oração",
+      "slug": "filipenses-4-6-7-oracao",
+      "central_theme": "Oração e ansiedade.",
+      "practical_application": "Levar uma preocupação específica a Deus e buscar também o cuidado responsável necessário.",
+      "themes": [
+        "oracao",
+        "e",
+        "ansiedade"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Ansiedade levada à oração",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-filipenses-4-13",
+      "source_id": "bpm-filipenses-4-13",
+      "reference": "Filipenses 4:13",
+      "context_reference": "Filipenses 4:10-13",
+      "book": "Filipenses",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Posso todas as coisas por meio de Cristo que me fortalece.",
+      "source_url": "https://ebible.org/porbrbsl/PHP04.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Força para atravessar toda circunstância",
+      "slug": "filipenses-4-13-contentamento",
+      "central_theme": "Contentamento em cristo.",
+      "practical_application": "Receber força para fidelidade em abundância ou necessidade, sem prometer sucesso ilimitado.",
+      "themes": [
+        "contentamento",
+        "em",
+        "cristo"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Força para atravessar toda circunstância",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-colossenses-3-12",
+      "source_id": "bpm-colossenses-3-12",
+      "reference": "Colossenses 3:12",
+      "context_reference": "Colossenses 3:12-17",
+      "book": "Colossenses",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Revistam-se, portanto, como eleitos de Deus, santos e amados, de um coração de compaixão, bondade, humildade, mansidão e perseverança;",
+      "source_url": "https://ebible.org/porbrbsl/COL03.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Vestir-se de misericórdia",
+      "slug": "colossenses-3-12-carater",
+      "central_theme": "Caráter cristão.",
+      "practical_application": "Escolher uma resposta marcada por compaixão, humildade e paciência.",
+      "themes": [
+        "carater",
+        "cristao"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Vestir-se de misericórdia",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-colossenses-3-23",
+      "source_id": "bpm-colossenses-3-23",
+      "reference": "Colossenses 3:23",
+      "context_reference": "Colossenses 3:22-24",
+      "book": "Colossenses",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "E tudo o que fizerem, trabalhem de todo o coração, como para o Senhor e não para os homens,",
+      "source_url": "https://ebible.org/porbrbsl/COL03.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Trabalhar com inteireza",
+      "slug": "colossenses-3-23-trabalho",
+      "central_theme": "Trabalho e propósito.",
+      "practical_application": "Realizar uma responsabilidade com integridade sem aceitar exploração como vontade de Deus.",
+      "themes": [
+        "trabalho",
+        "e",
+        "proposito"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Trabalhar com inteireza",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-1-tessalonicenses-5-16-18",
+      "source_id": "bpm-1-tessalonicenses-5-16-18",
+      "reference": "1 Tessalonicenses 5:16-18",
+      "context_reference": "1 Tessalonicenses 5:16-22",
+      "book": "1 Tessalonicenses",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Alegrem-se sempre. Orem sem cessar. Em tudo deem graças, pois esta é a vontade de Deus em Cristo Jesus para com vocês.",
+      "source_url": "https://ebible.org/porbrbsl/1TH05.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Alegria, oração e gratidão na vida real",
+      "slug": "1-tessalonicenses-5-16-18-constancia",
+      "central_theme": "Constância espiritual.",
+      "practical_application": "Praticar oração e gratidão sem negar tristeza ou sofrimento.",
+      "themes": [
+        "constancia",
+        "espiritual"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Alegria, oração e gratidão na vida real",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-2-timoteo-3-16",
+      "source_id": "bpm-2-timoteo-3-16",
+      "reference": "2 Timóteo 3:16",
+      "context_reference": "2 Timóteo 3:14-17",
+      "book": "2 Timóteo",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Toda a Escritura é soprada por Deus e útil para o ensino, para a repreensão, para a correção e para a instrução na justiça,",
+      "source_url": "https://ebible.org/porbrbsl/2TI03.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "A Escritura que forma a vida",
+      "slug": "2-timoteo-3-16-autoridade",
+      "central_theme": "Autoridade e formação bíblica.",
+      "practical_application": "Permitir que a Bíblia corrija uma convicção ou comportamento concreto.",
+      "themes": [
+        "autoridade",
+        "e",
+        "formacao",
+        "biblica"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "A Escritura que forma a vida",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-hebreus-4-12",
+      "source_id": "bpm-hebreus-4-12",
+      "reference": "Hebreus 4:12",
+      "context_reference": "Hebreus 4:12-13",
+      "book": "Hebreus",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Pois a palavra de Deus é viva e eficaz, e mais afiada do que qualquer espada de dois gumes, penetrando até a divisão de alma e espírito, de juntas e medulas, e é apta para discernir os pensamentos e intenções do coração.",
+      "source_url": "https://ebible.org/porbrbsl/HEB04.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "A palavra que expõe o interior",
+      "slug": "hebreus-4-12-discernimento",
+      "central_theme": "Discernimento pela palavra.",
+      "practical_application": "Ler a Escritura com disposição para ser examinado e corrigido.",
+      "themes": [
+        "discernimento",
+        "pela",
+        "palavra"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "A palavra que expõe o interior",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-hebreus-10-23",
+      "source_id": "bpm-hebreus-10-23",
+      "reference": "Hebreus 10:23",
+      "context_reference": "Hebreus 10:19-25",
+      "book": "Hebreus",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "retenhamos firme a confissão da nossa esperança sem vacilar; pois aquele que prometeu é fiel.",
+      "source_url": "https://ebible.org/porbrbsl/HEB10.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Segurar a esperança sem soltar",
+      "slug": "hebreus-10-23-esperanca",
+      "central_theme": "Esperança e comunidade.",
+      "practical_application": "Permanecer firme e aproximar-se de pessoas que também estimulam a fé.",
+      "themes": [
+        "esperanca",
+        "e",
+        "comunidade"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Segurar a esperança sem soltar",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-tiago-1-5",
+      "source_id": "bpm-tiago-1-5",
+      "reference": "Tiago 1:5",
+      "context_reference": "Tiago 1:2-8",
+      "book": "Tiago",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Mas, se algum de vocês tem falta de sabedoria, peça a Deus, que a todos dá liberalmente e sem censura, e lhe será dada.",
+      "source_url": "https://ebible.org/porbrbsl/JAS01.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Pedir sabedoria no meio da pressão",
+      "slug": "tiago-1-5-sabedoria",
+      "central_theme": "Sabedoria e perseverança.",
+      "practical_application": "Pedir sabedoria e agir conforme a luz já recebida.",
+      "themes": [
+        "sabedoria",
+        "e",
+        "perseveranca"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Pedir sabedoria no meio da pressão",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-tiago-1-22",
+      "source_id": "bpm-tiago-1-22",
+      "reference": "Tiago 1:22",
+      "context_reference": "Tiago 1:19-25",
+      "book": "Tiago",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Mas sejam praticantes da palavra, e não apenas ouvintes, enganando a si mesmos.",
+      "source_url": "https://ebible.org/porbrbsl/JAS01.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Ouvir sem praticar não transforma",
+      "slug": "tiago-1-22-obediencia",
+      "central_theme": "Obediência prática.",
+      "practical_application": "Converter uma verdade ouvida em uma ação verificável hoje.",
+      "themes": [
+        "obediencia",
+        "pratica"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Ouvir sem praticar não transforma",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-1-pedro-2-9",
+      "source_id": "bpm-1-pedro-2-9",
+      "reference": "1 Pedro 2:9",
+      "context_reference": "1 Pedro 2:9-12",
+      "book": "1 Pedro",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Mas vocês são raça eleita, sacerdócio real, nação santa, povo de propriedade exclusiva de Deus, para que proclamem as excelências daquele que os chamou das trevas para a sua maravilhosa luz.",
+      "source_url": "https://ebible.org/porbrbsl/1PE02.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Chamados das trevas para a luz",
+      "slug": "1-pedro-2-9-identidade",
+      "central_theme": "Identidade e testemunho.",
+      "practical_application": "Viver a identidade recebida em Cristo com caráter e serviço.",
+      "themes": [
+        "identidade",
+        "e",
+        "testemunho"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Chamados das trevas para a luz",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-1-joao-1-9",
+      "source_id": "bpm-1-joao-1-9",
+      "reference": "1 João 1:9",
+      "context_reference": "1 João 1:5-10",
+      "book": "1 João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Se confessarmos os nossos pecados, ele é fiel e justo para nos perdoar os pecados e nos purificar de toda injustiça.",
+      "source_url": "https://ebible.org/porbrbsl/1JN01.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Confissão que abre caminho",
+      "slug": "1-joao-1-9-confissao",
+      "central_theme": "Confissão e perdão.",
+      "practical_application": "Confessar com honestidade, abandonar a justificativa e buscar reparação quando necessária.",
+      "themes": [
+        "confissao",
+        "e",
+        "perdao"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "Confissão que abre caminho",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-1-joao-4-18",
+      "source_id": "bpm-1-joao-4-18",
+      "reference": "1 João 4:18",
+      "context_reference": "1 João 4:16-21",
+      "book": "1 João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "No amor não há medo; antes, o perfeito amor lança fora o medo, porque o medo envolve castigo. Aquele que tem medo não está aperfeiçoado no amor.",
+      "source_url": "https://ebible.org/porbrbsl/1JN04.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "O amor enfrenta o medo",
+      "slug": "1-joao-4-18-amor",
+      "central_theme": "Amor e medo.",
+      "practical_application": "Permitir que o amor de Deus corrija uma reação governada pelo medo.",
+      "themes": [
+        "amor",
+        "e",
+        "medo"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "O amor enfrenta o medo",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    },
+    {
+      "candidate_id": "bpm-apocalipse-21-4",
+      "source_id": "bpm-apocalipse-21-4",
+      "reference": "Apocalipse 21:4",
+      "context_reference": "Apocalipse 21:1-5",
+      "book": "Apocalipse",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Ele enxugará dos seus olhos toda lágrima. Não haverá mais morte; nem haverá mais pranto, nem lamento, nem dor. As primeiras coisas já passaram.”",
+      "source_url": "https://ebible.org/porbrbsl/REV21.htm",
+      "accessed_at": "2026-07-17",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "A promessa do fim da dor",
+      "slug": "apocalipse-21-4-esperanca",
+      "central_theme": "Esperança na restauração.",
+      "practical_application": "Sustentar esperança futura sem apressar o luto presente.",
+      "themes": [
+        "esperanca",
+        "na",
+        "restauracao"
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Preservar o contexto original e não transformar a passagem em garantia automática fora dele."
+      ],
+      "claims_to_avoid": [
+        "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
+      ],
+      "title_seed": "A promessa do fim da dor",
+      "retention_potential_score": 0.78,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.8,
+      "clarity_score": 0.85
+    }
+  ]
+}

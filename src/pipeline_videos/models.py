@@ -498,6 +498,7 @@ class VerseUsageRecord(PipelineModel):
     video_format: Literal["landscape", "short"]
     status: Literal["reserved", "used"]
     references: list[str] = Field(default_factory=list)
+    supporting_references: list[str] = Field(default_factory=list)
     normalized_references: list[str] = Field(default_factory=list)
     main_passage: str | None = None
     topic: str | None = None

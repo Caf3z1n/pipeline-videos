@@ -43,6 +43,7 @@ from pipeline_videos.scenes import build_scenes
 from pipeline_videos.script import import_script
 from pipeline_videos.state import invalidate, require_approval, set_approval, stage_summary
 from pipeline_videos.storage import (
+    DEFAULT_PROJECTS_DIR,
     ProjectLayout,
     read_model,
     resolve_project,
@@ -68,6 +69,7 @@ metadata_app = typer.Typer(help="Rascunhos de metadados e thumbnail.")
 youtube_app = typer.Typer(help="OAuth, upload, status e publicação segura no YouTube.")
 remote_app = typer.Typer(help="Fila remota de produção, revisão privada e agendamento.")
 analytics_app = typer.Typer(help="Importa métricas observadas para aprendizado editorial.")
+catalog_app = typer.Typer(help="Capacidade e ciclos do catálogo bíblico verificado.")
 app.add_typer(images_app, name="images")
 app.add_typer(script_app, name="script")
 app.add_typer(audio_app, name="audio")
@@ -77,6 +79,34 @@ app.add_typer(metadata_app, name="metadata")
 app.add_typer(youtube_app, name="youtube")
 app.add_typer(remote_app, name="remote")
 app.add_typer(analytics_app, name="analytics")
+app.add_typer(catalog_app, name="catalog")
+
+
+@catalog_app.command("status")
+def catalog_status(
+    video_format: Annotated[
+        str,
+        typer.Option("--format", help="Formato principal: short ou long."),
+    ] = "short",
+    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
+) -> None:
+    """Exibe a capacidade do ciclo sem reservar passagem nem alterar o registro."""
+    from pipeline_videos.verse_selection import (
+        catalog_capacity_summary,
+        combined_usage_index,
+        load_verse_catalog,
+    )
+
+    normalized = (
+        "short" if video_format == "short" else "landscape" if video_format == "long" else None
+    )
+    if normalized is None:
+        raise typer.BadParameter("--format precisa ser short ou long.")
+    root = (projects_dir or DEFAULT_PROJECTS_DIR).expanduser().resolve()
+    catalog = load_verse_catalog()
+    usage = combined_usage_index(root, catalog=catalog)
+    summary = catalog_capacity_summary(catalog, usage, video_format=normalized)
+    typer.echo(json.dumps(summary, ensure_ascii=False))
 
 
 def _codex_image_generation_status() -> tuple[str, str]:
