@@ -393,6 +393,11 @@ class VerseCatalog(PipelineModel):
 
 
 class VerseUsageRecord(PipelineModel):
+    # The shared Git registry is read and written by independently deployed
+    # desktop and VPS releases. Preserve additive fields from newer writers so
+    # an older reader can merge the registry without failing or losing data.
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+
     registry_id: str | None = None
     environment: str | None = None
     project_id: str
@@ -411,6 +416,9 @@ class VerseUsageRecord(PipelineModel):
 
 
 class VerseUsageIndex(PipelineModel):
+    # Keep the shared envelope forward-compatible for additive metadata too.
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+
     schema_version: Literal["1.0"] = "1.0"
     generated_at: str
     records: list[VerseUsageRecord] = Field(default_factory=list)
