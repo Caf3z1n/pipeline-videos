@@ -313,6 +313,8 @@ def job_is_due(job: RemoteVideoJob, now: datetime | None = None) -> bool:
     request = job.request
     if request.not_before and current < request.not_before.astimezone(UTC):
         return False
+    if job.automatic_recovery_count > 0:
+        return True
     if request.start_policy == "overnight":
         local = current.astimezone(REMOTE_TIMEZONE)
         return 1 <= local.hour < 5

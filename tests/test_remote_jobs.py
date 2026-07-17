@@ -91,6 +91,22 @@ def test_store_supports_enqueue_cancel_retry_and_due_window(tmp_path) -> None:
     assert retried.error is None
 
 
+def test_overnight_job_recovery_can_resume_after_window(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    queued = store.enqueue(_request(start_policy="overnight"))
+    retry_at = datetime(2026, 7, 16, 8, 10, tzinfo=UTC)
+    recovering = queued.model_copy(
+        update={
+            "attempts": 1,
+            "automatic_recovery_count": 1,
+            "next_retry_at": retry_at,
+        }
+    )
+
+    assert job_is_due(recovering, retry_at - timedelta(seconds=1)) is False
+    assert job_is_due(recovering, retry_at) is True
+
+
 def test_prepare_job_project_enables_local_specialists_without_human_approval(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Coragem em Josué", title="Coragem em Josué"))
