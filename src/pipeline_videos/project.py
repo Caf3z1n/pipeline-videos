@@ -141,6 +141,7 @@ def create_project(
     layout.ensure_directories()
     now = utc_now()
     config = ProjectConfig()
+    config.youtube_publication.category_id = "22" if video_format == "short" else "27"
     config.production.mode = production_mode
     style = load_style(style_id)
     if style.visual_standard_id != config.images.visual_standard_id:
@@ -206,13 +207,19 @@ def create_project(
         config.render.background_blur_profile = "functional_caption_focus_v1"
         config.youtube_growth.title_variants = 1
         config.youtube_growth.thumbnail_variants = 1
-        config.youtube_growth.thumbnail_generation_mode = "integrated_imagegen_v1"
-        config.youtube_growth.thumbnail_reference_mode = "opening_scene_edit_v1"
         config.youtube_growth.title_standard = "tension_pipe_passage_v2"
         config.youtube_growth.description_standard = "scripture_timeline_v1"
-        config.youtube_growth.thumbnail_standard = "direct_conflict_red_v1"
-        config.youtube_growth.thumbnail_typography_standard = "integrated_extruded_3d_v1"
         config.youtube_growth.title_thumbnail_pairing_standard = "complementary_v1"
+        if video_format == "short":
+            config.youtube_growth.thumbnail_generation_mode = "integrated_imagegen_v1"
+            config.youtube_growth.thumbnail_reference_mode = "opening_scene_edit_v1"
+            config.youtube_growth.thumbnail_standard = "direct_conflict_red_v1"
+            config.youtube_growth.thumbnail_typography_standard = "integrated_extruded_3d_v1"
+        else:
+            config.youtube_growth.thumbnail_generation_mode = "theme_prompt_imagegen_v1"
+            config.youtube_growth.thumbnail_reference_mode = "theme_only_v1"
+            config.youtube_growth.thumbnail_standard = "biblical_cinematic_landscape_v1"
+            config.youtube_growth.thumbnail_typography_standard = "no_text_v1"
 
     stages = initial_stage_records()
     if video_format != "short" or demo:

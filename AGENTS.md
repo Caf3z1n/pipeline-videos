@@ -55,9 +55,9 @@
 - O agente principal é o único escritor de estado compartilhado.
 - Workers escrevem somente no staging declarado e recebem contexto compacto com
   `fork_turns=none`.
-- Use no máximo dois trabalhadores de imagem simultaneamente. Em projetos novos, inicie o
-  especialista do YouTube somente depois de importar a imagem ativa da abertura; o paralelismo
-  imagem+crescimento permanece apenas para filas legadas sem edição obrigatória do primeiro frame.
+- Use no máximo dois trabalhadores de imagem simultaneamente. Em Shorts novos, inicie o
+  especialista do YouTube somente depois de importar a imagem ativa da abertura. Vídeos longos usam
+  somente o tema central no prompt e não dependem dessa referência.
 - Imagens usam uma chamada `imagegen` por tentativa. Em `moderation_blocked`, repita o mesmo prompt
   uma vez; se bloquear novamente, tente uma única alternativa de cena preservando identidade, idade
   aparente, rosto, cabelo, figurino, proporções, silhueta, estilo, paleta, ambiente e sentido.
@@ -97,14 +97,18 @@
 - Crie exatamente um `youtube_growth_specialist` quando `youtube/growth-queue.json` estiver
   pendente, localmente ou na VPS, com raciocínio médio. Nenhum especialista publica nem promete
   CTR/alcance.
-- Em projetos novos de qualquer formato, inclusive Shorts, o especialista gera exatamente uma
-  combinação título+thumbnail com `imagegen`. Ele edita diretamente a imagem ativa da abertura,
+- Em projetos novos de qualquer formato, o especialista gera exatamente uma combinação
+  título+thumbnail com `imagegen`. Em Shorts, ele edita diretamente a imagem ativa da abertura,
   declarada na fila como referência obrigatória. Texto, palavra vermelha e
   seta/X/sublinhado/pincel devem nascer incorporados ao bitmap, com grafia exata e integração à
   luz, profundidade e composição. Não existe compositor local nem fallback de pacote legado.
-- Thumbnails usam conflito visual simples, emoção legível, assunto dominante, espaço negativo e de
-  duas a cinco palavras; setas e marcações exigem alvo narrativo real.
-- A tipografia padrão das thumbnails é `integrated_extruded_3d_v1`: letras extrudadas com volume
+- Em vídeos longos novos, gere a thumbnail com `biblical_cinematic_landscape_v1`: horizontal 16:9,
+  baseada exclusivamente no tema central do briefing, sem imagem de referência e sem texto, letras,
+  logotipos, marcas-d'água, seta, X, sublinhado, pincel ou outra marcação editorial. O personagem
+  ocupa 30% a 40% do quadro e o lado oposto preserva área limpa.
+- Thumbnails de Shorts usam conflito visual simples, emoção legível, assunto dominante, espaço
+  negativo e de duas a cinco palavras; setas e marcações exigem alvo narrativo real.
+- A tipografia padrão das thumbnails de Shorts é `integrated_extruded_3d_v1`: letras extrudadas com volume
   espesso visível, bordas chanfradas, textura material, highlights, sombras de contato/oclusão e
   perspectiva coerentes com a cena. A palavra dominante usa escala muito maior; palavra vermelha e
   seta/X/sublinhado/pincel preservam o mesmo tratamento 3D. Nunca use texto plano, adesivo ou overlay.
@@ -112,11 +116,12 @@
   curto e, em vídeos longos,
   traz timeline das citações iniciada exatamente por `00:00 - Abertura`.
 - O especialista cria exatamente um par título+thumbnail. O título carrega referência, tensão e
-  busca; a frase da capa acrescenta decisão, contraste ou consequência. No padrão
-  `tension_pipe_passage_v2`, a capa não repete a tensão situada antes de `|`; projetos legados com
-  passagem primeiro continuam sem repetir a frase temática depois de `|`.
-- Thumbnails novas usam conflito/personagem reconhecível, destaque vermelho e ao menos uma seta, X,
-  sublinhado ou pincel com alvo real; evite frases abstratas quando o confronto for mais forte.
+  busca. Em Shorts, a frase da capa acrescenta decisão, contraste ou consequência. No padrão
+  `tension_pipe_passage_v2`, a capa de Short não repete a tensão situada antes de `|`; projetos
+  legados com passagem primeiro continuam sem repetir a frase temática depois de `|`. Em longos, o
+  conceito visual complementa o título sem texto no bitmap.
+- Thumbnails novas de Shorts usam conflito/personagem reconhecível, destaque vermelho e ao menos uma
+  seta, X, sublinhado ou pincel com alvo real; evite frases abstratas quando o confronto for mais forte.
 - Planeje espaço negativo real e tente não cobrir rosto, corpo, ação principal ou o alvo narrativo.
   Depois da primeira saída válida, aceite o bitmap sem repetir por qualidade, deriva visual ou texto
   imperfeito; tentativas adicionais são permitidas somente quando `moderation_blocked` não gerar
@@ -154,14 +159,14 @@
 - Agendas diárias materializam um ou dois jobs independentes por data e slot. Cada ocorrência deve
   ter `not_before`, upload inicial privado, `publication_mode=scheduled` e `publish_at` explícito
   com fuso. A materialização é idempotente e nunca reutiliza a sessão raiz de outro Short.
-- Gere exatamente um título e uma thumbnail integrada. Edite a imagem ativa da abertura com
-  `imagegen`; não gere a composição a partir de texto apenas. Em Shorts, essa mesma arte ocupa exatamente
-  o primeiro frame; em vídeos longos, ela é enviada pela API como thumbnail personalizada.
-- A thumbnail integrada deve usar exatamente o mesmo `visual_standard`, estilo 3D, materiais,
+- Gere exatamente um título e uma thumbnail. Em Shorts, edite a imagem ativa da abertura com
+  `imagegen`; essa mesma arte ocupa exatamente o primeiro frame. Em vídeos longos, gere a composição
+  horizontal somente a partir do prompt temático e envie-a pela API como thumbnail personalizada.
+- A thumbnail de Short deve usar exatamente o mesmo `visual_standard`, estilo 3D, materiais,
   desenho de personagem, paleta e iluminação das cenas. No remoto, use obrigatoriamente a
   imagem produzida para a cena de abertura como referência visual e interrompa a etapa se ela ainda
   não existir; nunca improvise fotografia, fotorrealismo ou live action.
-- Local e remoto usam `integrated_extruded_3d_v1` para o texto da capa, com o mesmo volume, bevel,
+- Local e remoto usam `integrated_extruded_3d_v1` para o texto da capa de Shorts, com o mesmo volume, bevel,
   material, luz, perspectiva, sombra e hierarquia por escala definidos na fila de crescimento.
 - `render-review` funciona em produções locais e remotas, usa os ativos ativos em qualidade final e
   nunca registra aprovação humana. Um candidato assim pode ser enviado automaticamente somente como

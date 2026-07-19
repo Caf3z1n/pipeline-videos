@@ -15,6 +15,7 @@ from pipeline_videos.models import (
 )
 from pipeline_videos.project import create_project
 from pipeline_videos.publication import (
+    GoogleYouTubeClient,
     prepare_publication,
     publication_status,
     publish_project,
@@ -100,6 +101,63 @@ class FakeYouTubeClient:
         assert contains_synthetic_media is True
         self.visibility_calls.append({"privacy_status": privacy_status, "publish_at": publish_at})
         return {"id": video_id, "status": {"privacyStatus": privacy_status}}
+
+
+class _FakeRequest:
+    def __init__(self, response: dict[str, Any]) -> None:
+        self.response = response
+
+    def execute(self) -> dict[str, Any]:
+        return self.response
+
+
+class _FakeVideosResource:
+    def __init__(self) -> None:
+        self.update_calls: list[dict[str, Any]] = []
+
+    def list(self, **_kwargs) -> _FakeRequest:
+        return _FakeRequest(
+            {
+                "items": [
+                    {
+                        "id": "video-123",
+                        "snippet": {"categoryId": "22"},
+                        "status": {"privacyStatus": "public", "embeddable": True},
+                    }
+                ]
+            }
+        )
+
+    def update(self, **kwargs) -> _FakeRequest:
+        self.update_calls.append(kwargs)
+        return _FakeRequest({})
+
+
+class _FakeGoogleService:
+    def __init__(self) -> None:
+        self.resource = _FakeVideosResource()
+
+    def videos(self) -> _FakeVideosResource:
+        return self.resource
+
+
+def test_google_client_updates_snippet_and_status_separately() -> None:
+    service = _FakeGoogleService()
+    client = GoogleYouTubeClient(service)
+
+    client.update_video(
+        "video-123",
+        snippet={"title": "Título", "description": "Descrição", "categoryId": "27"},
+        status={"selfDeclaredMadeForKids": False},
+    )
+
+    assert [call["part"] for call in service.resource.update_calls] == ["snippet", "status"]
+    assert service.resource.update_calls[0]["body"]["snippet"]["categoryId"] == "27"
+    assert service.resource.update_calls[1]["body"]["status"] == {
+        "privacyStatus": "public",
+        "embeddable": True,
+        "selfDeclaredMadeForKids": False,
+    }
 
 
 def _ready_project(tmp_path, *, video_format: str = "landscape"):
@@ -266,6 +324,31 @@ def test_upload_is_idempotent_and_sends_metadata_thumbnail_and_captions(tmp_path
     assert client.update_calls == 0
     assert read_json(layout.publication)["captions"]["youtube_id"] == "caption-123"
     assert layout.load_manifest().stages["publication"].status == StageStatus.COMPLETED
+
+
+def test_force_new_upload_archives_existing_record_even_for_same_render(tmp_path) -> None:
+    layout = _ready_project(tmp_path)
+    client = FakeYouTubeClient()
+    project_id = layout.load_manifest().project_id
+
+    upload_project(
+        layout,
+        client=client,
+        allow_external=True,
+        confirmation=project_id,
+        verify_validation=False,
+    )
+    upload_project(
+        layout,
+        client=client,
+        allow_external=True,
+        confirmation=project_id,
+        force_new_upload=True,
+        verify_validation=False,
+    )
+
+    assert client.upload_calls == 2
+    assert (layout.publication_archive / "video-123.json").is_file()
 
 
 def test_short_upload_skips_ineffective_custom_thumbnail_api_call(tmp_path) -> None:

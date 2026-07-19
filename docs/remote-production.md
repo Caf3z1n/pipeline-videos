@@ -36,10 +36,11 @@ Cada cena segue a política retomável: prompt original, repetição idêntica a
 `moderation_blocked` e, somente após o segundo bloqueio, uma alternativa que preserve personagem,
 idade aparente, rosto, cabelo, figurino, proporções, estilo, paleta, ambiente e sentido narrativo.
 
-A fila de crescimento declara exatamente um título e uma thumbnail. O bitmap nasce no Imagegen com
-texto e elemento narrativo incorporados, editando a imagem ativa da abertura. O importador aceita
-somente `generated_integrated_art`; não há compositor, overlay ou reutilização silenciosa de cenas
-como fallback.
+A fila de crescimento declara exatamente um título e uma thumbnail. Em Shorts, o bitmap nasce no
+Imagegen com texto e elemento narrativo incorporados, editando a imagem ativa da abertura. Em vídeos
+longos, nasce como `generated_theme_art`: horizontal 16:9, sem imagem de referência, sem texto ou
+marcações e baseada exclusivamente no tema central inserido no prompt versionado. Não há compositor,
+overlay ou reutilização silenciosa de cenas como fallback.
 
 ## Estados e publicação
 

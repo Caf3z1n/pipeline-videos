@@ -42,18 +42,17 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     assert manifest.config.render.preview_motion_supersample == 2
     assert manifest.config.production.optimization_profile == "token_optimized_v1"
     assert manifest.config.production.worker_context_policy == "compact_only"
-    assert manifest.config.youtube_growth.thumbnail_generation_mode == "integrated_imagegen_v1"
-    assert manifest.config.youtube_growth.thumbnail_reference_mode == "opening_scene_edit_v1"
+    assert manifest.config.youtube_growth.thumbnail_generation_mode == "theme_prompt_imagegen_v1"
+    assert manifest.config.youtube_growth.thumbnail_reference_mode == "theme_only_v1"
     assert manifest.config.youtube_growth.title_variants == 1
     assert manifest.config.youtube_growth.thumbnail_variants == 1
     assert manifest.config.youtube_growth.title_standard == "tension_pipe_passage_v2"
     assert manifest.config.youtube_growth.description_standard == "scripture_timeline_v1"
-    assert manifest.config.youtube_growth.thumbnail_standard == "direct_conflict_red_v1"
-    assert manifest.config.youtube_growth.thumbnail_typography_standard == (
-        "integrated_extruded_3d_v1"
-    )
+    assert manifest.config.youtube_growth.thumbnail_standard == "biblical_cinematic_landscape_v1"
+    assert manifest.config.youtube_growth.thumbnail_typography_standard == "no_text_v1"
     assert manifest.config.youtube_growth.title_thumbnail_pairing_standard == "complementary_v1"
     assert manifest.config.youtube_publication.allow_automated_private_review_upload is True
+    assert manifest.config.youtube_publication.category_id == "27"
     assert manifest.config.editorial_policy.standard == "scripture_rich_ptbr_v1"
     assert manifest.config.editorial_policy.require_literal_scripture_citations is True
     assert manifest.config.editorial_policy.require_quoted_comment_response is False
@@ -153,6 +152,7 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.youtube_growth.thumbnail_typography_standard == (
         "integrated_extruded_3d_v1"
     )
+    assert manifest.config.youtube_publication.category_id == "22"
     assert manifest.config.images.height > manifest.config.images.width
     assert manifest.config.images.visual_standard_id == "cinematic-family-3d-v1"
     assert manifest.config.images.enforce_visual_standard is True

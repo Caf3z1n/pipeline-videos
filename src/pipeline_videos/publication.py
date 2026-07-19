@@ -153,11 +153,15 @@ class GoogleYouTubeClient:
     def update_video(
         self, video_id: str, *, snippet: dict[str, Any], status: dict[str, Any]
     ) -> None:
+        self.service.videos().update(
+            part="snippet",
+            body={"id": video_id, "snippet": snippet},
+        ).execute()
         merged_status = self._mutable_status(video_id)
         merged_status.update(status)
         self.service.videos().update(
-            part="snippet,status",
-            body={"id": video_id, "snippet": snippet, "status": merged_status},
+            part="status",
+            body={"id": video_id, "status": merged_status},
         ).execute()
 
     def set_thumbnail(self, video_id: str, path: Path) -> dict[str, Any]:
@@ -492,15 +496,15 @@ def upload_project(
         if layout.publication.is_file()
         else None
     )
-    if existing and existing.video.source_hash != plan.video_hash:
-        if not force_new_upload:
-            raise RuntimeError(
-                "Já existe outro render enviado para este projeto. Use --force-new-upload "
-                "somente se deseja criar um novo vídeo no YouTube."
-            )
+    if existing and force_new_upload:
         layout.publication_archive.mkdir(parents=True, exist_ok=True)
         shutil.copy2(layout.publication, layout.publication_archive / f"{existing.video_id}.json")
         existing = None
+    elif existing and existing.video.source_hash != plan.video_hash:
+        raise RuntimeError(
+            "Já existe outro render enviado para este projeto. Use --force-new-upload "
+            "somente se deseja criar um novo vídeo no YouTube."
+        )
 
     start_stage(layout, "publication", input_hash, provider="youtube-data-api-v3")
     try:

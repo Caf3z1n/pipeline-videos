@@ -36,6 +36,7 @@ from pipeline_videos.state import (
     wait_stage,
 )
 from pipeline_videos.storage import ProjectLayout, read_json, read_model, write_json, write_text
+from pipeline_videos.thumbnail_prompts import build_long_form_thumbnail_prompt
 from pipeline_videos.utils import (
     compact_json_schema,
     relative_posix,
@@ -44,8 +45,8 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-GROWTH_QUEUE_SCHEMA_VERSION = "1.12"
-GROWTH_ALGORITHM_VERSION = "1.12"
+GROWTH_QUEUE_SCHEMA_VERSION = "1.13"
+GROWTH_ALGORITHM_VERSION = "1.13"
 SHORT_TITLE_MAX_CHARACTERS = 70
 SHORT_DESCRIPTION_MAX_CHARACTERS = 600
 SHORT_DESCRIPTION_SEARCH_WINDOW = 240
@@ -82,6 +83,7 @@ def _growth_context_payload(layout: ProjectLayout) -> dict[str, Any]:
     if missing:
         raise FileNotFoundError("Entradas ausentes para o especialista: " + ", ".join(missing))
     project = layout.load_manifest()
+    briefing = read_model(layout.briefing, Briefing)
     script = read_model(layout.script, ScriptDocument)
     contract = ensure_creative_contract(layout, script)
     sources = read_model(layout.sources, SourceLibrary)
@@ -149,6 +151,7 @@ def _growth_context_payload(layout: ProjectLayout) -> dict[str, Any]:
             "production_mode": project.config.production.mode,
             "reasoning_effort": "medium",
         },
+        "thumbnail_theme": briefing.central_theme.strip() or project.title,
         "creative_contract": compact_contract,
         "sources": compact_sources,
         "script_outline": {
@@ -250,8 +253,15 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         )
 
     is_short = project.video_format == "short"
+    is_theme_based_long = (
+        not is_short
+        and config.thumbnail_generation_mode == "theme_prompt_imagegen_v1"
+        and config.thumbnail_reference_mode == "theme_only_v1"
+        and config.thumbnail_standard == "biblical_cinematic_landscape_v1"
+        and config.thumbnail_typography_standard == "no_text_v1"
+    )
     single_agent_mode = not config.use_specialist_subagent
-    requires_opening_reference = True
+    requires_opening_reference = not is_theme_based_long
     thumbnail_count = config.thumbnail_variants
     thumbnail_size = (
         [project.config.render.width, project.config.render.height] if is_short else [1280, 720]
@@ -261,6 +271,11 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         for index in range(1, thumbnail_count + 1)
     ]
     growth_context = _growth_context_payload(layout)
+    long_form_thumbnail_prompt = (
+        build_long_form_thumbnail_prompt(str(growth_context["thumbnail_theme"]))
+        if is_theme_based_long
+        else None
+    )
     opening_reference = (
         _active_scene_image_source(
             layout,
@@ -313,28 +328,40 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         },
         "inputs": {
             "compact_context": relative_posix(layout.growth_context, layout.root),
-            "thumbnail_visual_reference_scene_id": growth_context["opening_scene"]["scene_id"],
+            "thumbnail_visual_reference_scene_id": (
+                None if is_theme_based_long else growth_context["opening_scene"]["scene_id"]
+            ),
             "thumbnail_visual_reference_path": (
                 relative_posix(opening_reference, layout.root) if opening_reference else None
             ),
+            "thumbnail_theme": (
+                str(growth_context["thumbnail_theme"]) if is_theme_based_long else None
+            ),
+            "thumbnail_prompt": long_form_thumbnail_prompt,
         },
         "visual_standard": {
             "id": project.config.images.visual_standard_id,
             "enforced": project.config.images.enforce_visual_standard,
-            "thumbnail_must_match_scene_images": True,
-            "reference_policy": "required_opening_scene_image",
+            "thumbnail_must_match_scene_images": not is_theme_based_long,
+            "reference_policy": (
+                "theme_only_no_reference" if is_theme_based_long else "required_opening_scene_image"
+            ),
             "required_prompt_markers": [
                 project.config.images.visual_standard_id,
                 "animação 3D cinematográfica familiar premium",
             ],
-            "required_typography_prompt_markers": [
-                "integrated_extruded_3d_v1",
-                "tipografia 3D extrudada integrada",
-                "bordas chanfradas",
-                "sombras de contato",
-                "perspectiva coerente",
-                "material coerente com a cena",
-            ],
+            "required_typography_prompt_markers": (
+                []
+                if is_theme_based_long
+                else [
+                    "integrated_extruded_3d_v1",
+                    "tipografia 3D extrudada integrada",
+                    "bordas chanfradas",
+                    "sombras de contato",
+                    "perspectiva coerente",
+                    "material coerente com a cena",
+                ]
+            ),
             "forbidden_positive_style_markers": list(_PHOTOGRAPHIC_THUMBNAIL_STYLE_MARKERS),
         },
         "outputs": {
@@ -342,44 +369,65 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
             "thumbnails": thumbnail_paths,
             "thumbnail_count": thumbnail_count,
             "thumbnail_design_count": config.title_variants,
-            "thumbnail_source_mode": "generated_integrated_art",
+            "thumbnail_source_mode": (
+                "generated_theme_art" if is_theme_based_long else "generated_integrated_art"
+            ),
             "thumbnail_reference_mode": config.thumbnail_reference_mode,
             "thumbnail_size": thumbnail_size,
             "thumbnail_role": "short_first_frame" if is_short else "custom_thumbnail",
-            "base_art_without_text": False,
+            "base_art_without_text": is_theme_based_long,
             "external_image_generation_required": True,
             "text_overlay_required": False,
-            "imagegen_text_authority": True,
+            "imagegen_text_authority": not is_theme_based_long,
+            "text_forbidden": is_theme_based_long,
             "title_standard": config.title_standard,
             "description_standard": config.description_standard,
             "thumbnail_standard": config.thumbnail_standard,
             "thumbnail_typography_standard": config.thumbnail_typography_standard,
             "title_thumbnail_pairing_standard": config.title_thumbnail_pairing_standard,
-            "design_contract": {
-                "text_word_count": [2, 5],
-                "maximum_lines": 3,
-                "allowed_text_colors": ["white", "yellow", "red"],
-                "allowed_text_alignments": ["left", "center", "right"],
-                "strong_outline": True,
-                "strong_shadow": True,
-                "texture": "subtle",
-                "typography_standard": config.thumbnail_typography_standard,
-                "typography_treatment": "integrated_extruded_3d",
-                "visible_extrusion": True,
-                "beveled_edges": True,
-                "contact_and_occlusion_shadows": True,
-                "scene_coherent_material_and_lighting": True,
-                "perspective_matches_scene": True,
-                "hierarchy_by_scale": "dominant_keyword_scale",
-                "safe_areas_required": True,
-                "optional_narrative_elements": ["arrow", "x", "underline", "brush"],
-                "pillow_is_text_authority": False,
-                "text_must_be_baked_into_bitmap": True,
-                "paired_variants_required": True,
-                "title_thumbnail_repetition_allowed": (
-                    config.title_thumbnail_pairing_standard != "complementary_v1"
-                ),
-            },
+            "design_contract": (
+                {
+                    "text_word_count": [0, 0],
+                    "maximum_lines": 0,
+                    "allowed_text_colors": [],
+                    "allowed_text_alignments": [],
+                    "typography_standard": "no_text_v1",
+                    "typography_treatment": "none",
+                    "safe_areas_required": True,
+                    "clean_negative_space_required": True,
+                    "character_frame_ratio": [0.30, 0.40],
+                    "character_side": ["left", "right"],
+                    "text_must_be_baked_into_bitmap": False,
+                    "text_forbidden": True,
+                    "paired_variants_required": True,
+                }
+                if is_theme_based_long
+                else {
+                    "text_word_count": [2, 5],
+                    "maximum_lines": 3,
+                    "allowed_text_colors": ["white", "yellow", "red"],
+                    "allowed_text_alignments": ["left", "center", "right"],
+                    "strong_outline": True,
+                    "strong_shadow": True,
+                    "texture": "subtle",
+                    "typography_standard": config.thumbnail_typography_standard,
+                    "typography_treatment": "integrated_extruded_3d",
+                    "visible_extrusion": True,
+                    "beveled_edges": True,
+                    "contact_and_occlusion_shadows": True,
+                    "scene_coherent_material_and_lighting": True,
+                    "perspective_matches_scene": True,
+                    "hierarchy_by_scale": "dominant_keyword_scale",
+                    "safe_areas_required": True,
+                    "optional_narrative_elements": ["arrow", "x", "underline", "brush"],
+                    "pillow_is_text_authority": False,
+                    "text_must_be_baked_into_bitmap": True,
+                    "paired_variants_required": True,
+                    "title_thumbnail_repetition_allowed": (
+                        config.title_thumbnail_pairing_standard != "complementary_v1"
+                    ),
+                }
+            ),
         },
         "generation_retry_policy": imagegen_retry_policy(),
         "schemas": {
@@ -410,66 +458,122 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
             "Evite clickbait enganoso, excesso de elementos, choque gratuito e violações "
             "das políticas.",
             "Preencha package.json no schema fornecido, repetindo job_id e input_hash da fila.",
-            (
-                "Construa um conflito visual simples com escala dramática, um personagem ou "
-                "objeto dominante, emoção legível, luz direcional e área negativa planejada "
-                "para o texto."
-            ),
-            (
-                "A thumbnail precisa pertencer exatamente ao mesmo universo visual das cenas. "
-                "Use visual_standard.id, visual_system.style, visual_system.palette e a "
-                "opening_scene como contrato, preservando animação 3D "
-                "cinematográfica familiar premium, materiais estilizados, proporções, desenho "
-                "de personagem, paleta e iluminação de longa-metragem."
-            ),
-            (
-                "Comece metadata.thumbnail_prompt com 'Visual standard: "
-                f"{project.config.images.visual_standard_id}. Style/medium: animação 3D "
-                "cinematográfica familiar premium.' Não descreva o estilo positivo como "
-                "photography, realistic, photorealistic, live action, fotografia editorial ou "
-                "retrato fotorrealista."
-            ),
-            (
-                "Preencha thumbnail_designs com um design por candidata, no mesmo índice do "
-                "título: texto honesto de duas a cinco palavras, hierarquia em até três linhas, "
-                "cores white/yellow/red, alinhamento coerente com o espaço negativo, contorno e "
-                "sombra fortes e textura sutil."
-            ),
-            (
-                "Use obrigatoriamente thumbnail_typography_standard="
-                "integrated_extruded_3d_v1. Em cada design, mantenha "
-                "typography_treatment=integrated_extruded_3d, "
-                "typography_hierarchy=dominant_keyword_scale e "
-                "typography_material=scene_lit_text_material."
-            ),
-            (
-                "Inclua literalmente em metadata.thumbnail_prompt: 'Typography standard: "
-                "integrated_extruded_3d_v1. Tipografia 3D extrudada integrada, com espessura "
-                "visível, bordas chanfradas, sombras de contato e oclusão, perspectiva coerente "
-                "e material coerente com a cena.'"
-            ),
-            (
-                "Modele as letras como objetos 3D pertencentes à cena: volume espesso visível, "
-                "bevel nas bordas, textura material, highlights direcionais e sombras de contato "
-                "coerentes com a luz. A palavra ou linha dominante deve ser muito maior que as "
-                "demais; não use todas as palavras no mesmo tamanho."
-            ),
-            (
-                "A palavra vermelha deve receber o mesmo volume, bevel, material e profundidade "
-                "das letras principais. A seta/X/sublinhado/pincel também deve ter espessura, "
-                "perspectiva e sombra coerentes, nunca aparência de adesivo ou overlay plano."
-            ),
-            (
-                "Respeite safe areas e verifique a legibilidade em tela pequena sem cobrir "
-                "rostos, ação ou o objeto dominante."
-            ),
-            (
-                "Use arrow, x, underline ou brush somente quando o elemento narrativo for "
-                "honesto e relevante; identifique o alvo e registre a justificativa editorial."
-            ),
             "Não altere project.json, fila, aprovações, ativos ou arquivos fora de staging.",
         ],
     }
+    if is_theme_based_long:
+        payload["instructions"].extend(
+            [
+                (
+                    "Gere exatamente uma thumbnail horizontal 16:9 a partir de "
+                    "inputs.thumbnail_prompt, sem usar imagem de referência. O tema em "
+                    "inputs.thumbnail_theme é a única base narrativa da composição."
+                ),
+                (
+                    "Copie inputs.thumbnail_prompt integralmente e sem acréscimos para "
+                    "metadata.thumbnail_prompt e use esse mesmo texto na chamada de imagegen."
+                ),
+                (
+                    "Entregue somente o título principal e a thumbnail principal: mantenha "
+                    "metadata.alternative_titles e metadata.thumbnail_alternatives vazios."
+                ),
+                (
+                    "A imagem final não pode conter texto, letras, números, logotipos, "
+                    "marcas-d'água, seta, X, sublinhado, pincel ou qualquer marcação editorial."
+                ),
+                (
+                    "Preencha um thumbnail_design sem tipografia: text e accent_word vazios, "
+                    "text_lines vazio, texture=none, typography_treatment=none, "
+                    "typography_hierarchy=none, typography_material=none e "
+                    "narrative_element=none."
+                ),
+                (
+                    "Use metadata.thumbnail_concept para resumir o único conceito visual e "
+                    "copie esse conceito para strategy.promise_match.thumbnail_delivery."
+                ),
+                (
+                    "Preserve a área limpa no lado oposto ao personagem, mas não insira texto "
+                    "agora e não aplique overlay local depois."
+                ),
+            ]
+        )
+    else:
+        payload["instructions"].extend(
+            [
+                (
+                    "Construa um conflito visual simples com escala dramática, um personagem ou "
+                    "objeto dominante, emoção legível, luz direcional e área negativa planejada "
+                    "para o texto."
+                ),
+                (
+                    "A thumbnail precisa pertencer exatamente ao mesmo universo visual das cenas. "
+                    "Use visual_standard.id, visual_system.style, visual_system.palette e a "
+                    "opening_scene como contrato, preservando animação 3D cinematográfica familiar "
+                    "premium, materiais estilizados, proporções, desenho de personagem, paleta e "
+                    "iluminação de longa-metragem."
+                ),
+                (
+                    "Comece metadata.thumbnail_prompt com 'Visual standard: "
+                    f"{project.config.images.visual_standard_id}. Style/medium: animação 3D "
+                    "cinematográfica familiar premium.' Não descreva o estilo positivo como "
+                    "photography, realistic, photorealistic, live action, fotografia editorial ou "
+                    "retrato fotorrealista."
+                ),
+                (
+                    "Preencha thumbnail_designs com um design por candidata, no mesmo índice do "
+                    "título: texto honesto de duas a cinco palavras, hierarquia em até três "
+                    "linhas, cores white/yellow/red, alinhamento coerente com o espaço negativo, "
+                    "contorno e "
+                    "sombra fortes e textura sutil."
+                ),
+                (
+                    "Use obrigatoriamente thumbnail_typography_standard="
+                    "integrated_extruded_3d_v1. Em cada design, mantenha "
+                    "typography_treatment=integrated_extruded_3d, "
+                    "typography_hierarchy=dominant_keyword_scale e "
+                    "typography_material=scene_lit_text_material."
+                ),
+                (
+                    "Inclua literalmente em metadata.thumbnail_prompt: 'Typography standard: "
+                    "integrated_extruded_3d_v1. Tipografia 3D extrudada integrada, com espessura "
+                    "visível, bordas chanfradas, sombras de contato e oclusão, perspectiva "
+                    "coerente e material coerente com a cena.'"
+                ),
+                (
+                    "Modele as letras como objetos 3D pertencentes à cena: volume espesso visível, "
+                    "bevel nas bordas, textura material, highlights direcionais e sombras de "
+                    "contato coerentes com a luz. A palavra ou linha dominante deve ser muito "
+                    "maior que as "
+                    "demais; não use todas as palavras no mesmo tamanho."
+                ),
+                (
+                    "A palavra vermelha deve receber o mesmo volume, bevel, material e "
+                    "profundidade das letras principais. A seta/X/sublinhado/pincel também deve "
+                    "ter espessura, "
+                    "perspectiva e sombra coerentes, nunca aparência de adesivo ou overlay plano."
+                ),
+                (
+                    "Respeite safe areas e verifique a legibilidade em tela pequena sem cobrir "
+                    "rostos, ação ou o objeto dominante."
+                ),
+                (
+                    "Use arrow, x, underline ou brush somente quando o elemento narrativo for "
+                    "honesto e relevante; identifique o alvo e registre a justificativa editorial."
+                ),
+            ]
+        )
+    if is_short:
+        payload["outputs"]["design_contract"]["top_text_safe_margin_ratio"] = 0.10
+        payload["instructions"].append(
+            "Somente para esta thumbnail vertical de Short, reserve os 10% superiores do "
+            "canvas como margem de segurança totalmente livre de tipografia. Inclua "
+            "literalmente em metadata.thumbnail_prompt: 'Short top safe area: keep the top "
+            "10% of the canvas completely free of text, letters, extrusion, outlines and "
+            "shadows; place every word below this boundary.' Ao editar com imagegen, trate "
+            "volume, extrusão, contorno e sombra como parte da tipografia: nenhum pixel "
+            "desses elementos pode entrar nessa faixa. Esta regra não se aplica a "
+            "thumbnails de vídeos longos."
+        )
     if config.title_standard == "passage_pipe_topic_v1":
         main_passage = str(
             growth_context.get("creative_contract", {}).get("main_passage", "")
@@ -500,9 +604,13 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 ),
                 (
                     "Preencha strategy.promise_match copiando content_promise, opening_hook como "
-                    "opening_line e inputs.thumbnail_visual_reference_scene_id. Em title_delivery, "
-                    "copie exatamente a parte do título antes da barra; em thumbnail_delivery, "
-                    "copie exatamente o texto do primeiro thumbnail_design."
+                    "opening_line e contract_guard.opening_scene_id. Em title_delivery, copie "
+                    "exatamente a parte do título antes da barra. Em thumbnail_delivery, copie "
+                    + (
+                        "metadata.thumbnail_concept."
+                        if is_theme_based_long
+                        else "exatamente o texto do primeiro thumbnail_design."
+                    )
                 ),
             ]
         )
@@ -545,20 +653,18 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 ),
                 (
                     "Em cada par, o título deve carregar tensão concreta, referência e busca; a "
-                    "thumbnail acrescenta conflito, decisão ou consequência visual."
-                    if config.title_standard == "tension_pipe_passage_v2"
-                    else "Em cada par, distribua a promessa: o título deve carregar "
-                    "referência, tema "
-                    "e intenção de busca; o texto da thumbnail deve acrescentar tensão, decisão, "
-                    "contraste, consequência ou pergunta visual que o título ainda não disse."
-                ),
-                (
-                    "É proibido repetir na thumbnail a tensão escrita antes da barra vertical. "
-                    "Também não use a frase inteira da thumbnail dentro do título."
-                    if config.title_standard == "tension_pipe_passage_v2"
-                    else "É proibido repetir na thumbnail a frase temática que aparece depois da "
-                    "barra vertical do título. Também não use essa frase inteira como trecho "
-                    "dentro da thumbnail, nem a frase inteira da thumbnail dentro do título."
+                    "imagem acrescenta emoção, gesto, paisagem e conflito visual sem texto."
+                    if is_theme_based_long
+                    else (
+                        "Em cada par, o título deve carregar tensão concreta, referência e busca; "
+                        "a thumbnail acrescenta conflito, decisão ou consequência visual."
+                        if config.title_standard == "tension_pipe_passage_v2"
+                        else "Em cada par, distribua a promessa: o título deve carregar "
+                        "referência, tema e intenção de busca; o texto da thumbnail deve "
+                        "acrescentar tensão, "
+                        "decisão, contraste, consequência ou pergunta visual que o título ainda "
+                        "não disse."
+                    )
                 ),
                 (
                     "Preencha title_thumbnail_complement explicando de forma concisa a função "
@@ -566,6 +672,15 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 ),
             ]
         )
+        if not is_theme_based_long:
+            payload["instructions"].append(
+                "É proibido repetir na thumbnail a tensão escrita antes da barra vertical. "
+                "Também não use a frase inteira da thumbnail dentro do título."
+                if config.title_standard == "tension_pipe_passage_v2"
+                else "É proibido repetir na thumbnail a frase temática que aparece depois da "
+                "barra vertical do título. Também não use essa frase inteira como trecho "
+                "dentro da thumbnail, nem a frase inteira da thumbnail dentro do título."
+            )
     payload["instructions"].extend(
         [
             (
@@ -573,56 +688,68 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 "o bitmap completo exatamente no caminho de staging do mesmo índice."
             ),
             *imagegen_retry_instructions(asset_label="thumbnail"),
-            (
-                "Inclua na própria geração o texto exato de thumbnail_design, sua palavra de "
-                "destaque vermelha e o elemento narrativo vermelho. Texto e símbolo precisam "
-                "participar da iluminação, profundidade, perspectiva e composição da arte; "
-                "não entregue arte-base limpa nem aparência de camada solta."
-            ),
-            (
-                "Componha a tipografia 3D como camada de primeiro ou médio plano da imagem, com "
-                "oclusão e sombra de contato convincentes. Preserve a leitura instantânea em "
-                "tela pequena e a hierarquia dramática entre linha auxiliar, palavra dominante "
-                "e destaque vermelho."
-            ),
-            (
-                "Confirme visualmente a grafia e os acentos antes de concluir. Não aceite "
-                "texto adicional, duplicado, deformado ou diferente de "
-                "thumbnail_design.text."
-            ),
-            (
-                "Reserve espaço negativo real para a tipografia e nunca cubra rosto, corpo, "
-                "ação principal ou o alvo do símbolo. O símbolo deve apontar ou marcar "
-                "precisamente o alvo declarado."
-            ),
-            (
-                "O importador apenas normalizará dimensões e formato; não aplicará texto, "
-                "seta, X, sublinhado ou pincel com Pillow."
-            ),
-            (
-                f"{image_count_label} {image_pairing_verb} aos títulos pelo "
-                "índice. Em Shorts, a primeira candidata integrada ocupará o frame zero; "
-                "eventuais candidatas adicionais ficam como alternativas versionadas."
-            ),
         ]
     )
-    payload["instructions"].extend(
-        [
-            (
-                "Edite diretamente inputs.thumbnail_visual_reference_path com imagegen, "
-                "passando esse arquivo em referenced_image_paths. Use esse arquivo exato "
-                "como imagem de referência e preserve a cena, o personagem e a identidade "
-                "visual; acrescente somente a composição de thumbnail, o texto e a marcação "
-                "narrativa solicitados."
-            ),
-            (
-                "Depois que a primeira edição produzir um bitmap válido, aceite essa saída sem "
-                "repetir por qualidade, deriva visual ou imperfeição de texto. Nova tentativa "
-                "automática continua permitida somente quando não houver saída por "
-                "moderation_blocked, conforme generation_retry_policy."
-            ),
-        ]
-    )
+    if is_theme_based_long:
+        payload["instructions"].extend(
+            [
+                "Não passe referenced_image_paths: esta geração usa somente o prompt temático.",
+                (
+                    "Depois que a primeira geração produzir um bitmap válido, aceite essa saída "
+                    "sem repetir por qualidade ou deriva visual. Nova tentativa automática só é "
+                    "permitida quando não houver saída por moderation_blocked."
+                ),
+            ]
+        )
+    else:
+        payload["instructions"].extend(
+            [
+                (
+                    "Inclua na própria geração o texto exato de thumbnail_design, sua palavra de "
+                    "destaque vermelha e o elemento narrativo vermelho. Texto e símbolo precisam "
+                    "participar da iluminação, profundidade, perspectiva e composição da arte; "
+                    "não entregue arte-base limpa nem aparência de camada solta."
+                ),
+                (
+                    "Componha a tipografia 3D como camada de primeiro ou médio plano da imagem, "
+                    "com oclusão e sombra de contato convincentes. Preserve a leitura instantânea "
+                    "em "
+                    "tela pequena e a hierarquia dramática entre linha auxiliar, palavra dominante "
+                    "e destaque vermelho."
+                ),
+                (
+                    "Confirme visualmente a grafia e os acentos antes de concluir. Não aceite "
+                    "texto adicional, duplicado, deformado ou diferente de thumbnail_design.text."
+                ),
+                (
+                    "Reserve espaço negativo real para a tipografia e nunca cubra rosto, corpo, "
+                    "ação principal ou o alvo do símbolo. O símbolo deve apontar ou marcar "
+                    "precisamente o alvo declarado."
+                ),
+                (
+                    "O importador apenas normalizará dimensões e formato; não aplicará texto, "
+                    "seta, X, sublinhado ou pincel com Pillow."
+                ),
+                (
+                    f"{image_count_label} {image_pairing_verb} aos títulos pelo índice. Em Shorts, "
+                    "a primeira candidata integrada ocupará o frame zero; eventuais candidatas "
+                    "adicionais ficam como alternativas versionadas."
+                ),
+                (
+                    "Edite diretamente inputs.thumbnail_visual_reference_path com imagegen, "
+                    "passando esse arquivo em referenced_image_paths. Use esse arquivo exato como "
+                    "imagem de referência e preserve a cena, o personagem e a identidade visual; "
+                    "acrescente somente a composição de thumbnail, o texto e a marcação narrativa "
+                    "solicitados."
+                ),
+                (
+                    "Depois que a primeira edição produzir um bitmap válido, aceite essa saída sem "
+                    "repetir por qualidade, deriva visual ou imperfeição de texto. Nova tentativa "
+                    "automática continua permitida somente quando não houver saída por "
+                    "moderation_blocked, conforme generation_retry_policy."
+                ),
+            ]
+        )
 
     invalidate(
         layout,
@@ -650,16 +777,27 @@ def _validate_thumbnail_visual_standard(
     queue: dict[str, Any],
 ) -> None:
     outputs = queue.get("outputs", {})
-    if outputs.get("thumbnail_source_mode") != "generated_integrated_art":
+    source_mode = outputs.get("thumbnail_source_mode")
+    if source_mode not in {"generated_integrated_art", "generated_theme_art"}:
         return
+    prompt = package.metadata.thumbnail_prompt.strip()
+    if source_mode == "generated_theme_art":
+        expected_prompt = str(queue.get("inputs", {}).get("thumbnail_prompt") or "").strip()
+        if not expected_prompt or prompt != expected_prompt:
+            raise ValueError(
+                "O prompt da thumbnail longa precisa copiar integralmente o template temático."
+            )
     contract = queue.get("visual_standard")
     if not isinstance(contract, dict) or not contract.get("enforced"):
         return
-    prompt = package.metadata.thumbnail_prompt.strip()
     positive_prompt = _prompt_without_negative_sections(prompt)
     normalized_prompt = _normalized_search_text(positive_prompt)
     standard_id = str(contract.get("id", "")).strip()
-    if standard_id and _normalized_search_text(standard_id) not in normalized_prompt:
+    if (
+        source_mode == "generated_integrated_art"
+        and standard_id
+        and _normalized_search_text(standard_id) not in normalized_prompt
+    ):
         raise ValueError(
             "O prompt da thumbnail não declara o visual_standard obrigatório das cenas."
         )
@@ -868,9 +1006,10 @@ def _validate_package(
         )
     if len(package.strategy.thumbnail_designs) != expected_designs:
         raise ValueError("O pacote precisa de um thumbnail_design por candidata.")
-    if any(design.texture != "subtle_grain" for design in package.strategy.thumbnail_designs):
-        raise ValueError("O novo padrão de thumbnail exige textura sutil no texto.")
-    if outputs.get("thumbnail_typography_standard") == "integrated_extruded_3d_v1":
+    typography_standard = outputs.get("thumbnail_typography_standard")
+    if typography_standard == "integrated_extruded_3d_v1":
+        if any(design.texture != "subtle_grain" for design in package.strategy.thumbnail_designs):
+            raise ValueError("O novo padrão de thumbnail exige textura sutil no texto.")
         for design in package.strategy.thumbnail_designs:
             if design.typography_treatment != "integrated_extruded_3d":
                 raise ValueError("A thumbnail precisa usar tipografia 3D extrudada integrada.")
@@ -878,7 +1017,22 @@ def _validate_package(
                 raise ValueError("A thumbnail precisa hierarquizar a palavra dominante por escala.")
             if design.typography_material != "scene_lit_text_material":
                 raise ValueError("A tipografia precisa compartilhar material e luz com a cena.")
-    if outputs.get("title_thumbnail_pairing_standard") == "complementary_v1":
+    elif typography_standard == "no_text_v1":
+        for design in package.strategy.thumbnail_designs:
+            if (
+                design.text.strip()
+                or design.accent_word.strip()
+                or design.text_lines
+                or design.typography_treatment != "none"
+                or design.typography_hierarchy != "none"
+                or design.typography_material != "none"
+                or design.narrative_element != "none"
+            ):
+                raise ValueError("A thumbnail longa precisa permanecer sem texto ou marcações.")
+    if (
+        outputs.get("title_thumbnail_pairing_standard") == "complementary_v1"
+        and typography_standard != "no_text_v1"
+    ):
         designs = package.strategy.thumbnail_designs
         normalized_design_texts = {_normalized_search_text(design.text) for design in designs}
         if len(normalized_design_texts) != expected_designs:
@@ -910,15 +1064,25 @@ def _validate_package(
             if not (design.narrative_element_target or "").strip():
                 raise ValueError("O elemento narrativo da thumbnail precisa declarar seu alvo.")
     source_mode = outputs.get("thumbnail_source_mode")
-    if source_mode != "generated_integrated_art":
-        raise ValueError("A fila precisa usar thumbnail integrada gerada pelo modelo.")
+    if source_mode not in {"generated_integrated_art", "generated_theme_art"}:
+        raise ValueError("A fila precisa usar thumbnail gerada pelo modelo.")
     declared_paths = outputs.get("thumbnails", [])
     if len(declared_paths) != int(outputs.get("thumbnail_count", 0)):
         raise ValueError("A fila integrada precisa declarar um arquivo por thumbnail.")
+    if int(outputs.get("thumbnail_count", 0)) == 1 and metadata.thumbnail_alternatives:
+        raise ValueError("O pacote de uma única thumbnail não pode declarar alternativas.")
     if outputs.get("text_overlay_required") is not False:
         raise ValueError("A fila integrada não pode solicitar overlay local de texto.")
-    if outputs.get("imagegen_text_authority") is not True:
+    if (
+        source_mode == "generated_integrated_art"
+        and outputs.get("imagegen_text_authority") is not True
+    ):
         raise ValueError("A fila integrada precisa declarar o imagegen como autoridade textual.")
+    if source_mode == "generated_theme_art":
+        if outputs.get("imagegen_text_authority") is not False:
+            raise ValueError("A thumbnail sem texto não pode declarar autoridade textual.")
+        if outputs.get("text_forbidden") is not True:
+            raise ValueError("A fila temática precisa proibir texto no bitmap.")
     if project.video_format == "short":
         if len(metadata.title) > SHORT_TITLE_MAX_CHARACTERS:
             raise ValueError(
@@ -973,10 +1137,17 @@ def _validate_package(
             raise ValueError("promise_match não aponta para a cena de abertura ativa.")
         if promise_match.title_delivery != metadata.title.removesuffix(suffix).strip():
             raise ValueError("title_delivery precisa copiar a tensão antes da barra.")
-        if not package.strategy.thumbnail_designs or (
-            promise_match.thumbnail_delivery != package.strategy.thumbnail_designs[0].text
-        ):
-            raise ValueError("thumbnail_delivery precisa copiar o texto da thumbnail principal.")
+        expected_thumbnail_delivery = (
+            metadata.thumbnail_concept
+            if typography_standard == "no_text_v1"
+            else package.strategy.thumbnail_designs[0].text
+        )
+        if promise_match.thumbnail_delivery != expected_thumbnail_delivery:
+            raise ValueError(
+                "thumbnail_delivery precisa copiar o conceito visual da thumbnail principal."
+                if typography_standard == "no_text_v1"
+                else "thumbnail_delivery precisa copiar o texto da thumbnail principal."
+            )
     if len(package.strategy.official_guidelines) < 3 or not set(
         package.strategy.official_guidelines
     ).issubset(OFFICIAL_YOUTUBE_GUIDELINES):
@@ -1251,8 +1422,9 @@ def import_growth_package(
     audio = read_model(layout.audio, AudioManifest) if layout.audio.is_file() else None
     scenes = read_model(layout.scenes, SceneManifest)
     source_mode = queue["outputs"].get("thumbnail_source_mode")
-    if source_mode != "generated_integrated_art":
-        raise ValueError("Apenas thumbnails integradas geradas pelo modelo são suportadas.")
+    if source_mode not in {"generated_integrated_art", "generated_theme_art"}:
+        raise ValueError("Apenas thumbnails geradas pelo modelo são suportadas.")
+    clean_theme_art = source_mode == "generated_theme_art"
     thumbnail_paths = [
         _safe_staging_file(layout, path) for path in queue["outputs"].get("thumbnails", [])
     ]
@@ -1288,9 +1460,9 @@ def import_growth_package(
         _normalize_thumbnail(source, destination, size)
 
     first_design = candidate_designs[0]
-    first_text = first_design.text
-    first_accent = first_design.accent_word
-    first_position = first_design.text_position
+    first_text = None if clean_theme_art else first_design.text
+    first_accent = None if clean_theme_art else first_design.accent_word
+    first_position = None if clean_theme_art else first_design.text_position
 
     write_json(layout.metadata, metadata)
     write_json(layout.growth_strategy, package.strategy)
@@ -1307,7 +1479,7 @@ def import_growth_package(
             "format_note": (
                 "Capa vertical composta e incorporada ao início do Short."
                 if project.video_format == "short"
-                else "Candidatas para A/B test no YouTube Studio."
+                else "Thumbnail horizontal sem texto gerada a partir do tema do vídeo."
             ),
             "text_overlay": first_text,
             "accent_word": first_accent,
@@ -1331,7 +1503,7 @@ def import_growth_package(
                     "source_hash": sha256_file(thumbnail_paths[index]),
                     "paired_title": [metadata.title, *metadata.alternative_titles][index],
                     "design": candidate_designs[index].model_dump(mode="json"),
-                    "text_baked_into_bitmap": True,
+                    "text_baked_into_bitmap": not clean_theme_art,
                 }
                 for index, (path, digest) in enumerate(
                     zip(version_paths, thumbnail_hashes, strict=True)
@@ -1339,8 +1511,13 @@ def import_growth_package(
             ],
             "approved": False,
             "updated_at": utc_now(),
-            "provider": "imagegen-integrated+youtube-growth-specialist",
-            "text_baked_into_bitmap": True,
+            "provider": (
+                "imagegen-theme+youtube-growth-specialist"
+                if clean_theme_art
+                else "imagegen-integrated+youtube-growth-specialist"
+            ),
+            "text_baked_into_bitmap": not clean_theme_art,
+            "text_forbidden": clean_theme_art,
             "text_overlay": first_text,
             "accent_word": first_accent,
             "text_position": first_position,
@@ -1419,12 +1596,13 @@ def import_growth_package(
         usage={
             "candidates": len(version_paths),
             "external_image_generations": len(version_paths),
-            "integrated_image_generations": len(version_paths),
+            "integrated_image_generations": 0 if clean_theme_art else len(version_paths),
+            "clean_image_generations": len(version_paths) if clean_theme_art else 0,
         },
         note=(
             "Imagem do versículo reutilizada na capa e composta no primeiro frame do Short."
             if project.video_format == "short"
-            else f"{len(version_paths)} candidatas prontas para teste."
+            else "Thumbnail temática sem texto pronta para publicação."
         ),
     )
     layout.append_event(

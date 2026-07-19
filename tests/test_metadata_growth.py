@@ -119,39 +119,53 @@ def _set_growth_variants(layout, count: int) -> None:
 
 
 def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPackage:
-    design_specs = [
-        YouTubeThumbnailDesign(
-            text="FÉ CONTRA MEDO",
-            accent_word="MEDO",
-            text_lines=["FÉ CONTRA", "MEDO"],
-            primary_color="white",
-            accent_color="red",
-            narrative_element="underline",
-            narrative_element_target="MEDO",
-            narrative_element_rationale="Sublinhar o conflito central da narrativa.",
-        ),
-        YouTubeThumbnailDesign(
-            text="DAVI NÃO RECUOU",
-            accent_word="RECUOU",
-            text_lines=["DAVI", "NÃO RECUOU"],
-            primary_color="white",
-            accent_color="red",
-            narrative_element="underline",
-            narrative_element_target="RECUOU",
-            narrative_element_rationale="Sublinhar a decisão narrada de Davi.",
-        ),
-        YouTubeThumbnailDesign(
-            text="ELE PARECIA INVENCÍVEL",
-            accent_word="INVENCÍVEL",
-            text_lines=["ELE PARECIA", "INVENCÍVEL"],
-            primary_color="white",
-            accent_color="red",
-            narrative_element="arrow",
-            narrative_element_anchor="center_right",
-            narrative_element_target="Golias",
-            narrative_element_rationale="Apontar para o antagonista já presente na arte-base.",
-        ),
-    ]
+    clean_theme_art = queue["outputs"]["thumbnail_source_mode"] == "generated_theme_art"
+    design_specs = (
+        [
+            YouTubeThumbnailDesign(
+                text="",
+                accent_word="",
+                texture="none",
+                typography_treatment="none",
+                typography_hierarchy="none",
+                typography_material="none",
+            )
+        ]
+        if clean_theme_art
+        else [
+            YouTubeThumbnailDesign(
+                text="FÉ CONTRA MEDO",
+                accent_word="MEDO",
+                text_lines=["FÉ CONTRA", "MEDO"],
+                primary_color="white",
+                accent_color="red",
+                narrative_element="underline",
+                narrative_element_target="MEDO",
+                narrative_element_rationale="Sublinhar o conflito central da narrativa.",
+            ),
+            YouTubeThumbnailDesign(
+                text="DAVI NÃO RECUOU",
+                accent_word="RECUOU",
+                text_lines=["DAVI", "NÃO RECUOU"],
+                primary_color="white",
+                accent_color="red",
+                narrative_element="underline",
+                narrative_element_target="RECUOU",
+                narrative_element_rationale="Sublinhar a decisão narrada de Davi.",
+            ),
+            YouTubeThumbnailDesign(
+                text="ELE PARECIA INVENCÍVEL",
+                accent_word="INVENCÍVEL",
+                text_lines=["ELE PARECIA", "INVENCÍVEL"],
+                primary_color="white",
+                accent_color="red",
+                narrative_element="arrow",
+                narrative_element_anchor="center_right",
+                narrative_element_target="Golias",
+                narrative_element_rationale="Apontar para o antagonista já presente na arte-base.",
+            ),
+        ]
+    )
     design_count = queue["outputs"].get(
         "thumbnail_design_count",
         queue["outputs"].get("thumbnail_count", len(queue["outputs"]["thumbnails"])),
@@ -168,7 +182,11 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
             opening_line=queue["contract_guard"]["opening_hook"],
             opening_scene_id=queue["contract_guard"]["opening_scene_id"],
             title_delivery=titles[0].split("|", 1)[0].strip(),
-            thumbnail_delivery=design_specs[0].text,
+            thumbnail_delivery=(
+                "Davi pequeno diante da paisagem do vale"
+                if clean_theme_art
+                else design_specs[0].text
+            ),
         )
     else:
         titles = [
@@ -189,16 +207,26 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
             chapters=[],
             topics=["Davi e Golias", "1 Samuel 17"],
             pinned_comment="Qual parte dessa história mais falou com você?",
-            thumbnail_concept="Davi pequeno diante da sombra de Golias",
-            thumbnail_prompt=(
-                "Visual standard: cinematic-family-3d-v1. Style/medium: animação 3D "
-                "cinematográfica familiar premium. Typography standard: "
-                "integrated_extruded_3d_v1. Tipografia 3D extrudada integrada, com espessura "
-                "visível, bordas chanfradas, sombras de contato e oclusão, perspectiva coerente "
-                "e material coerente com a cena. Contraste de escala, emoção clara e composição "
-                "simples."
+            thumbnail_concept=(
+                "Davi pequeno diante da paisagem do vale"
+                if clean_theme_art
+                else "Davi pequeno diante da sombra de Golias"
             ),
-            thumbnail_alternatives=["Pedra no ar", "Sombra do gigante"],
+            thumbnail_prompt=(
+                queue["inputs"]["thumbnail_prompt"]
+                if clean_theme_art
+                else (
+                    "Visual standard: cinematic-family-3d-v1. Style/medium: animação 3D "
+                    "cinematográfica familiar premium. Typography standard: "
+                    "integrated_extruded_3d_v1. Tipografia 3D extrudada integrada, com espessura "
+                    "visível, bordas chanfradas, sombras de contato e oclusão, perspectiva "
+                    "coerente e material coerente com a cena. Contraste de escala, emoção clara "
+                    "e composição simples."
+                )
+            ),
+            thumbnail_alternatives=(
+                ["Pedra no ar", "Sombra do gigante"] if design_count > 1 else []
+            ),
         ),
         strategy=YouTubeGrowthStrategy(
             format=format_name,
@@ -267,6 +295,7 @@ def _install_integrated_staging_thumbnails(layout, queue: dict) -> None:
 
 def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path) -> None:
     layout = _project_with_editorial_inputs(tmp_path)
+    layout.images.unlink()
 
     queue = prepare_growth_queue(layout)
     repeated = prepare_growth_queue(layout)
@@ -281,12 +310,16 @@ def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path
     assert queue["orchestration"]["context_policy"] == "compact_only"
     assert queue["inputs"] == {
         "compact_context": "youtube/growth-context.json",
-        "thumbnail_visual_reference_scene_id": "scene-001",
-        "thumbnail_visual_reference_path": "images/assets/scene-001/v001.png",
+        "thumbnail_visual_reference_scene_id": None,
+        "thumbnail_visual_reference_path": None,
+        "thumbnail_theme": "Coragem e confiança em Deus",
+        "thumbnail_prompt": queue["inputs"]["thumbnail_prompt"],
     }
+    assert "TEMA DO VÍDEO:\nCoragem e confiança em Deus" in queue["inputs"]["thumbnail_prompt"]
+    assert "texto, letras, logotipos" in queue["inputs"]["thumbnail_prompt"]
     assert queue["visual_standard"]["id"] == "cinematic-family-3d-v1"
-    assert queue["visual_standard"]["thumbnail_must_match_scene_images"] is True
-    assert queue["visual_standard"]["reference_policy"] == "required_opening_scene_image"
+    assert queue["visual_standard"]["thumbnail_must_match_scene_images"] is False
+    assert queue["visual_standard"]["reference_policy"] == "theme_only_no_reference"
     context = read_json(layout.growth_context)
     assert context["visual_system"]["style"]["visual_standard_id"] == ("cinematic-family-3d-v1")
     assert context["opening_scene"]["visual_subject"] == "Davi diante de Golias"
@@ -297,49 +330,30 @@ def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path
         json.dumps(YouTubeGrowthPackage.model_json_schema())
     )
     assert len(queue["outputs"]["thumbnails"]) == 1
-    assert queue["outputs"]["thumbnail_source_mode"] == "generated_integrated_art"
+    assert queue["outputs"]["thumbnail_source_mode"] == "generated_theme_art"
     assert queue["outputs"]["external_image_generation_required"] is True
-    assert queue["outputs"]["base_art_without_text"] is False
+    assert queue["outputs"]["base_art_without_text"] is True
     assert queue["outputs"]["text_overlay_required"] is False
-    assert queue["outputs"]["imagegen_text_authority"] is True
+    assert queue["outputs"]["imagegen_text_authority"] is False
+    assert queue["outputs"]["text_forbidden"] is True
     assert queue["outputs"]["title_standard"] == "tension_pipe_passage_v2"
     assert queue["outputs"]["description_standard"] == "scripture_timeline_v1"
-    assert queue["outputs"]["thumbnail_standard"] == "direct_conflict_red_v1"
-    assert queue["outputs"]["thumbnail_typography_standard"] == ("integrated_extruded_3d_v1")
+    assert queue["outputs"]["thumbnail_standard"] == "biblical_cinematic_landscape_v1"
+    assert queue["outputs"]["thumbnail_typography_standard"] == "no_text_v1"
     assert queue["outputs"]["title_thumbnail_pairing_standard"] == "complementary_v1"
-    assert queue["outputs"]["design_contract"]["maximum_lines"] == 3
-    assert queue["outputs"]["design_contract"]["allowed_text_colors"] == [
-        "white",
-        "yellow",
-        "red",
-    ]
-    assert queue["outputs"]["design_contract"]["allowed_text_alignments"] == [
-        "left",
-        "center",
-        "right",
-    ]
+    assert queue["outputs"]["design_contract"]["maximum_lines"] == 0
+    assert queue["outputs"]["design_contract"]["allowed_text_colors"] == []
+    assert queue["outputs"]["design_contract"]["allowed_text_alignments"] == []
     assert queue["outputs"]["design_contract"]["paired_variants_required"] is True
-    assert queue["outputs"]["design_contract"]["typography_treatment"] == ("integrated_extruded_3d")
-    assert queue["outputs"]["design_contract"]["visible_extrusion"] is True
-    assert queue["outputs"]["design_contract"]["beveled_edges"] is True
-    assert queue["outputs"]["design_contract"]["contact_and_occlusion_shadows"] is True
-    assert queue["outputs"]["design_contract"]["title_thumbnail_repetition_allowed"] is False
-    assert any("personagem ou objeto dominante" in item for item in queue["instructions"])
+    assert queue["outputs"]["design_contract"]["typography_treatment"] == "none"
+    assert queue["outputs"]["design_contract"]["clean_negative_space_required"] is True
+    assert queue["outputs"]["design_contract"]["text_forbidden"] is True
+    assert "top_text_safe_margin_ratio" not in queue["outputs"]["design_contract"]
+    assert any("única base narrativa" in item for item in queue["instructions"])
     assert any("bitmap completo" in item for item in queue["instructions"])
-    assert any("não aplicará texto" in item for item in queue["instructions"])
+    assert any("texto, letras, números" in item for item in queue["instructions"])
     assert any("um par editorial completo" in item for item in queue["instructions"])
-    assert any("primeira edição" in item for item in queue["instructions"])
-    assert any("É proibido repetir" in item for item in queue["instructions"])
-    assert any("DAVI VS GOLIAS" in item for item in queue["instructions"])
-    assert any("accent_color=red" in item for item in queue["instructions"])
-    assert any("mesmo universo visual" in item for item in queue["instructions"])
-    assert any("Style/medium: animação 3D" in item for item in queue["instructions"])
-    assert any(
-        "tipografia 3d extrudada integrada" in item.casefold() for item in queue["instructions"]
-    )
-    assert any(
-        "não use todas as palavras no mesmo tamanho" in item for item in queue["instructions"]
-    )
+    assert any("Não passe referenced_image_paths" in item for item in queue["instructions"])
     assert layout.load_manifest().stages["youtube_growth"].attempts == 1
 
     write_json(layout.growth_package_staging, _package(queue))
@@ -357,16 +371,16 @@ def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path
         assert thumbnail.getpixel((640, 70)) == (30, 40, 80)
     assert len(list(layout.thumbnail.parent.glob("thumbnail-v*.png"))) == 1
     thumbnail_manifest = read_json(layout.thumbnail.parent / "thumbnail-manifest.json")
-    assert [item["design"]["text"] for item in thumbnail_manifest["candidates"]] == [
-        "FÉ CONTRA MEDO",
-    ]
+    assert [item["design"]["text"] for item in thumbnail_manifest["candidates"]] == [""]
     manifest = layout.load_manifest()
     assert manifest.stages["youtube_growth"].status == StageStatus.COMPLETED
     assert manifest.stages["metadata"].status == StageStatus.COMPLETED
     assert manifest.stages["thumbnail"].status == StageStatus.COMPLETED
     assert manifest.stages["thumbnail"].usage["external_image_generations"] == 1
-    assert manifest.stages["thumbnail"].usage["integrated_image_generations"] == 1
-    assert thumbnail_manifest["text_baked_into_bitmap"] is True
+    assert manifest.stages["thumbnail"].usage["integrated_image_generations"] == 0
+    assert manifest.stages["thumbnail"].usage["clean_image_generations"] == 1
+    assert thumbnail_manifest["text_baked_into_bitmap"] is False
+    assert thumbnail_manifest["text_forbidden"] is True
 
 
 def test_single_agent_growth_queue_requests_one_integrated_title_thumbnail_pair(tmp_path) -> None:
@@ -387,6 +401,13 @@ def test_single_agent_growth_queue_requests_one_integrated_title_thumbnail_pair(
     assert len(queue["outputs"]["thumbnails"]) == 1
     assert queue["generation_retry_policy"]["same_prompt_attempts"] == 2
     assert queue["visual_standard"]["reference_policy"] == "required_opening_scene_image"
+    assert queue["outputs"]["design_contract"]["top_text_safe_margin_ratio"] == 0.10
+    assert any(
+        "top 10% of the canvas completely free of text" in item for item in queue["instructions"]
+    )
+    assert any(
+        "não se aplica a thumbnails de vídeos longos" in item for item in queue["instructions"]
+    )
     assert "apparent_age" in queue["generation_retry_policy"]["immutable_on_alternative"]
     assert any("exatamente o mesmo prompt" in item for item in queue["instructions"])
     assert any("um par editorial completo" in item for item in queue["instructions"])
@@ -396,10 +417,10 @@ def test_single_agent_growth_queue_requests_one_integrated_title_thumbnail_pair(
 def test_integrated_retouch_imports_new_versions_without_local_overlay_or_activation(
     tmp_path,
 ) -> None:
-    layout = _project_with_editorial_inputs(tmp_path)
+    layout = _project_with_editorial_inputs(tmp_path, video_format="short")
     _set_growth_variants(layout, 3)
     queue = prepare_growth_queue(layout)
-    write_json(layout.growth_package_staging, _package(queue))
+    write_json(layout.growth_package_staging, _package(queue, format_name="short"))
     _install_integrated_staging_thumbnails(layout, queue)
     import_growth_package(layout)
     original_active = layout.thumbnail.read_bytes()
@@ -567,6 +588,59 @@ def test_growth_rejects_photographic_thumbnail_prompt(tmp_path) -> None:
         )
 
 
+def test_long_growth_rejects_any_change_to_the_theme_prompt(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(tmp_path)
+    queue = prepare_growth_queue(layout)
+    package = _package(queue)
+    changed_metadata = package.metadata.model_copy(
+        update={"thumbnail_prompt": f"{package.metadata.thumbnail_prompt}\nTexto extra."}
+    )
+
+    with pytest.raises(ValueError, match="copiar integralmente o template temático"):
+        _validate_package(
+            layout,
+            package.model_copy(update={"metadata": changed_metadata}),
+            queue,
+        )
+
+
+def test_long_growth_rejects_text_or_editorial_marks(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(tmp_path)
+    queue = prepare_growth_queue(layout)
+    package = _package(queue)
+    invalid_design = package.strategy.thumbnail_designs[0].model_copy(
+        update={
+            "text": "FÉ CONTRA MEDO",
+            "accent_word": "MEDO",
+            "text_lines": ["FÉ CONTRA MEDO"],
+        }
+    )
+    invalid_strategy = package.strategy.model_copy(update={"thumbnail_designs": [invalid_design]})
+
+    with pytest.raises(ValueError, match="sem texto ou marcações"):
+        _validate_package(
+            layout,
+            package.model_copy(update={"strategy": invalid_strategy}),
+            queue,
+        )
+
+
+def test_long_growth_rejects_thumbnail_alternatives(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(tmp_path)
+    queue = prepare_growth_queue(layout)
+    package = _package(queue)
+    metadata_with_alternative = package.metadata.model_copy(
+        update={"thumbnail_alternatives": ["Outra composição"]}
+    )
+
+    with pytest.raises(ValueError, match="não pode declarar alternativas"):
+        _validate_package(
+            layout,
+            package.model_copy(update={"metadata": metadata_with_alternative}),
+            queue,
+        )
+
+
 def test_growth_rejects_prompt_without_integrated_extruded_3d_typography(tmp_path) -> None:
     layout = _project_with_editorial_inputs(tmp_path, video_format="short")
     queue = prepare_growth_queue(layout)
@@ -631,9 +705,9 @@ def test_growth_ignores_long_avoid_section_with_photographic_markers(tmp_path) -
 
 
 def test_growth_rejects_title_that_repeats_the_paired_thumbnail_text(tmp_path) -> None:
-    layout = _project_with_editorial_inputs(tmp_path)
+    layout = _project_with_editorial_inputs(tmp_path, video_format="short")
     queue = prepare_growth_queue(layout)
-    package = _package(queue)
+    package = _package(queue, format_name="short")
     repeated_metadata = package.metadata.model_copy(
         update={"title": "Davi enfrenta Golias | 1 Samuel 17"}
     )
@@ -661,10 +735,10 @@ def test_growth_rejects_title_that_repeats_the_paired_thumbnail_text(tmp_path) -
 
 
 def test_growth_rejects_reused_thumbnail_phrase_across_title_pairs(tmp_path) -> None:
-    layout = _project_with_editorial_inputs(tmp_path)
+    layout = _project_with_editorial_inputs(tmp_path, video_format="short")
     _set_growth_variants(layout, 3)
     queue = prepare_growth_queue(layout)
-    package = _package(queue)
+    package = _package(queue, format_name="short")
     duplicate = package.strategy.thumbnail_designs[1].model_copy(
         update={
             "text": package.strategy.thumbnail_designs[0].text,

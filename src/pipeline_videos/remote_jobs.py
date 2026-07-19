@@ -1223,6 +1223,9 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
 
 def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     queue = read_json(layout.growth_queue)
+    theme_based_thumbnail = (
+        queue.get("outputs", {}).get("thumbnail_source_mode") == "generated_theme_art"
+    )
     context = _project_file(layout, queue["inputs"]["compact_context"])
     package = _project_file(layout, queue["outputs"]["package"])
     thumbnails = tuple(
@@ -1295,14 +1298,20 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 "instructions": [
                     "Siga integralmente instructions, schemas e generation_retry_policy da fila.",
                     (
-                        "Use thumbnail_visual_reference_path como edit obrigatório de imagegen: "
-                        "preserve a imagem, a cena e o personagem e acrescente a composição "
-                        "editorial, o texto e a marcação vermelha; não a converta em fotografia. "
-                        "Aceite a primeira saída válida sem repetir por qualidade ou deriva visual."
-                        if visual_reference is not None
-                        else "Siga integralmente o visual_standard textual da fila."
+                        "Use somente inputs.thumbnail_prompt, sem referenced_image_paths; gere a "
+                        "thumbnail horizontal limpa e sem texto exatamente como a fila determina."
+                        if theme_based_thumbnail
+                        else (
+                            "Use thumbnail_visual_reference_path como edit obrigatório de "
+                            "imagegen: preserve a imagem, a cena e o personagem e acrescente a "
+                            "composição editorial, o texto e a marcação vermelha; não a converta "
+                            "em fotografia. Aceite a primeira saída válida sem repetir por "
+                            "qualidade ou deriva visual."
+                            if visual_reference is not None
+                            else "Siga integralmente o visual_standard textual da fila."
+                        )
                     ),
-                    "Gere exatamente um título e uma thumbnail integrada nesta produção remota.",
+                    "Gere exatamente um título e uma thumbnail nesta produção remota.",
                     "Escreva apenas outputs.package e outputs.thumbnails.",
                     "O executor importará o pacote; não altere metadados compartilhados.",
                 ],
@@ -1323,24 +1332,29 @@ def _growth_correction_checkpoint(
     if package.is_file():
         allowed_inputs.append(str(package))
     task = dict(payload["task"])
+    theme_based_thumbnail = (
+        read_json(layout.growth_queue).get("outputs", {}).get("thumbnail_source_mode")
+        == "generated_theme_art"
+    )
     task.update(
         {
             "kind": "correct_one_title_thumbnail_pair",
             "validation_error": str(validation_error)[:4000],
             "instructions": [
-                "Corrija somente o pacote e a thumbnail integrados que falharam na validação.",
-                (
-                    "Preserve título, promessa, passagem, personagem, cena de abertura e todos "
-                    "os campos já válidos."
-                ),
+                "Corrija somente o pacote e a thumbnail que falharam na validação.",
+                ("Preserve título, promessa, passagem e todos os campos já válidos."),
                 (
                     "Mantenha cinematic-family-3d-v1 e animação 3D cinematográfica familiar "
                     "como estilo positivo. Termos fotográficos podem aparecer somente dentro "
                     "de restrições negativas como Avoid."
                 ),
                 (
-                    "Se o estilo positivo pedir fotografia, reescreva o prompt e regenere uma "
-                    "única vez a thumbnail a partir da imagem de abertura obrigatória."
+                    "Para a thumbnail temática longa, restaure metadata.thumbnail_prompt como "
+                    "cópia exata de inputs.thumbnail_prompt e regenere sem imagem de referência, "
+                    "texto ou marcação editorial."
+                    if theme_based_thumbnail
+                    else "Se o estilo positivo pedir fotografia, reescreva o prompt e regenere "
+                    "uma única vez a thumbnail a partir da imagem de abertura obrigatória."
                 ),
                 (
                     "Nesta correção, ignore a regra de pular staging já existente: sobrescreva "

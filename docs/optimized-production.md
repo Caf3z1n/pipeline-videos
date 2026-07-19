@@ -26,8 +26,9 @@ válido tornam a retomada idempotente.
 
 No cenário local, o roteiro de Short usa exatamente um `shorts_script_specialist` com raciocínio
 alto. Imagens podem usar até dois workers com `fork_turns=none`; cada worker recebe somente seu job
-compacto e escreve no staging declarado. O especialista de crescimento usa raciocínio médio,
-recebe a imagem ativa da abertura e gera exatamente um par título+thumbnail integrado.
+compacto e escreve no staging declarado. O especialista de crescimento usa raciocínio médio e gera
+exatamente um par título+thumbnail. Shorts recebem a imagem ativa da abertura; vídeos longos
+recebem somente o tema central já inserido no prompt horizontal versionado.
 
 O agente principal é o único escritor de `project.json`, filas, manifestos, decisões e eventos. Ele
 valida e importa roteiro, lote de imagens e crescimento de forma serializada.
@@ -81,13 +82,20 @@ item já importado ou aprovado.
 
 ## Crescimento e thumbnail
 
-A fila exige exatamente um par complementar. O título concentra passagem, tema e busca; a capa
-acrescenta tensão, decisão, contraste ou consequência. A thumbnail edita a imagem ativa da abertura
-e nasce no Imagegen com texto, palavra vermelha e seta, X, sublinhado ou pincel incorporados.
+A fila exige exatamente um par complementar. O título concentra passagem, tema e busca. Em Shorts,
+a capa acrescenta tensão, decisão, contraste ou consequência, edita a imagem ativa da abertura e
+nasce no Imagegen com texto, palavra vermelha e seta, X, sublinhado ou pincel incorporados.
 
-O importador aceita somente `generated_integrated_art`. Não existe compositor local, overlay de
-texto, reutilização de outra cena ou fallback para pacote antigo. Uma saída válida é aceita; retries
-adicionais existem apenas para `moderation_blocked` sem bitmap.
+Em vídeos longos, a fila usa `generated_theme_art` e o template
+`biblical_cinematic_landscape_v1`: geração nova horizontal 16:9, baseada exclusivamente no tema do
+briefing, sem imagem de referência e sem texto, letras, logotipos ou marcações. O personagem ocupa
+30% a 40% do quadro e o lado oposto preserva espaço negativo limpo. O importador aceita os dois
+modos e nunca aplica overlay local. Uma saída válida é aceita; retries adicionais existem apenas
+para `moderation_blocked` sem bitmap.
+
+Em Shorts, o prompt final reserva os 10% superiores do canvas como faixa segura sem tipografia,
+incluindo extrusão, contornos e sombras. Todo o texto começa abaixo desse limite para tolerar o corte
+visual da grade do YouTube. Essa margem específica não se aplica às thumbnails de vídeos longos.
 
 O guard visual exige os marcadores positivos de `cinematic-family-3d-v1` e animação 3D, mas
 desconsidera marcadores fotográficos declarados dentro de seções negativas como `Avoid:`. Se um

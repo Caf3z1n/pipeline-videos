@@ -118,9 +118,9 @@ pacote contra os modelos Pydantic completos e os arquivos-fonte do projeto:
 - os JSON Schemas enviados às filas removem somente metadados de apresentação, preservando tipos,
   enums, referências e campos obrigatórios;
 - os subagentes partem com `fork_turns=none`, evitando herdar o histórico inteiro da conversa;
-- em projetos novos, inclusive Shorts, a fila declara um bitmap final de thumbnail; o especialista
-  edita a imagem ativa da abertura, incorpora texto e símbolos com imagegen e o importador não cria
-  overlays locais;
+- em projetos novos, a fila declara um único bitmap final de thumbnail. Em Shorts, o especialista
+  edita a imagem ativa da abertura e incorpora texto e símbolos com imagegen. Em longos, gera uma
+  imagem horizontal limpa baseada somente no tema central. O importador não cria overlays locais;
 - reutilização de cena e composição Pillow permanecem apenas como compatibilidade para projetos
   legados. Em Shorts, a candidata integrada é usada no frame zero.
 

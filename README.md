@@ -5,32 +5,35 @@ vídeos bíblicos. O chat ajuda na criação; a pasta de cada vídeo é a fonte 
 
 O modo único é `draft_one_shot`: o Codex produz uma prévia completa. Localmente e na VPS, cada vídeo
 usa um coordenador persistente e subagentes de roteiro, imagens e crescimento, todos em
-`gpt-5.6-sol` e com o raciocínio próprio da função. Depois da importação das imagens, o crescimento
-edita a imagem ativa da abertura.
+`gpt-5.6-sol` e com o raciocínio próprio da função. Shorts editam a imagem ativa da abertura;
+vídeos longos geram uma thumbnail horizontal nova, baseada somente no tema central.
 
 O planejamento one-shot aparece em `run --dry-run` como cinco ondas. Depois do roteiro e das
 cenas, os trabalhadores de imagem rodam enquanto o agente principal produz áudio, música e
-legendas. Após o import das imagens, o especialista do YouTube recebe a abertura como referência.
+legendas. Após o import das imagens, o especialista do YouTube recebe a abertura nos Shorts e o
+tema central nos vídeos longos.
 O principal continua sendo o único escritor do estado e realiza as importações serialmente antes do
 ponto de junção do render.
 
 O MVP já prova o fluxo vertical sem serviços pagos: briefing → roteirista especialista de Shorts →
 revisão bíblica → cenas → imagens fixture → áudio simulado → música local → alinhamento por palavra
-→ ASS/SRT/VTT → especialista YouTube → thumbnail integrada → MP4 final e prévia. O caminho de
+→ ASS/SRT/VTT → especialista YouTube → thumbnail final → MP4 final e prévia. O caminho de
 produção usa a geração de imagens embutida do Codex por uma fila de importação e ElevenLabs por um
 adaptador protegido por confirmação explícita.
 
 Projetos reais novos usam o perfil `token_optimized_v1`. A prévia permanece em resolução completa,
 mas usa CRF 16, preset `fast` e supersampling 2; o render final aprovado preserva a qualidade V4 com
 CRF 12, preset `slow` e supersampling 3. Trabalhadores recebem arquivos compactos em `images/jobs/`
-sem herdar o histórico, e o gerador cria uma capa final com texto e símbolos incorporados. Título
-e thumbnail formam uma única combinação complementar em todos os modos novos.
+sem herdar o histórico. O gerador cria uma única thumbnail: Shorts recebem texto e símbolos
+incorporados; vídeos longos recebem uma imagem cinematográfica limpa, sem texto. Título e thumbnail
+formam uma única combinação complementar em todos os modos novos.
 
 O padrão editorial mantém toda a locução em português e exige citações bíblicas literais
 verificadas. Shorts e vídeos longos novos usam `Tensão concreta | Passagem` e CTA de uma única
-ação. Longos recebem também uma timeline bíblica iniciada por `00:00 - Abertura`. Nas capas, a
-palavra de impacto e o elemento narrativo usam vermelho, com seta, X, sublinhado ou pincel apontando
-para algo real da cena.
+ação. Longos recebem também uma timeline bíblica iniciada por `00:00 - Abertura`. Nas capas de
+Shorts, a palavra de impacto e o elemento narrativo usam vermelho, com seta, X, sublinhado ou pincel
+apontando para algo real da cena. As capas longas preservam uma área limpa no lado oposto ao
+personagem.
 
 Depois de roteiro e revisão, o caminho recomendado é:
 
@@ -398,7 +401,8 @@ entrada e saída de 2 e 3 segundos, preservando a narração como faixa principa
 ### 7. Especialista de título, descrição, SEO e thumbnail
 
 Projetos reais usam um subagente `youtube_growth_specialist`. Nos projetos novos, a fila é preparada
-depois da importação das imagens, pois a capa edita diretamente a imagem ativa da abertura:
+depois da importação das imagens. Shorts editam diretamente a imagem ativa da abertura; longos usam
+o tema central do briefing no template `biblical_cinematic_landscape_v1`, sem imagem de referência:
 
 ```powershell
 uv run pipeline-videos metadata growth-prepare salmo-121
@@ -406,7 +410,7 @@ uv run pipeline-videos metadata growth-prepare salmo-121
 uv run pipeline-videos metadata growth-import salmo-121
 ```
 
-O especialista entrega uma combinação de título e thumbnail, uma
+O especialista entrega exatamente uma combinação de título e thumbnail, uma
 descrição única, palavras-chave, intenção de busca, hipótese de CTR e justificativas registradas em
 `youtube/seo-strategy.json`. O agente principal valida e importa o pacote; o subagente não altera
 `project.json`, aprovações ou ativos em uso.
@@ -418,11 +422,10 @@ Nos projetos novos, todas as opções de título começam pela passagem principa
 o tema reconhecível do vídeo. A descrição abre com resumo curto e, em vídeos longos, recebe uma
 timeline das citações no ponto em que entram na narrativa.
 
-O par editorial distribui funções entre os dois elementos. O título concentra
-referência, tema e intenção de busca; a frase curta da capa acrescenta tensão, decisão, contraste ou
-consequência. O importador rejeita repetições literais, trechos completos e paráfrases quase iguais
-entre o tema depois de `|` e o texto da thumbnail. Nomes próprios e palavras-chave isoladas podem
-aparecer nos dois quando forem necessários para clareza.
+O par editorial distribui funções entre os dois elementos. O título concentra referência, tema e
+intenção de busca. Em Shorts, a frase curta da capa acrescenta tensão, decisão, contraste ou
+consequência. Em longos, a imagem comunica emoção, gesto, paisagem e conflito sem qualquer texto,
+letra, logotipo ou marcação editorial.
 
 Nos Shorts, o título principal precisa conter a expressão de busca primária, pelo menos uma opção
 de título precisa ancorar a passagem bíblica e a descrição fica curta, sem capítulos. O especialista
@@ -442,17 +445,17 @@ causalidade a partir de poucos dados.
 
 O objetivo é aumentar relevância, clareza e probabilidade de clique sem clickbait enganoso. Não há
 garantia de viralização: o próprio YouTube considera relevância, satisfação, watch time, histórico do
-público, concorrência e sazonalidade. Em projetos novos, o especialista faz uma chamada de imagegen
-para editar a imagem ativa da abertura e entrega o bitmap final já com texto, palavra de destaque vermelha e elemento
-narrativo incorporados. Tipografia e símbolos participam da luz, profundidade, perspectiva e
-composição; não podem parecer uma camada solta nem cobrir rostos, corpos ou a ação principal. O
-importador apenas normaliza dimensões e formato, sem aplicar texto com Pillow. A primeira saída
-válida é mantida mesmo se houver deriva visual ou imperfeição; nova tentativa automática ocorre
-somente quando `moderation_blocked` não produz imagem. Projetos legados continuam compatíveis com
-reutilização de cenas e composição local. Em Shorts, a capa ocupa exatamente o frame zero.
+público, concorrência e sazonalidade. Em Shorts novos, o especialista faz uma chamada de imagegen
+para editar a imagem ativa da abertura e entrega o bitmap final com texto, destaque vermelho e
+elemento narrativo incorporados. Em vídeos longos novos, faz uma geração horizontal 16:9 sem
+referência visual, usando integralmente o prompt temático versionado e proibindo texto, letras,
+logotipos e marcações. O importador apenas normaliza dimensões e formato, sem aplicar texto com
+Pillow. A primeira saída válida é mantida; nova tentativa automática ocorre somente quando
+`moderation_blocked` não produz imagem. Projetos legados preservam o contrato armazenado. Em Shorts,
+a capa ocupa exatamente o frame zero.
 
-A tipografia integrada segue `integrated_extruded_3d_v1`: as letras são modeladas como objetos 3D
-da própria cena, com extrusão espessa, bordas chanfradas, textura material, highlights, sombras de
+Nos Shorts, a tipografia integrada segue `integrated_extruded_3d_v1`: as letras são modeladas como
+objetos 3D da própria cena, com extrusão espessa, bordas chanfradas, textura material, highlights, sombras de
 contato/oclusão e perspectiva coerentes com a câmera e a iluminação. A palavra dominante recebe
 escala muito maior, enquanto a palavra vermelha e a marcação narrativa mantêm o mesmo volume e
 profundidade. O validador rejeita prompts sem esses marcadores para evitar texto plano, adesivo ou
@@ -525,8 +528,9 @@ uv run pipeline-videos youtube upload salmo-121 `
   --allow-external
 ```
 
-O upload inclui título, descrição/capítulos, tags e legenda SRT. Em vídeos longos, inclui também a
-thumbnail. Nos Shorts, a capa é incorporada ao frame zero e o quadro precisa ser selecionado
+O upload inclui título, descrição/capítulos, tags e legenda SRT. Vídeos longos usam por padrão a
+categoria Educação (`27`); Shorts permanecem em Pessoas e blogs (`22`). Em vídeos longos, o upload
+inclui também a thumbnail. Nos Shorts, a capa é incorporada ao frame zero e o quadro precisa ser selecionado
 manualmente no aplicativo móvel do YouTube. O estado fica em `youtube/publication.json`; tentativas
 repetidas retomam o mesmo `video_id` em vez de duplicar o vídeo. Publicar ou agendar é uma segunda
 ação, com confirmação pelo ID remoto:

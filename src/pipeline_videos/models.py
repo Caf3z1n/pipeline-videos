@@ -189,17 +189,27 @@ class YouTubeGrowthConfig(PipelineModel):
     specialist_role: Literal["youtube_growth_specialist"] = "youtube_growth_specialist"
     title_variants: int = Field(default=1, ge=1, le=3)
     thumbnail_variants: int = Field(default=1, ge=1, le=3)
-    thumbnail_generation_mode: Literal["integrated_imagegen_v1"] = "integrated_imagegen_v1"
-    thumbnail_reference_mode: Literal["opening_scene_edit_v1"] = "opening_scene_edit_v1"
+    thumbnail_generation_mode: Literal[
+        "integrated_imagegen_v1",
+        "theme_prompt_imagegen_v1",
+    ] = "integrated_imagegen_v1"
+    thumbnail_reference_mode: Literal[
+        "opening_scene_edit_v1",
+        "theme_only_v1",
+    ] = "opening_scene_edit_v1"
     title_standard: Literal[
         "passage_pipe_topic_v1",
         "tension_pipe_passage_v2",
     ] = "passage_pipe_topic_v1"
     description_standard: Literal["scripture_timeline_v1"] = "scripture_timeline_v1"
-    thumbnail_standard: Literal["direct_conflict_red_v1"] = "direct_conflict_red_v1"
-    thumbnail_typography_standard: Literal["integrated_extruded_3d_v1"] = (
-        "integrated_extruded_3d_v1"
-    )
+    thumbnail_standard: Literal[
+        "direct_conflict_red_v1",
+        "biblical_cinematic_landscape_v1",
+    ] = "direct_conflict_red_v1"
+    thumbnail_typography_standard: Literal[
+        "integrated_extruded_3d_v1",
+        "no_text_v1",
+    ] = "integrated_extruded_3d_v1"
     title_thumbnail_pairing_standard: Literal["complementary_v1"] = "complementary_v1"
 
 
@@ -1021,9 +1031,9 @@ class YouTubeThumbnailDesign(PipelineModel):
     safe_margin_x_ratio: float = Field(default=0.06, ge=0.04, le=0.18)
     safe_margin_y_ratio: float = Field(default=0.06, ge=0.04, le=0.18)
     texture: Literal["none", "subtle_grain"] = "subtle_grain"
-    typography_treatment: Literal["integrated_extruded_3d"] = "integrated_extruded_3d"
-    typography_hierarchy: Literal["dominant_keyword_scale"] = "dominant_keyword_scale"
-    typography_material: Literal["scene_lit_text_material"] = "scene_lit_text_material"
+    typography_treatment: Literal["integrated_extruded_3d", "none"] = "integrated_extruded_3d"
+    typography_hierarchy: Literal["dominant_keyword_scale", "none"] = "dominant_keyword_scale"
+    typography_material: Literal["scene_lit_text_material", "none"] = "scene_lit_text_material"
     narrative_element: Literal["none", "arrow", "x", "underline", "brush"] = "none"
     narrative_element_anchor: Literal[
         "top_left",
@@ -1038,6 +1048,16 @@ class YouTubeThumbnailDesign(PipelineModel):
 
     @model_validator(mode="after")
     def validate_editorial_design(self) -> YouTubeThumbnailDesign:
+        if self.typography_treatment == "none":
+            if self.text.strip() or self.accent_word.strip() or self.text_lines:
+                raise ValueError("A thumbnail sem tipografia não pode declarar texto")
+            if self.typography_hierarchy != "none" or self.typography_material != "none":
+                raise ValueError("A thumbnail sem tipografia precisa neutralizar a hierarquia")
+            if self.texture != "none":
+                raise ValueError("A thumbnail sem tipografia não pode declarar textura de texto")
+            if self.narrative_element != "none":
+                raise ValueError("A thumbnail limpa não pode declarar marcação editorial")
+            return self
         words = self.text.split()
         if not 2 <= len(words) <= 5:
             raise ValueError("O texto da thumbnail precisa ter de duas a cinco palavras")

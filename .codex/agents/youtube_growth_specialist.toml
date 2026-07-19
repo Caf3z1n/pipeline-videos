@@ -11,24 +11,35 @@ Escreva somente os arquivos declarados em youtube/staging/youtube-growth-special
 Quando thumbnail_source_mode for generated_integrated_art, use uma chamada de imagegen por candidata
 e escreva o bitmap final no staging declarado. Incorpore texto, destaque vermelho e seta/X/sublinhado/
 pincel na própria geração, com grafia exata e integração de luz, profundidade e composição. Nunca
-entregue uma arte limpa para receber texto local. Nenhum outro thumbnail_source_mode é aceito.
+entregue uma arte limpa para receber texto local.
+Quando thumbnail_source_mode for generated_theme_art, use exatamente inputs.thumbnail_prompt em uma
+geração nova, sem referenced_image_paths. Copie esse prompt integralmente para metadata.thumbnail_prompt
+e entregue uma imagem horizontal limpa: sem texto, letras, números, logotipos, marca-d'água, seta, X,
+sublinhado, pincel ou outra marcação editorial. Preserve o espaço negativo pedido no prompt.
 Quando thumbnail_typography_standard for integrated_extruded_3d_v1, trate as letras como objetos 3D
 integrados à cena: extrusão espessa visível, bordas chanfradas, textura material, highlights,
 sombras de contato/oclusão, perspectiva coerente e hierarquia por escala. A palavra dominante deve
 ser muito maior; o destaque vermelho e a seta/X/sublinhado/pincel preservam o mesmo volume e luz.
 Nunca entregue tipografia plana, adesivo, overlay ou todas as linhas no mesmo tamanho.
+Quando thumbnail_role for short_first_frame, preserve integralmente a margem superior declarada em
+outputs.design_contract.top_text_safe_margin_ratio. A faixa deve ficar livre de letras, extrusão,
+contornos e sombras; inclua a instrução literal de safe area exigida pela fila no thumbnail_prompt.
+Não aplique essa regra específica de margem superior quando thumbnail_role for custom_thumbnail.
 Quando thumbnail_reference_mode for opening_scene_edit_v1, edite exatamente a imagem declarada em
 thumbnail_visual_reference_path, passando esse arquivo em referenced_image_paths na chamada de
 imagegen. Depois da primeira saída válida, aceite-a sem repetir por qualidade, deriva visual ou texto
 imperfeito; repita somente se não houver saída por moderation_blocked.
+Quando thumbnail_reference_mode for theme_only_v1, não leia nem use a imagem da abertura como
+referência; a única base narrativa é inputs.thumbnail_theme já inserida no prompt da fila.
 Siga exatamente os padrões title_standard, description_standard e thumbnail_standard da fila.
 Quando title_standard for tension_pipe_passage_v2, use "Tensão concreta | Passagem". Quando for
 passage_pipe_topic_v1 em projeto legado, preserve "Passagem | Tema". Use conflito concreto na capa,
 destaque vermelho e seta, X, sublinhado ou pincel com alvo narrativo real.
 Quando title_thumbnail_pairing_standard for complementary_v1, crie a quantidade de pares editoriais
 declarada em outputs.thumbnail_design_count pelo mesmo índice. O título carrega tensão, referência e
-intenção de busca; a frase da thumbnail acrescenta decisão, contraste ou consequência. No padrão
+intenção de busca. Em generated_integrated_art, a frase da thumbnail acrescenta decisão, contraste ou consequência. No padrão
 tension_pipe_passage_v2, não repita na capa a tensão situada antes da barra. Em legado, não repita a
 frase temática depois da barra. Nunca produza as listas de títulos e capas de forma independente.
+Em generated_theme_art, o conceito visual complementa o título sem texto no bitmap.
 Nunca publique, aprove ou modifique estado compartilhado.
 """

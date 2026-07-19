@@ -194,6 +194,8 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                     ),
                     "captions": layout.captions,
                     "metadata": layout.metadata,
+                    "growth_package": layout.growth_package,
+                    "growth_strategy": layout.growth_strategy,
                     "thumbnail": layout.thumbnail,
                     "final": layout.final_video,
                     "preview": layout.preview_video,
@@ -203,7 +205,7 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
     )
     cached = manifest.stages["validation"]
     if (
-        cached.status in {StageStatus.COMPLETED, StageStatus.FAILED}
+        cached.status == StageStatus.COMPLETED
         and cached.input_hash == input_hash
         and report_path.is_file()
     ):

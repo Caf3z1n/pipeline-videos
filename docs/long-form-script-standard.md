@@ -84,10 +84,12 @@ segundos, contemplação funcional até quatorze segundos e payoff aproximadamen
 
 ## Título, thumbnail e direção visual
 
-Vídeos longos novos seguem `Tensão ou promessa concreta | Passagem`. Título, thumbnail, primeira
-fala e cena de abertura entregam a mesma promessa. A thumbnail continua usando a imagem ativa da
-abertura, o padrão visual `cinematic-family-3d-v1` e a tipografia integrada
-`integrated_extruded_3d_v1`.
+Vídeos longos novos seguem `Tensão ou promessa concreta | Passagem` e geram exatamente um título e
+uma thumbnail. Título, thumbnail, primeira fala e cena de abertura entregam a mesma promessa. A
+thumbnail usa `biblical_cinematic_landscape_v1`: uma geração horizontal 16:9 nova, baseada somente no
+tema central do briefing, sem imagem de referência e sem tipografia. Ela mantém o padrão de animação
+3D cinematográfica familiar, escolhe personagem, emoção, gesto e paisagem a partir do tema e reserva
+uma área visualmente limpa no lado oposto ao personagem.
 
 A direção visual deve:
 

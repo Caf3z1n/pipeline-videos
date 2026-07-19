@@ -650,6 +650,45 @@ def test_remote_growth_requires_opening_scene_as_visual_reference(tmp_path) -> N
     assert spec.expected_outputs == (package, thumbnail)
 
 
+def test_remote_long_growth_uses_theme_prompt_without_visual_reference(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(video_format="long", topic="Confiança"))
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+    context = layout.root / "youtube" / "growth-context.json"
+    package = layout.root / "youtube" / "staging" / "youtube-growth-specialist" / "package.json"
+    thumbnail = package.parent / "thumbnail-001.png"
+    write_json(context, {"thumbnail_theme": "Confiança em Deus"})
+    write_json(
+        layout.growth_queue,
+        {
+            "job_id": "youtube-growth-long-test",
+            "inputs": {
+                "compact_context": "youtube/growth-context.json",
+                "thumbnail_visual_reference_scene_id": None,
+                "thumbnail_visual_reference_path": None,
+                "thumbnail_theme": "Confiança em Deus",
+                "thumbnail_prompt": "Prompt temático horizontal sem texto.",
+            },
+            "outputs": {
+                "package": "youtube/staging/youtube-growth-specialist/package.json",
+                "thumbnails": ["youtube/staging/youtube-growth-specialist/thumbnail-001.png"],
+                "thumbnail_source_mode": "generated_theme_art",
+            },
+            "visual_standard": {
+                "id": "cinematic-family-3d-v1",
+                "reference_policy": "theme_only_no_reference",
+            },
+        },
+    )
+
+    spec = _growth_phase_spec(layout)
+
+    assert spec.payload["allowed_inputs"] == [str(layout.growth_queue), str(context)]
+    assert spec.payload["task"]["thumbnail_visual_reference_path"] is None
+    assert "sem referenced_image_paths" in spec.payload["task"]["instructions"][1]
+    assert spec.expected_outputs == (package, thumbnail)
+
+
 def test_specific_topic_uses_compact_catalog_selection_phase(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="coragem para conversas difíceis"))
