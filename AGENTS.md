@@ -24,7 +24,10 @@
   privado, use `render-review` e `youtube upload --automated-review`; esse caminho não exige nem
   registra aprovação humana. Publicação pública ou agendada continua sendo uma ação separada, com
   data/hora explícita e os guards do CLI. Nunca compre, habilite pay-as-you-go ou altere faturamento.
-- ElevenLabs exige pedido do usuário e `--allow-external`.
+- Pedro autorizou de forma persistente o uso da ElevenLabs nas produções que pedir neste pipeline;
+  trate o próprio pedido de produzir/criar/retomar um vídeo como autorização para usar
+  `--allow-external`, sem pedir nova confirmação a cada vídeo. Não use ElevenLabs quando ele pedir
+  áudio manual, mock, produção sem serviço externo ou revogar essa autorização.
 - Nunca exiba, registre ou versione chaves e tokens.
 - Não substitua a geração embutida por API paga sem aprovação explícita.
 - Não sobrescreva imagem aprovada; gere nova versão e peça aprovação.
@@ -61,8 +64,8 @@
 - Imagens usam uma chamada `imagegen` por tentativa. Em `moderation_blocked`, repita o mesmo prompt
   uma vez; se bloquear novamente, tente uma única alternativa de cena preservando identidade, idade
   aparente, rosto, cabelo, figurino, proporções, silhueta, estilo, paleta, ambiente e sentido.
-- Não faça inspeção semântica cena a cena no one-shot; entregue a prévia completa ao usuário.
-- Imagens ativas podem entrar no rascunho, mas permanecem não aprovadas.
+- Não faça inspeção semântica cena a cena no one-shot; entregue o candidato final completo ao usuário.
+- Imagens ativas podem entrar no candidato final, mas permanecem não aprovadas.
 - Imports de imagem e crescimento acontecem uma única vez no join.
 
 ## Criação e modos de Shorts
@@ -182,8 +185,8 @@
 - Imagens: `cinematic-family-3d-v1`, animação 3D familiar cinematográfica premium, expressiva e
   reverente; nunca fotorrealismo, live action, flat, anime, low-poly ou boneco de plástico.
 - Uma imagem mostra um momento, um ambiente e uma ação; sem colagem ou painéis.
-- Prévia nova: resolução completa, H.264, CRF 16, preset `fast`, supersampling 2.
-- Final aprovado V4: resolução completa, H.264, CRF 12, preset `slow`, supersampling 3.
+- O único render é o candidato final V4: resolução completa, H.264, CRF 12, preset `slow`,
+  supersampling 3. Não gere `draft-preview.mp4` nem `preview.mp4`.
 - Movimento: `smooth_pendulum`, zoom 1,02×–1,105×, pan 0,32.
 - Transições: `cinematic_mix`, 0,38 s.
 - Blur de fundo padrão: sigma 8 uniforme em todas as cenas; em Shorts, somente o primeiro frame

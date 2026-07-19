@@ -116,7 +116,7 @@ def test_prepare_job_project_enables_local_specialists_without_human_approval(tm
     layout = prepare_job_project(job, projects_root=tmp_path / "projects")
     manifest = layout.load_manifest()
 
-    assert manifest.config.production.mode == "draft_one_shot"
+    assert manifest.config.production.mode == "final_candidate_one_shot"
     assert manifest.config.production.use_subagents is True
     assert manifest.config.production.image_workers == 3
     assert manifest.config.production.optimization_profile == "token_optimized_v1"

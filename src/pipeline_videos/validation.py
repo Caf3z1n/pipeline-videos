@@ -41,7 +41,7 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-VALIDATION_ALGORITHM_VERSION = "5"
+VALIDATION_ALGORITHM_VERSION = "6"
 
 
 @dataclass
@@ -198,7 +198,6 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                     "growth_strategy": layout.growth_strategy,
                     "thumbnail": layout.thumbnail,
                     "final": layout.final_video,
-                    "preview": layout.preview_video,
                 }.items()
             },
         }
@@ -404,8 +403,8 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
         ):
             report.warnings.append("Os capítulos do YouTube não começam em 0:00.")
         if not layout.thumbnail.is_file():
-            if manifest.config.production.mode == "draft_one_shot" and not require_render:
-                report.warnings.append("A thumbnail ainda não foi gerada para o rascunho.")
+            if not require_render:
+                report.warnings.append("A thumbnail ainda não foi gerada.")
             else:
                 report.errors.append("A thumbnail está ausente.")
         else:
@@ -444,13 +443,6 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                 "final",
                 expected_width=render_config.width,
                 expected_height=render_config.height,
-            )
-            _validate_video(
-                layout.preview_video,
-                report,
-                "preview",
-                expected_width=render_config.preview_width,
-                expected_height=render_config.preview_height,
             )
             if layout.final_video.exists():
                 final_data = ffprobe_json(layout.final_video)

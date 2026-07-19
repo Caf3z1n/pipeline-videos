@@ -2,9 +2,9 @@
 
 ## Perfil atual
 
-Todos os projetos novos usam `draft_one_shot` e `token_optimized_v1`. A prévia permanece em
-resolução completa com CRF 16, preset `fast` e supersampling 2. O render final aprovado usa CRF 12,
-preset `slow` e supersampling 3.
+Todos os projetos novos usam `final_candidate_one_shot` e `token_optimized_v1`. O pipeline produz
+diretamente `render/final.mp4` com CRF 12, preset `slow` e supersampling 3. Não existe render de
+prévia rápida nem uma segunda transcodificação para `preview.mp4`.
 
 Não existem perfis legados, modos Light, produção guiada ou fallback de imagens manuais. Áudio
 manual continua disponível porque muda somente a origem da locução e preserva o pipeline atual.

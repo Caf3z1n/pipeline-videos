@@ -721,7 +721,7 @@ def create_auto_video(
     video_format: Literal["landscape", "short"],
     project_date: date | None = None,
     catalog_path: Path = DEFAULT_VERSE_CATALOG,
-    production_mode: ProductionMode = "draft_one_shot",
+    production_mode: ProductionMode = "final_candidate_one_shot",
 ) -> tuple[ProjectLayout, VerseCandidate, float]:
     root = (projects_dir or DEFAULT_PROJECTS_DIR).expanduser().resolve()
     catalog = load_verse_catalog(catalog_path)
@@ -886,7 +886,7 @@ def create_auto_short(
     target_duration_seconds: int = 50,
     project_date: date | None = None,
     catalog_path: Path = DEFAULT_VERSE_CATALOG,
-    production_mode: ProductionMode = "draft_one_shot",
+    production_mode: ProductionMode = "final_candidate_one_shot",
 ) -> tuple[ProjectLayout, VerseCandidate, float]:
     return create_auto_video(
         projects_dir=projects_dir,

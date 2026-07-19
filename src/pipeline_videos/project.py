@@ -89,13 +89,13 @@ Antes de continuar em outra sessão, leia nesta ordem:
 Não regenere artefatos concluídos sem conferir o hash e o estado. Use `--force` somente quando a
 regeneração for deliberada; imagens aprovadas são preservadas como versões imutáveis.
 
-O modo padrão é `draft_one_shot`: trabalhadores de imagem escrevem apenas em `images/staging`, e o
-agente principal é o único que importa o lote e altera arquivos de estado. A prévia completa não
-equivale à aprovação das imagens nem do render final.
+O modo padrão é `final_candidate_one_shot`: trabalhadores de imagem escrevem apenas em
+`images/staging`, e o agente principal é o único que importa o lote e altera arquivos de estado.
+O candidato final usa os ativos selecionados sem registrar aprovação humana automaticamente.
 
 Projetos novos usam `token_optimized_v1`. Depois de roteiro e revisão, use `autopilot`; entregue a
-cada trabalhador somente `images/jobs/image-worker-N.json`, sem histórico herdado. A prévia rápida
-não altera a qualidade V4 do render final aprovado.
+cada trabalhador somente `images/jobs/image-worker-N.json`, sem histórico herdado. O pipeline
+produz diretamente o candidato final na qualidade V4.
 
 A etapa `music` sorteia uma faixa da biblioteca local do pipeline e preserva uma cópia em
 `audio/music/`. Uma escolha já registrada é reutilizada, salvo quando `--force` for deliberado.
@@ -126,7 +126,7 @@ def create_project(
     demo: bool = False,
     video_format: Literal["landscape", "short"] = "landscape",
     project_date: date | None = None,
-    production_mode: ProductionMode = "draft_one_shot",
+    production_mode: ProductionMode = "final_candidate_one_shot",
 ) -> ProjectLayout:
     topic_id = project_topic_slug(project_id)
     project_id = project_directory_name(project_id, project_date=project_date)
@@ -150,8 +150,6 @@ def create_project(
         config.render = RenderConfig(
             width=1080,
             height=1920,
-            preview_width=1080,
-            preview_height=1920,
         )
         config.images.width = 1024
         config.images.height = 1536
@@ -164,12 +162,8 @@ def create_project(
         config.render = RenderConfig(
             width=1280,
             height=720,
-            preview_width=640,
-            preview_height=360,
             final_crf=22,
             final_preset="veryfast",
-            preview_crf=27,
-            preview_preset="veryfast",
             transition_seconds=0.35,
             transition_style="fade_black",
             motion_style="legacy",
@@ -201,9 +195,6 @@ def create_project(
         config.captions.isolate_quoted_comment_response = False
         config.captions.comment_response_hold_seconds = 0.0
         config.audio.comment_response_silence_seconds = 0.0
-        config.render.preview_crf = 16
-        config.render.preview_preset = "fast"
-        config.render.preview_motion_supersample = 2
         config.render.background_blur_profile = "functional_caption_focus_v1"
         config.youtube_growth.title_variants = 1
         config.youtube_growth.thumbnail_variants = 1

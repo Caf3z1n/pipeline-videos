@@ -37,9 +37,7 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     assert resolve_project("salmo-121", tmp_path).root == layout.root
     assert manifest.config.render.final_crf == 12
     assert manifest.config.render.final_preset == "slow"
-    assert manifest.config.render.preview_crf == 16
-    assert manifest.config.render.preview_preset == "fast"
-    assert manifest.config.render.preview_motion_supersample == 2
+    assert all(not field.startswith("preview_") for field in manifest.config.render.model_dump())
     assert manifest.config.production.optimization_profile == "token_optimized_v1"
     assert manifest.config.production.worker_context_policy == "compact_only"
     assert manifest.config.youtube_growth.thumbnail_generation_mode == "theme_prompt_imagegen_v1"
@@ -103,6 +101,33 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     assert changed.approvals["metadata"].status == ApprovalStatus.PENDING
 
 
+def test_existing_preview_manifest_is_migrated_on_load(tmp_path) -> None:
+    layout = create_project(
+        "manifesto-legado",
+        "Manifesto legado",
+        projects_dir=tmp_path,
+        target_duration_seconds=60,
+        project_date=date(2026, 7, 19),
+    )
+    payload = read_json(layout.manifest)
+    payload["config"]["production"]["mode"] = "draft_one_shot"
+    payload["config"]["render"].update(
+        {
+            "preview_width": 640,
+            "preview_height": 360,
+            "preview_crf": 16,
+            "preview_preset": "fast",
+            "preview_motion_supersample": 2,
+        }
+    )
+    write_json(layout.manifest, payload)
+
+    manifest = layout.load_manifest()
+
+    assert manifest.config.production.mode == "final_candidate_one_shot"
+    assert all(not field.startswith("preview_") for field in manifest.config.render.model_dump())
+
+
 def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> None:
     layout = create_project(
         "davi-golias-short",
@@ -118,14 +143,8 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.video_format == "short"
     assert layout.root == tmp_path / "shorts" / "14-07-2026_davi-golias-short"
     assert (manifest.config.render.width, manifest.config.render.height) == (1080, 1920)
-    assert (manifest.config.render.preview_width, manifest.config.render.preview_height) == (
-        1080,
-        1920,
-    )
     assert manifest.config.render.final_crf == 12
-    assert manifest.config.render.preview_crf == 16
     assert manifest.config.render.final_preset == "slow"
-    assert manifest.config.render.preview_preset == "fast"
     assert manifest.config.render.transition_seconds == 0.38
     assert manifest.config.render.transition_style == "cinematic_mix"
     assert manifest.config.render.motion_style == "smooth_pendulum"
@@ -133,7 +152,6 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.render.motion_zoom_max == 1.105
     assert manifest.config.render.motion_pan_strength == 0.32
     assert manifest.config.render.motion_supersample == 3
-    assert manifest.config.render.preview_motion_supersample == 2
     assert manifest.config.render.background_music_path is None
     assert manifest.config.render.background_music_gain_db == -12.0
     assert manifest.config.render.short_cover_enabled is True
@@ -172,7 +190,7 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.captions.word_arrival_animation is True
     assert manifest.config.audio.voice_id == "wKukuyYdIlElkaj9zEQG"
     assert (layout.root / manifest.config.captions.font_file).is_file()
-    assert manifest.config.production.mode == "draft_one_shot"
+    assert manifest.config.production.mode == "final_candidate_one_shot"
     assert manifest.config.production.use_subagents is True
     assert manifest.config.production.image_workers == 3
     assert manifest.config.production.approval_policy == "final_only"

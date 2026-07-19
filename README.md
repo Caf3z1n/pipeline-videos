@@ -3,8 +3,8 @@
 Aplicação local, headless e orientada por arquivos para planejar, produzir, revisar e retomar
 vídeos bíblicos. O chat ajuda na criação; a pasta de cada vídeo é a fonte de verdade.
 
-O modo único é `draft_one_shot`: o Codex produz uma prévia completa. Localmente e na VPS, cada vídeo
-usa um coordenador persistente e subagentes de roteiro, imagens e crescimento, todos em
+O modo único é `final_candidate_one_shot`: o Codex produz diretamente um candidato final V4.
+Localmente e na VPS, cada vídeo usa um coordenador persistente e subagentes de roteiro, imagens e crescimento, todos em
 `gpt-5.6-sol` e com o raciocínio próprio da função. Shorts editam a imagem ativa da abertura;
 vídeos longos geram uma thumbnail horizontal nova, baseada somente no tema central.
 
@@ -17,13 +17,13 @@ ponto de junção do render.
 
 O MVP já prova o fluxo vertical sem serviços pagos: briefing → roteirista especialista de Shorts →
 revisão bíblica → cenas → imagens fixture → áudio simulado → música local → alinhamento por palavra
-→ ASS/SRT/VTT → especialista YouTube → thumbnail final → MP4 final e prévia. O caminho de
+→ ASS/SRT/VTT → especialista YouTube → thumbnail final → MP4 final. O caminho de
 produção usa a geração de imagens embutida do Codex por uma fila de importação e ElevenLabs por um
-adaptador protegido por confirmação explícita.
+adaptador protegido pelo guard técnico `--allow-external`; Pedro já autorizou esse uso por padrão nas
+produções que pedir neste pipeline.
 
-Projetos reais novos usam o perfil `token_optimized_v1`. A prévia permanece em resolução completa,
-mas usa CRF 16, preset `fast` e supersampling 2; o render final aprovado preserva a qualidade V4 com
-CRF 12, preset `slow` e supersampling 3. Trabalhadores recebem arquivos compactos em `images/jobs/`
+Projetos reais novos usam o perfil `token_optimized_v1`. O único render usa a qualidade V4 com CRF
+12, preset `slow` e supersampling 3. Trabalhadores recebem arquivos compactos em `images/jobs/`
 sem herdar o histórico. O gerador cria uma única thumbnail: Shorts recebem texto e símbolos
 incorporados; vídeos longos recebem uma imagem cinematográfica limpa, sem texto. Título e thumbnail
 formam uma única combinação complementar em todos os modos novos.
@@ -65,7 +65,6 @@ uv run pipeline-videos demo
 Artefatos principais:
 
 - `projects/videos-longos/14-07-2026_salmo-23/render/final.mp4`: H.264, 1280×720, 30 fps;
-- `projects/videos-longos/14-07-2026_salmo-23/render/preview.mp4`: prévia 640×360;
 - `projects/videos-longos/14-07-2026_salmo-23/captions/`: legendas ASS, SRT e VTT;
 - `projects/videos-longos/14-07-2026_salmo-23/youtube/`: metadados e thumbnail fixture;
 - `projects/videos-longos/14-07-2026_salmo-23/validation/`: contratos e mídia.
@@ -472,26 +471,24 @@ As regras seguem as orientações oficiais de [títulos e thumbnails](https://su
 uv run pipeline-videos captions build salmo-121
 uv run pipeline-videos metadata growth-prepare salmo-121
 uv run pipeline-videos metadata growth-import salmo-121
-# No modo padrão, gera a prévia completa usando as versões ativas:
+# Gera diretamente o candidato final V4 usando as versões ativas:
 uv run pipeline-videos render salmo-121
 
-# Depois da revisão do usuário, aprove imagens/metadados e produza o final:
+# Depois da revisão do usuário, registre as aprovações sem renderizar novamente:
 uv run pipeline-videos approve salmo-121 images --by "Pedro"
 uv run pipeline-videos approve salmo-121 metadata --by "Pedro"
-uv run pipeline-videos render salmo-121 --final
 uv run pipeline-videos validate salmo-121
 uv run pipeline-videos approve salmo-121 final_render --by "Pedro"
 ```
 
-A prévia one-shot fica em `render/draft-preview.mp4` e não altera `render/final.mp4`, a aprovação das
-imagens ou a aprovação final.
+O candidato fica em `render/final.mp4`. A renderização usa os ativos ativos, passa pela validação
+técnica e não registra aprovação humana automaticamente.
 
 O padrão final aprovado continua sendo o da V4 de Davi e Golias: resolução completa, H.264 com CRF
 12, preset `slow` e supersampling 3; movimento pendular suave entre 1,02× e 1,105×; transições
 `cinematic_mix`; e legendas Montserrat ExtraBold em caixa alta, com no máximo três palavras por
-linha e card vermelho sólido arredondado na palavra ativa. Somente a prévia dos projetos novos usa
-CRF 16, preset `fast` e supersampling 2 para reduzir o tempo de revisão. Projetos legados preservam
-as configurações anteriores até uma migração explícita. Em Shorts, o bloco de legenda fica no
+linha e card vermelho sólido arredondado na palavra ativa. O caminho antigo de prévia rápida foi
+removido; projetos existentes têm seus campos antigos ignorados ao serem carregados. Em Shorts, o bloco de legenda fica no
 centro da tela; os prompts visuais reservam essa faixa para preservar a leitura. Um marcador menor
 Somente citações bíblicas literais usam itálico. A fonte e sua licença OFL são copiadas
 automaticamente para cada projeto novo.
@@ -617,7 +614,6 @@ projects/
 │   └── captions.vtt
 ├── render/
 │   ├── config.json
-│   ├── preview.mp4
 │   └── final.mp4
 ├── youtube/
 │   ├── metadata.json
@@ -679,7 +675,7 @@ uv run pipeline-videos validate demo-salmo-23
 
 Os testes cobrem alinhamento de caracteres, mock, guard da ElevenLabs, seleção e persistência
 da música local, versionamento de imagens, agrupamento e cobertura de legendas, planejamento das
-cinco ondas concorrentes, importação de thumbnails integradas, fallback determinístico legado,
+cinco ondas concorrentes, importação de thumbnails integradas, migração de manifestos antigos,
 cache paralelo do render e
 FFprobe real.
 

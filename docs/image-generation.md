@@ -33,7 +33,7 @@ grandes faixas claras com bordas abruptas que indiquem separação entre painéi
 O agente gera uma imagem por item, move/copia o resultado para o workspace e executa `images import`.
 Uma falha deixa o item pendente. Reexecutar a fila ignora itens já importados.
 
-No modo `draft_one_shot`, a fila inclui `batch_id`, `job_id`, `worker_id` e `staging_path`. Quando o
+No modo `final_candidate_one_shot`, a fila inclui `batch_id`, `job_id`, `worker_id` e `staging_path`. Quando o
 especialista de crescimento está ativo, até dois trabalhadores geram imagens e a terceira vaga fica
 reservada para ele. `worker_id` define a afinidade inicial; o planejador read-only entrega o próximo
 job ordenado ao primeiro trabalhador livre. Cada job possui staging exclusivo. O agente principal
@@ -51,8 +51,8 @@ O comando `pipeline-videos autopilot <projeto>` prepara a fila e continua a lane
 ainda não estiverem no staging, ele registra um checkpoint retomável; após os workers terminarem,
 uma nova execução importa o lote uma única vez e prossegue automaticamente.
 
-`active_version` é a seleção usada na prévia de rascunho. `approved_version` continua vazio até a
-decisão do usuário, portanto rapidez de produção não é confundida com aprovação editorial.
+`active_version` é a seleção usada no candidato final. `approved_version` continua vazio até a
+decisão do usuário, portanto produção técnica não é confundida com aprovação editorial.
 
 ## Continuidade
 

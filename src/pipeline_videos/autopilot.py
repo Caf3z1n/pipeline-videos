@@ -14,7 +14,7 @@ from pipeline_videos.utils import relative_posix, utc_now
 class AutopilotResult:
     status: Literal["waiting_external", "completed"]
     waits: list[dict[str, Any]]
-    preview_path: Path | None = None
+    render_path: Path | None = None
     validation_ok: bool | None = None
 
 
@@ -127,8 +127,8 @@ def _write_state(layout: ProjectLayout, result: AutopilotResult) -> None:
             "updated_at": utc_now(),
             "status": result.status,
             "waits": result.waits,
-            "preview_path": (
-                relative_posix(result.preview_path, layout.root) if result.preview_path else None
+            "render_path": (
+                relative_posix(result.render_path, layout.root) if result.render_path else None
             ),
             "validation_ok": result.validation_ok,
         },
@@ -140,10 +140,8 @@ def run_autopilot_once(
     *,
     allow_external: bool = False,
     force: bool = False,
-    review_candidate: bool = False,
 ) -> AutopilotResult:
     project = layout.load_manifest()
-    draft_mode = True
 
     if (
         project.video_format == "short"
@@ -166,9 +164,8 @@ def run_autopilot_once(
     from pipeline_videos.review import validate_draft_preflight
     from pipeline_videos.scenes import build_scenes
 
-    if draft_mode:
-        validate_draft_preflight(layout)
-    build_scenes(layout, force=force, skip_approvals=draft_mode)
+    validate_draft_preflight(layout)
+    build_scenes(layout, force=force, skip_approvals=True)
 
     from pipeline_videos.audio import generate_audio
     from pipeline_videos.captions import generate_captions
@@ -241,27 +238,15 @@ def run_autopilot_once(
     elif not project.config.youtube_growth.enabled and not layout.thumbnail.exists():
         queue_thumbnail_for_codex(layout)
 
-    from pipeline_videos.render import render_draft_preview, render_project
+    from pipeline_videos.render import render_review_candidate
     from pipeline_videos.validation import validate_project
 
-    if review_candidate:
-        from pipeline_videos.render import render_review_candidate
-
-        render = render_review_candidate(layout, force=force)
-        report = validate_project(layout, require_render=True)
-        preview_path = render.preview_video
-    elif draft_mode:
-        render = render_draft_preview(layout, force=force)
-        report = validate_project(layout, require_render=False)
-        preview_path = render.preview_video
-    else:
-        render = render_project(layout, force=force)
-        report = validate_project(layout, require_render=True)
-        preview_path = render.preview_video
+    render = render_review_candidate(layout, force=force)
+    report = validate_project(layout, require_render=True)
     result = AutopilotResult(
         "completed",
         [],
-        preview_path=preview_path,
+        render_path=render.final_video,
         validation_ok=report.valid,
     )
     _write_state(layout, result)

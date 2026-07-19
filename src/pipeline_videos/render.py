@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import shutil
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -23,7 +22,6 @@ from pipeline_videos.state import (
     complete_stage,
     fail_stage,
     invalidate,
-    require_approval,
     stage_is_current,
     start_stage,
 )
@@ -37,16 +35,11 @@ from pipeline_videos.utils import (
     sha256_value,
 )
 
-RENDER_ALGORITHM_VERSION = "5"
+RENDER_ALGORITHM_VERSION = "6"
 MAX_SEGMENT_RENDER_WORKERS = 2
 OUTPUT_PIXEL_FORMAT = "yuv420p"
 OUTPUT_AUDIO_CODEC = "aac"
 OUTPUT_AUDIO_CHANNELS = 2
-PREVIEW_VIDEO_CODEC = "libx264"
-PREVIEW_PIXEL_FORMAT = "yuv420p"
-PREVIEW_AUDIO_CODEC = "aac"
-PREVIEW_AUDIO_SAMPLE_RATE = 48_000
-PREVIEW_AUDIO_CHANNELS = 2
 _CINEMATIC_TRANSITIONS = (
     "fadeslow",
     "smoothleft",
@@ -70,18 +63,8 @@ class SceneRenderPlan:
 class RenderResult:
     base_video: Path
     final_video: Path
-    preview_video: Path
     reused_base: bool
     final_validation: dict[str, Any]
-    preview_validation: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class DraftPreviewResult:
-    base_video: Path
-    preview_video: Path
-    reused_base: bool
-    validation: dict[str, Any]
 
 
 def _project_file(root: Path, value: str | Path, *, label: str) -> Path:
@@ -141,8 +124,6 @@ def _selected_images(
     layout: ProjectLayout,
     scenes: Sequence[Scene],
     manifest: ImageManifest,
-    *,
-    approved_only: bool,
 ) -> dict[str, Path]:
     items = {item.image_id: item for item in manifest.items}
     selected: dict[str, Path] = {}
@@ -152,20 +133,15 @@ def _selected_images(
             raise ValueError(
                 f"A cena {scene.scene_id} referencia imagem inexistente: {scene.image_id}."
             )
-        version_number = (
-            item.approved_version if approved_only else item.active_version or item.approved_version
-        )
+        version_number = item.active_version or item.approved_version
         if version_number is None:
-            requirement = "aprovada" if approved_only else "ativa ou aprovada"
-            raise ValueError(f"A imagem {item.image_id} não possui versão {requirement}.")
+            raise ValueError(f"A imagem {item.image_id} não possui versão ativa ou aprovada.")
         version = next((entry for entry in item.versions if entry.version == version_number), None)
         if version is None:
             raise ValueError(
                 f"A versão {version_number} da imagem {item.image_id} não consta no manifesto."
             )
-        if approved_only and version.status != "approved":
-            raise ValueError(f"A versão selecionada de {item.image_id} não está aprovada.")
-        if not approved_only and version.status == "rejected":
+        if version.status == "rejected":
             raise ValueError(f"A versão ativa de {item.image_id} está rejeitada.")
         selected[scene.scene_id] = _project_file(
             layout.root,
@@ -181,8 +157,6 @@ def _scene_plans(
     images_manifest: ImageManifest,
     audio: AudioManifest,
     config: RenderConfig,
-    *,
-    approved_only: bool,
 ) -> list[SceneRenderPlan]:
     scenes = sorted(scenes_manifest.scenes, key=lambda scene: scene.order)
     if not scenes:
@@ -196,7 +170,6 @@ def _scene_plans(
         layout,
         scenes,
         images_manifest,
-        approved_only=approved_only,
     )
     section_roles: dict[str, str] = {}
     if layout.script.is_file():
@@ -356,23 +329,6 @@ def _require_nonempty_file(path: Path, *, label: str) -> None:
         raise FileNotFoundError(f"{label} nÃ£o encontrado: {path}")
     if path.stat().st_size <= 0:
         raise ValueError(f"{label} estÃ¡ vazio: {path}")
-
-
-def _copy_output_atomic(source: Path, destination: Path) -> None:
-    """Copy an immutable snapshot into place without linking mutable outputs."""
-
-    _require_nonempty_file(source, label="Artefato de origem")
-    if source.resolve() == destination.resolve():
-        return
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temp = destination.with_name(destination.stem + ".copying" + destination.suffix)
-    temp.unlink(missing_ok=True)
-    try:
-        shutil.copyfile(source, temp)
-        _require_nonempty_file(temp, label="CÃ³pia temporÃ¡ria")
-        _replace_output(temp, destination)
-    finally:
-        temp.unlink(missing_ok=True)
 
 
 def _cached_artifact_is_current(path: Path, cache: Path, input_hash: str) -> bool:
@@ -610,14 +566,6 @@ def _base_paths(layout: ProjectLayout, namespace: str) -> tuple[Path, Path]:
     )
 
 
-def _peer_base_namespace(namespace: str) -> str | None:
-    if namespace == "final":
-        return "draft"
-    if namespace == "draft":
-        return "final"
-    return None
-
-
 def _build_visual_base(
     layout: ProjectLayout,
     plans: Sequence[SceneRenderPlan],
@@ -631,21 +579,6 @@ def _build_visual_base(
     base_video, base_cache = _base_paths(layout, namespace)
     if not force and _cached_artifact_is_current(base_video, base_cache, base_hash):
         return base_video, True
-
-    peer_namespace = _peer_base_namespace(namespace)
-    if not force and peer_namespace is not None:
-        peer_video, peer_cache = _base_paths(layout, peer_namespace)
-        if _cached_artifact_is_current(peer_video, peer_cache, base_hash):
-            _copy_output_atomic(peer_video, base_video)
-            write_json(
-                base_cache,
-                {
-                    "input_hash": base_hash,
-                    "segments": len(plans),
-                    "reused_from": relative_posix(peer_video, layout.root),
-                },
-            )
-            return base_video, True
 
     segment_dir = layout.render_work / (
         "segments" if namespace == "final" else f"{namespace}-segments"
@@ -901,82 +834,6 @@ def _render_final(
     _replace_output(temp, destination)
 
 
-def _preview_encoding_matches_final(
-    config: RenderConfig,
-    *,
-    final_audio_sample_rate: int,
-) -> bool:
-    return (
-        config.preview_width == config.width
-        and config.preview_height == config.height
-        and config.video_codec == PREVIEW_VIDEO_CODEC
-        and config.preview_preset == config.final_preset
-        and config.preview_crf == config.final_crf
-        and OUTPUT_PIXEL_FORMAT == PREVIEW_PIXEL_FORMAT
-        and PREVIEW_AUDIO_CODEC == OUTPUT_AUDIO_CODEC
-        and final_audio_sample_rate == PREVIEW_AUDIO_SAMPLE_RATE
-        and PREVIEW_AUDIO_CHANNELS == OUTPUT_AUDIO_CHANNELS
-    )
-
-
-def _render_preview(
-    layout: ProjectLayout,
-    config: RenderConfig,
-    *,
-    final_audio_sample_rate: int,
-) -> bool:
-    _require_nonempty_file(layout.final_video, label="Render final")
-    if _preview_encoding_matches_final(
-        config,
-        final_audio_sample_rate=final_audio_sample_rate,
-    ):
-        _copy_output_atomic(layout.final_video, layout.preview_video)
-        return True
-
-    temp = layout.preview_video.with_name("preview.part.mp4")
-    temp.unlink(missing_ok=True)
-    preview_filter = (
-        f"scale={config.preview_width}:{config.preview_height}:"
-        "force_original_aspect_ratio=decrease:flags=lanczos,"
-        f"pad={config.preview_width}:{config.preview_height}:(ow-iw)/2:(oh-ih)/2,"
-        f"format={PREVIEW_PIXEL_FORMAT}"
-    )
-    args = [
-        executable("ffmpeg"),
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-i",
-        relative_posix(layout.final_video, layout.root),
-        "-vf",
-        preview_filter,
-        "-c:v",
-        PREVIEW_VIDEO_CODEC,
-        "-preset",
-        config.preview_preset,
-        "-crf",
-        str(config.preview_crf),
-        "-pix_fmt",
-        PREVIEW_PIXEL_FORMAT,
-        "-c:a",
-        PREVIEW_AUDIO_CODEC,
-        "-ar",
-        str(PREVIEW_AUDIO_SAMPLE_RATE),
-        "-ac",
-        str(PREVIEW_AUDIO_CHANNELS),
-        "-b:a",
-        config.audio_bitrate,
-        "-movflags",
-        "+faststart",
-        relative_posix(temp, layout.root),
-    ]
-    run_process(args, cwd=layout.root, timeout=3_600)
-    _require_nonempty_file(temp, label="PrÃ©via temporÃ¡ria")
-    _replace_output(temp, layout.preview_video)
-    return False
-
-
 def _stream_rate(stream: dict[str, Any]) -> float:
     value = stream.get("avg_frame_rate") or stream.get("r_frame_rate") or "0/1"
     try:
@@ -1066,16 +923,13 @@ def validate_render_output(
     config: RenderConfig,
     expected_duration: float,
     *,
-    preview: bool = False,
     expected_sample_rate: int = 48_000,
     raise_on_error: bool = True,
 ) -> dict[str, Any]:
-    width = config.preview_width if preview else config.width
-    height = config.preview_height if preview else config.height
     return validate_media_output(
         path,
-        width=width,
-        height=height,
+        width=config.width,
+        height=config.height,
         fps=config.fps,
         expected_duration=expected_duration,
         require_audio=True,
@@ -1084,142 +938,10 @@ def validate_render_output(
     )
 
 
-def render_draft_preview(layout: ProjectLayout, *, force: bool = False) -> DraftPreviewResult:
-    """Render a complete low-resolution review copy from active image candidates."""
-    project = layout.load_manifest()
-    config = project.config.render
-    draft_config = config.model_copy(
-        update={
-            "width": config.preview_width,
-            "height": config.preview_height,
-            "final_crf": config.preview_crf,
-            "final_preset": config.preview_preset,
-            "motion_supersample": config.preview_motion_supersample,
-        }
-    )
-    scenes = read_model(layout.scenes, SceneManifest)
-    images = read_model(layout.images, ImageManifest)
-    audio = read_model(layout.audio, AudioManifest)
-    captions = read_model(layout.captions, CaptionManifest)
-    narration = _project_file(layout.root, audio.narration_path, label="Narração consolidada")
-    ass_file = _project_file(layout.root, captions.ass_path, label="Legenda ASS")
-    caption_font_file = (
-        _project_file(
-            layout.root,
-            project.config.captions.font_file,
-            label="Fonte da legenda",
-        )
-        if project.config.captions.font_file
-        else None
-    )
-    background_music = (
-        _project_file(
-            layout.root,
-            config.background_music_path,
-            label="Música de fundo",
-        )
-        if config.background_music_path
-        else None
-    )
-    short_cover = (
-        _project_file(layout.root, layout.thumbnail, label="Capa inicial do Short")
-        if project.video_format == "short" and config.short_cover_enabled
-        else None
-    )
-    plans = _scene_plans(
-        layout,
-        scenes,
-        images,
-        audio,
-        draft_config,
-        approved_only=False,
-    )
-    base_hash = _base_input_hash(plans, draft_config)
-    draft_hash = sha256_value(
-        {
-            "algorithm": RENDER_ALGORITHM_VERSION,
-            "base_hash": base_hash,
-            "narration_hash": sha256_file(narration),
-            "captions_hash": sha256_file(ass_file),
-            "caption_font_hash": sha256_file(caption_font_file) if caption_font_file else None,
-            "background_music_hash": sha256_file(background_music) if background_music else None,
-            "short_cover_hash": sha256_file(short_cover) if short_cover else None,
-            "render_config": draft_config.model_dump(mode="json"),
-            "caption_canvas": [config.width, config.height],
-            "audio_sample_rate": audio.sample_rate,
-            "audio_duration": audio.duration,
-        }
-    )
-    cache = layout.render_work / "draft-preview.json"
-    base_video = layout.render_work / "draft-base.mp4"
-    if not force and layout.draft_preview_video.is_file() and _cache_hash(cache) == draft_hash:
-        validation = validate_render_output(
-            layout.draft_preview_video,
-            config,
-            audio.duration,
-            preview=True,
-            expected_sample_rate=audio.sample_rate,
-            raise_on_error=False,
-        )
-        if validation["valid"]:
-            return DraftPreviewResult(
-                base_video=base_video,
-                preview_video=layout.draft_preview_video,
-                reused_base=True,
-                validation=validation,
-            )
-
-    base_video, reused_base = _build_visual_base(
-        layout,
-        plans,
-        draft_config,
-        base_hash,
-        force=force,
-        namespace="draft",
-    )
-    _render_final(
-        layout,
-        base_video,
-        narration,
-        ass_file,
-        audio,
-        draft_config,
-        destination=layout.draft_preview_video,
-        caption_canvas=(config.width, config.height),
-        caption_font_file=caption_font_file,
-        background_music=background_music,
-        short_cover=short_cover,
-    )
-    validation = validate_render_output(
-        layout.draft_preview_video,
-        config,
-        audio.duration,
-        preview=True,
-        expected_sample_rate=audio.sample_rate,
-    )
-    write_json(cache, {"input_hash": draft_hash, "base_hash": base_hash})
-    layout.append_event(
-        {
-            "event": "draft_preview_rendered",
-            "path": relative_posix(layout.draft_preview_video, layout.root),
-            "base_reused": reused_base,
-            "scenes": len(plans),
-        }
-    )
-    return DraftPreviewResult(
-        base_video=base_video,
-        preview_video=layout.draft_preview_video,
-        reused_base=reused_base,
-        validation=validation,
-    )
-
-
 def _render_project_output(
     layout: ProjectLayout,
     *,
     force: bool,
-    approved_only: bool,
-    provider: str,
 ) -> RenderResult:
     project = layout.load_manifest()
     config = project.config.render
@@ -1258,13 +980,12 @@ def _render_project_output(
         images,
         audio,
         config,
-        approved_only=approved_only,
     )
     base_hash = _base_input_hash(plans, config)
     input_hash = sha256_value(
         {
             "algorithm": RENDER_ALGORITHM_VERSION,
-            "image_source_policy": "approved" if approved_only else "active_review_candidate",
+            "image_source_policy": "active_final_candidate",
             "base_hash": base_hash,
             "narration_hash": sha256_file(narration),
             "captions_hash": sha256_file(ass_file),
@@ -1276,7 +997,7 @@ def _render_project_output(
             "audio_duration": audio.duration,
         }
     )
-    base_video = layout.render_work / ("base.mp4" if approved_only else "review-candidate-base.mp4")
+    base_video = layout.render_work / "review-candidate-base.mp4"
 
     if stage_is_current(layout, "render", input_hash, force=force):
         final_report = validate_render_output(
@@ -1286,22 +1007,12 @@ def _render_project_output(
             expected_sample_rate=audio.sample_rate,
             raise_on_error=False,
         )
-        preview_report = validate_render_output(
-            layout.preview_video,
-            config,
-            audio.duration,
-            preview=True,
-            expected_sample_rate=48_000,
-            raise_on_error=False,
-        )
-        if final_report["valid"] and preview_report["valid"]:
+        if final_report["valid"]:
             return RenderResult(
                 base_video=base_video,
                 final_video=layout.final_video,
-                preview_video=layout.preview_video,
                 reused_base=True,
                 final_validation=final_report,
-                preview_validation=preview_report,
             )
 
     invalidate(
@@ -1310,7 +1021,7 @@ def _render_project_output(
         approvals=("final_render",),
         note="O render foi atualizado.",
     )
-    start_stage(layout, "render", input_hash, provider=provider)
+    start_stage(layout, "render", input_hash, provider="ffmpeg-review-candidate")
     try:
         base_video, reused_base = _build_visual_base(
             layout,
@@ -1318,7 +1029,7 @@ def _render_project_output(
             config,
             base_hash,
             force=force,
-            namespace="final" if approved_only else "review-candidate",
+            namespace="review-candidate",
         )
         expected_base_duration = sum(plan.frame_count for plan in plans) / config.fps
         validate_media_output(
@@ -1346,34 +1057,20 @@ def _render_project_output(
             audio.duration,
             expected_sample_rate=audio.sample_rate,
         )
-        preview_reused_final = _render_preview(
-            layout,
-            config,
-            final_audio_sample_rate=audio.sample_rate,
-        )
-        preview_report = validate_render_output(
-            layout.preview_video,
-            config,
-            audio.duration,
-            preview=True,
-            expected_sample_rate=48_000,
-        )
         artifacts = [
             relative_posix(base_video, layout.root),
             relative_posix(layout.final_video, layout.root),
-            relative_posix(layout.preview_video, layout.root),
         ]
         complete_stage(
             layout,
             "render",
             input_hash,
             artifacts,
-            provider=provider,
+            provider="ffmpeg-review-candidate",
             usage={
                 "scenes": len(plans),
                 "frames": sum(plan.frame_count for plan in plans),
                 "base_reused": int(reused_base),
-                "preview_reused_final": int(preview_reused_final),
                 "short_cover_frames": (
                     round(config.short_cover_duration_seconds * config.fps) if short_cover else 0
                 ),
@@ -1382,36 +1079,19 @@ def _render_project_output(
         return RenderResult(
             base_video=base_video,
             final_video=layout.final_video,
-            preview_video=layout.preview_video,
             reused_base=reused_base,
             final_validation=final_report,
-            preview_validation=preview_report,
         )
     except Exception as exc:
         fail_stage(layout, "render", exc)
         raise
 
 
-def render_project(layout: ProjectLayout, *, force: bool = False) -> RenderResult:
-    require_approval(layout, "images")
-    return _render_project_output(
-        layout,
-        force=force,
-        approved_only=True,
-        provider="ffmpeg",
-    )
-
-
 def render_review_candidate(layout: ProjectLayout, *, force: bool = False) -> RenderResult:
     """Render full quality from active assets without recording a human approval."""
-    project = layout.load_manifest()
-    if not project.config.youtube_publication.allow_automated_private_review_upload:
-        raise RuntimeError("A política de candidato privado não está habilitada neste projeto.")
     result = _render_project_output(
         layout,
         force=force,
-        approved_only=False,
-        provider="ffmpeg-review-candidate",
     )
     layout.append_event(
         {
@@ -1423,4 +1103,5 @@ def render_review_candidate(layout: ProjectLayout, *, force: bool = False) -> Re
     return result
 
 
-render_video = render_project
+render_project = render_review_candidate
+render_video = render_review_candidate

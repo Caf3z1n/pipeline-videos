@@ -350,14 +350,14 @@ def prepare_job_project(
             projects_dir=root,
             target_duration_seconds=request.duration_seconds,
             video_format=video_format,
-            production_mode="draft_one_shot",
+            production_mode="final_candidate_one_shot",
         )
     else:
         layout, _, _ = create_auto_video(
             projects_dir=root,
             target_duration_seconds=request.duration_seconds,
             video_format=video_format,
-            production_mode="draft_one_shot",
+            production_mode="final_candidate_one_shot",
         )
     manifest = layout.load_manifest()
     manifest.config.production.use_subagents = True
@@ -2156,7 +2156,7 @@ def _produce_remote_candidate(
             timeout_seconds=timeout_seconds,
         )
         try:
-            result = run_autopilot_once(layout, allow_external=True, review_candidate=True)
+            result = run_autopilot_once(layout, allow_external=True)
         except Exception as exc:
             if _growth_package_repair_is_applicable(layout):
                 job = _repair_growth_package_failure(

@@ -276,7 +276,7 @@ def test_manual_audio_short_uses_current_production_mode(tmp_path) -> None:
     manifests = sorted((tmp_path / "shorts").glob("*/project.json"))
     assert len(manifests) == 1
     payloads = [json.loads(path.read_text(encoding="utf-8")) for path in manifests]
-    assert payloads[0]["config"]["production"]["mode"] == "draft_one_shot"
+    assert payloads[0]["config"]["production"]["mode"] == "final_candidate_one_shot"
     assert payloads[0]["config"]["audio"]["provider"] == "local_manual"
     started = runner.invoke(cli.app, ["run", str(manifests[0].parent)])
     assert started.exit_code == 0, started.output

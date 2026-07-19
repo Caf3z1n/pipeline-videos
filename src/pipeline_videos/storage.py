@@ -204,14 +204,6 @@ class ProjectLayout:
         return self.root / "render" / "final.mp4"
 
     @property
-    def preview_video(self) -> Path:
-        return self.root / "render" / "preview.mp4"
-
-    @property
-    def draft_preview_video(self) -> Path:
-        return self.root / "render" / "draft-preview.mp4"
-
-    @property
     def metadata(self) -> Path:
         return self.root / "youtube" / "metadata.json"
 

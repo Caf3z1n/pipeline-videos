@@ -241,9 +241,14 @@ def run_demo(
     projects_dir: Path | None = None,
     force: bool = False,
 ) -> tuple[ProjectLayout, object]:
-    base = projects_dir or DEFAULT_PROJECTS_DIR
+    base = (projects_dir or DEFAULT_PROJECTS_DIR).expanduser().resolve()
     try:
         layout = resolve_project(DEMO_ID, base)
+        if projects_dir is not None:
+            try:
+                layout.root.resolve().relative_to(base)
+            except ValueError as exc:
+                raise FileNotFoundError from exc
     except FileNotFoundError:
         layout = create_project(
             DEMO_ID,

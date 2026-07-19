@@ -12,7 +12,7 @@ class PipelineModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
 
-type ProductionMode = Literal["draft_one_shot"]
+type ProductionMode = Literal["final_candidate_one_shot"]
 
 
 class StageStatus(StrEnum):
@@ -60,21 +60,6 @@ class RenderConfig(PipelineModel):
     video_codec: str = "libx264"
     final_crf: int = 12
     final_preset: str = "slow"
-    preview_width: int = 1920
-    preview_height: int = 1080
-    preview_crf: int = 12
-    preview_preset: Literal[
-        "ultrafast",
-        "superfast",
-        "veryfast",
-        "faster",
-        "fast",
-        "medium",
-        "slow",
-        "slower",
-        "veryslow",
-    ] = "slow"
-    preview_motion_supersample: int = Field(default=3, ge=1, le=4)
     audio_bitrate: str = "192k"
     transition_seconds: float = 0.38
     transition_style: Literal["fade_black", "cinematic_mix"] = "cinematic_mix"
@@ -100,6 +85,22 @@ class RenderConfig(PipelineModel):
     caption_focus_blur_extra_sigma: float = Field(default=0.0, ge=0.0, le=6.0)
     caption_focus_top_ratio: float = Field(default=0.28, ge=0.0, le=0.8)
     caption_focus_height_ratio: float = Field(default=0.44, gt=0.0, le=1.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_removed_preview_settings(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        migrated = dict(value)
+        for field in (
+            "preview_width",
+            "preview_height",
+            "preview_crf",
+            "preview_preset",
+            "preview_motion_supersample",
+        ):
+            migrated.pop(field, None)
+        return migrated
 
     @model_validator(mode="after")
     def validate_motion_zoom(self) -> RenderConfig:
@@ -333,12 +334,21 @@ class ShortsScriptConfig(PipelineModel):
 
 
 class ProductionConfig(PipelineModel):
-    mode: ProductionMode = "draft_one_shot"
+    mode: ProductionMode = "final_candidate_one_shot"
     use_subagents: bool = True
     image_workers: int = Field(default=3, ge=1, le=8)
     approval_policy: Literal["final_only"] = "final_only"
     optimization_profile: Literal["token_optimized_v1"] = "token_optimized_v1"
     worker_context_policy: Literal["compact_only"] = "compact_only"
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_draft_mode_name(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or value.get("mode") != "draft_one_shot":
+            return value
+        migrated = dict(value)
+        migrated["mode"] = "final_candidate_one_shot"
+        return migrated
 
 
 class ProjectConfig(PipelineModel):

@@ -41,7 +41,7 @@ from pipeline_videos.review import (
 )
 from pipeline_videos.scenes import build_scenes
 from pipeline_videos.script import import_script
-from pipeline_videos.state import invalidate, require_approval, set_approval, stage_summary
+from pipeline_videos.state import invalidate, set_approval, stage_summary
 from pipeline_videos.storage import (
     DEFAULT_PROJECTS_DIR,
     ProjectLayout,
@@ -1222,33 +1222,15 @@ def youtube_publish(
 def render_command(
     project: str,
     force: Annotated[bool, typer.Option("--force")] = False,
-    draft: Annotated[bool, typer.Option("--draft")] = False,
-    final: Annotated[bool, typer.Option("--final")] = False,
 ) -> None:
-    if draft and final:
-        raise typer.BadParameter("Use somente --draft ou --final.")
     layout = _project(project)
     from pipeline_videos.music import select_music
+    from pipeline_videos.render import render_review_candidate
 
+    validate_draft_preflight(layout)
     select_music(layout)
-    manifest = layout.load_manifest()
-    draft_mode = draft or not final
-    if draft_mode:
-        validate_draft_preflight(layout)
-        from pipeline_videos.render import render_draft_preview
-
-        result = render_draft_preview(layout, force=force)
-        console.print(f"[green]Prévia one-shot:[/green] {result.preview_video}")
-        return
-    if not manifest.demo:
-        require_approval(layout, "script")
-        require_approval(layout, "biblical_review")
-        require_approval(layout, "images")
-    from pipeline_videos.render import render_project
-
-    result = render_project(layout, force=force)
-    console.print(f"[green]Render final:[/green] {result.final_video}")
-    console.print(f"[green]Prévia:[/green] {result.preview_video}")
+    result = render_review_candidate(layout, force=force)
+    console.print(f"[green]Candidato final V4:[/green] {result.final_video}")
 
 
 @app.command("render-review")
@@ -1266,7 +1248,6 @@ def render_review_command(
     select_music(layout)
     result = render_review_candidate(layout, force=force)
     console.print(f"[green]Candidato privado:[/green] {result.final_video}")
-    console.print(f"[green]Prévia:[/green] {result.preview_video}")
 
 
 @app.command("validate")
@@ -1296,7 +1277,6 @@ def run_pipeline(
     layout = _project(project)
     manifest = layout.load_manifest()
     main_agent_script_mode = not manifest.config.shorts_script.use_specialist_subagent
-    draft_mode = True
     if dry_run:
         console.print("[bold]Plano de execução sem mutações[/bold]")
         for row in stage_summary(layout):
@@ -1334,9 +1314,8 @@ def run_pipeline(
             title="Plano de retomada após a fila de roteiro",
         )
         return
-    if draft_mode:
-        validate_draft_preflight(layout)
-    build_scenes(layout, force=force, skip_approvals=draft_mode)
+    validate_draft_preflight(layout)
+    build_scenes(layout, force=force, skip_approvals=True)
     growth_queue = None
     if (
         not manifest.demo
@@ -1361,8 +1340,6 @@ def run_pipeline(
             title="Plano concorrente e ponto de join",
         )
         return
-    if not manifest.demo and not draft_mode:
-        require_approval(layout, "images")
     from pipeline_videos.audio import generate_audio
     from pipeline_videos.captions import generate_captions
     from pipeline_videos.metadata import (
@@ -1371,7 +1348,7 @@ def run_pipeline(
         queue_thumbnail_for_codex,
     )
     from pipeline_videos.music import select_music
-    from pipeline_videos.render import render_draft_preview, render_project
+    from pipeline_videos.render import render_review_candidate
     from pipeline_videos.validation import validate_project
 
     current = layout.load_manifest()
@@ -1419,13 +1396,9 @@ def run_pipeline(
         generate_fixture_thumbnail(layout, force=force)
     elif not manifest.config.youtube_growth.enabled and not layout.thumbnail.exists():
         queue_thumbnail_for_codex(layout)
-    if draft_mode:
-        draft_result = render_draft_preview(layout, force=force)
-        report = validate_project(layout, require_render=False)
-        console.print(f"[green]Prévia one-shot:[/green] {draft_result.preview_video}")
-    else:
-        render_project(layout, force=force)
-        report = validate_project(layout, require_render=True)
+    render_result = render_review_candidate(layout, force=force)
+    report = validate_project(layout, require_render=True)
+    console.print(f"[green]Candidato final V4:[/green] {render_result.final_video}")
     console.print(
         f"[green]Pipeline concluído.[/green] Validação: "
         f"{'OK' if report.valid else 'com erros em validation/report.md'}."
@@ -1475,7 +1448,7 @@ def autopilot_command(
         )
     if result.status != "completed":
         raise RuntimeError("O autopilot ainda possui dependências externas pendentes.")
-    console.print(f"[green]Autopilot concluído:[/green] {result.preview_path}")
+    console.print(f"[green]Autopilot concluído:[/green] {result.render_path}")
     console.print(
         f"Validação: {'OK' if result.validation_ok else 'com erros em validation/report.md'}."
     )
@@ -1491,7 +1464,6 @@ def demo_command(
     layout, result = run_demo(projects_dir=projects_dir, force=force)
     report = result["validation"]
     console.print(f"[green]Demonstração pronta:[/green] {layout.final_video}")
-    console.print(f"Prévia: {layout.preview_video}")
     console.print(f"Validação: {'OK' if report.valid else 'REPROVADA'}")
 
 

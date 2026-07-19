@@ -109,24 +109,6 @@ def test_ffprobe_validation_reports_wrong_pixel_format(monkeypatch, tmp_path) ->
         )
 
 
-def test_render_output_uses_preview_dimensions(monkeypatch, tmp_path) -> None:
-    output = tmp_path / "preview.mp4"
-    output.touch()
-    config = RenderConfig(
-        width=640,
-        height=360,
-        preview_width=320,
-        preview_height=180,
-        fps=30,
-    )
-    monkeypatch.setattr(render, "ffprobe_json", lambda _path: _probe_payload())
-
-    report = render.validate_render_output(output, config, 0.4, preview=True)
-
-    assert report["valid"] is True
-    assert report["actual_width"] == 320
-
-
 @pytest.mark.integration
 @pytest.mark.skipif(
     shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
@@ -505,130 +487,6 @@ def test_visual_base_limits_parallel_segment_jobs_and_preserves_order(
     assert workers == [(2, "pipeline-video-segment")]
 
 
-def test_visual_base_reuses_equivalent_peer_namespace_with_independent_copy(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    layout = ProjectLayout(tmp_path / "project")
-    layout.ensure_directories()
-    plans = _render_plans(tmp_path, count=1)
-    config = RenderConfig(width=320, height=180, fps=30)
-    base_hash = render._base_input_hash(plans, config)
-    final_base = layout.render_work / "base.mp4"
-    final_base.write_bytes(b"shared-visual-base")
-    write_json(layout.render_work / "base.json", {"input_hash": base_hash, "segments": 1})
-    monkeypatch.setattr(
-        render,
-        "_render_segment",
-        lambda *_args, **_kwargs: pytest.fail("nÃ£o deveria renderizar segmentos"),
-    )
-
-    draft_base, reused = render._build_visual_base(
-        layout,
-        plans,
-        config,
-        base_hash,
-        force=False,
-        namespace="draft",
-    )
-
-    assert reused is True
-    assert draft_base == layout.render_work / "draft-base.mp4"
-    assert draft_base.read_bytes() == b"shared-visual-base"
-    final_base.write_bytes(b"changed-after-copy")
-    assert draft_base.read_bytes() == b"shared-visual-base"
-
-
-def test_preview_fast_path_copies_equivalent_final_without_hardlink(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    layout = ProjectLayout(tmp_path / "project")
-    layout.ensure_directories()
-    layout.final_video.write_bytes(b"equivalent-final")
-    config = RenderConfig(
-        width=320,
-        height=180,
-        preview_width=320,
-        preview_height=180,
-        final_crf=20,
-        preview_crf=20,
-        final_preset="fast",
-        preview_preset="fast",
-        audio_bitrate="192k",
-    )
-    monkeypatch.setattr(
-        render,
-        "run_process",
-        lambda *_args, **_kwargs: pytest.fail("FFmpeg nÃ£o deveria ser chamado"),
-    )
-
-    reused = render._render_preview(
-        layout,
-        config,
-        final_audio_sample_rate=48_000,
-    )
-
-    assert reused is True
-    assert layout.preview_video.read_bytes() == b"equivalent-final"
-    layout.final_video.write_bytes(b"mutated-final")
-    assert layout.preview_video.read_bytes() == b"equivalent-final"
-
-
-def test_preview_transcodes_when_dimensions_differ_and_preserves_audio_quality(
-    monkeypatch, tmp_path
-) -> None:
-    layout = ProjectLayout(tmp_path / "project")
-    layout.ensure_directories()
-    layout.final_video.write_bytes(b"final")
-    config = RenderConfig(
-        width=320,
-        height=180,
-        preview_width=160,
-        preview_height=90,
-        final_crf=20,
-        preview_crf=20,
-        final_preset="fast",
-        preview_preset="fast",
-        audio_bitrate="192k",
-    )
-    calls = []
-
-    def fake_run(args, *, cwd, timeout):
-        calls.append((args, timeout))
-        (cwd / args[-1]).write_bytes(b"transcoded-preview")
-
-    monkeypatch.setattr(render, "run_process", fake_run)
-
-    reused = render._render_preview(
-        layout,
-        config,
-        final_audio_sample_rate=48_000,
-    )
-
-    assert reused is False
-    assert layout.preview_video.read_bytes() == b"transcoded-preview"
-    assert len(calls) == 1
-    assert calls[0][0][calls[0][0].index("-b:a") + 1] == "192k"
-
-
-def test_preview_rejects_missing_final_before_starting_ffmpeg(monkeypatch, tmp_path) -> None:
-    layout = ProjectLayout(tmp_path / "project")
-    layout.ensure_directories()
-    monkeypatch.setattr(
-        render,
-        "run_process",
-        lambda *_args, **_kwargs: pytest.fail("FFmpeg nÃ£o deveria ser chamado"),
-    )
-
-    with pytest.raises(FileNotFoundError, match="Render final"):
-        render._render_preview(
-            layout,
-            RenderConfig(),
-            final_audio_sample_rate=48_000,
-        )
-
-
 def _scene(scene_id: str, order: int, image_id: str, narration: str) -> Scene:
     return Scene(
         scene_id=scene_id,
@@ -670,12 +528,8 @@ def test_short_end_to_end_render_reuses_visual_base_when_only_caption_style_chan
             width=320,
             height=180,
             fps=10,
-            preview_width=160,
-            preview_height=90,
             final_crf=28,
             final_preset="ultrafast",
-            preview_crf=32,
-            preview_preset="ultrafast",
             transition_seconds=0.05,
             transition_style="cinematic_mix",
             motion_strength=0.001,
@@ -808,24 +662,17 @@ def test_short_end_to_end_render_reuses_visual_base_when_only_caption_style_chan
     )
 
     generate_captions(layout)
-    draft = render.render_draft_preview(layout)
-    assert draft.preview_video.is_file()
-    assert not layout.final_video.exists()
-    assert not layout.preview_video.exists()
-    assert not (layout.render_work / "base.mp4").exists()
-
     approve_image(layout, "scene-001", decided_by="teste")
     approve_image(layout, "scene-002", decided_by="teste")
-    first = render.render_project(layout)
+    first = render.render_review_candidate(layout)
     base_mtime = first.base_video.stat().st_mtime_ns
 
     manifest = layout.load_manifest()
     manifest.config.captions.highlight_color = "#70D6FF"
     layout.save_manifest(manifest)
     generate_captions(layout)
-    second = render.render_project(layout)
+    second = render.render_review_candidate(layout)
 
     assert first.final_validation["valid"] is True
-    assert first.preview_validation["valid"] is True
     assert second.reused_base is True
     assert second.base_video.stat().st_mtime_ns == base_mtime

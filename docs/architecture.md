@@ -57,12 +57,12 @@ aprovado.
 As aprovações ficam separadas do estado técnico. Um arquivo pode existir e ainda não estar aprovado.
 Os checkpoints atuais são briefing, roteiro, revisão bíblica, imagens, metadados e render final.
 
-O roteiro só é aprovado após uma revisão correspondente à mesma versão e sem bloqueio aberto. O
-render real exige roteiro, revisão e imagens aprovados.
+O roteiro só é aprovado após uma revisão correspondente à mesma versão e sem bloqueio aberto. A
+produção do candidato final não transforma automaticamente ativos em aprovados.
 
-Em `draft_one_shot`, os bloqueios de consistência bíblica continuam valendo, mas as aprovações
-humanas intermediárias não impedem `render/draft-preview.mp4`. A prévia usa versões ativas, fica em
-cache separado e não toca o render final.
+No modo `final_candidate_one_shot`, os bloqueios de consistência bíblica continuam valendo, mas as
+aprovações humanas intermediárias não impedem `render/final.mp4`. O candidato usa as versões ativas
+em qualidade V4 e não registra aprovação humana automaticamente.
 
 ## Contratos de conteúdo
 
@@ -87,12 +87,10 @@ cache separado e não toca o render final.
 1. O áudio define a timeline real.
 2. Cada cena vira um segmento CFR com `scale`, `crop`, `zoompan` e fades discretos; até dois
    segmentos independentes podem ser processados em paralelo.
-3. Os segmentos formam `render/work/base.mp4`, sem legenda e reutilizável. Bases de draft/final com
-   o mesmo hash são compartilhadas por cópia atômica.
+3. Os segmentos formam `render/work/review-candidate-base.mp4`, sem legenda e reutilizável.
 4. O ASS é aplicado à base junto da narração.
-5. O final usa H.264/yuv420p, AAC e faststart; a prévia é derivada dele ou copiada sem recodificação
-   quando os parâmetros são equivalentes.
-6. FFprobe valida proporção, codecs, faixas, frame rate e duração.
+5. O candidato final usa H.264/yuv420p, AAC, faststart, CRF 12, preset `slow` e supersampling 3.
+6. FFprobe valida proporção, codecs, faixas, frame rate e duração do único MP4.
 
 O ASS emite um evento por intervalo de palavra, mas mantém o bloco inteiro no mesmo lugar; só a cor
 do termo ativo muda. A mudança de cena não interfere na timeline da legenda.
@@ -130,7 +128,7 @@ pacote contra os modelos Pydantic completos e os arquivos-fonte do projeto:
 estiverem prontas. Quando encontra geração embutida pendente, grava o checkpoint em
 `logs/autopilot-state.json`, informa exatamente quais arquivos de staging faltam e termina sem
 perder o progresso. Depois do preenchimento pelos trabalhadores, uma nova execução faz uma única
-importação em lote e continua até a prévia ou o próximo bloqueio.
+importação em lote e continua até o candidato final ou o próximo bloqueio.
 
 O comando nunca cria duas escritas concorrentes no estado. A geração de imagens continua fora do
 processo Python porque a ferramenta embutida pertence à sessão do Codex; áudio, música, legendas,
