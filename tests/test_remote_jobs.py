@@ -999,6 +999,10 @@ def test_not_before_delays_immediate_job(tmp_path) -> None:
 
     assert job_is_due(job, now) is False
     assert job_is_due(job, now + timedelta(hours=2)) is True
+    summary = job_summary(job)
+    assert summary["duration_seconds"] == 50
+    assert summary["not_before"] == (now + timedelta(hours=1)).isoformat()
+    assert summary["voice_variant"] == "jesus_1"
 
 
 def test_next_retry_at_delays_automatic_recovery(tmp_path) -> None:
