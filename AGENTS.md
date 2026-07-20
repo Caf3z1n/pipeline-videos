@@ -134,8 +134,9 @@
   espesso visível, bordas chanfradas, textura material, highlights, sombras de contato/oclusão e
   perspectiva coerentes com a cena. A palavra dominante usa escala muito maior; palavra vermelha e
   seta/X/sublinhado/pincel preservam o mesmo tratamento 3D. Nunca use texto plano, adesivo ou overlay.
-- Shorts e vídeos longos novos seguem `Enfoque concreto | Passagem`. O enfoque se adapta ao modo
-  criativo sem forçar tensão motivacional. A descrição abre com resumo
+- Shorts e vídeos longos novos seguem `Enfoque concreto | Passagem`. A passagem aparece exatamente
+  uma vez e somente depois da barra; o enfoque nunca repete a referência bíblica. O enfoque se
+  adapta ao modo criativo sem forçar tensão motivacional. A descrição abre com resumo
   curto e, em vídeos longos,
   traz timeline das citações iniciada exatamente por `00:00 - Abertura`.
 - O especialista cria exatamente um par título+thumbnail. O título carrega referência, enfoque e
@@ -145,7 +146,9 @@
   conceito visual complementa o título sem texto no bitmap.
 - Projetos novos usam `search_first_unique_v2` para SEO. A descrição é única, abre com a consulta
   principal, passagem e entrega concreta, usa ao menos dois parágrafos e não repete CTA genérico
-  como “Compartilhe esta mensagem”. Em vídeos longos, preserve também a timeline bíblica.
+  como “Compartilhe esta mensagem”. Também não se refere ao próprio formato com expressões como
+  “este Short”, “neste vídeo”, “este conteúdo” ou “o vídeo mostra”; começa diretamente pelo assunto.
+  Em vídeos longos, preserve também a timeline bíblica.
 - `metadata.topics` contém de oito a quinze tags distintas e diretamente relevantes, incluindo
   consulta principal, passagem, livro e variações reais de busca. Tags são metadado secundário:
   não use `#` nelas, não cole listas na descrição e não invente volume de busca. Hashtags na

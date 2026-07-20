@@ -482,8 +482,9 @@ descrição única, palavras-chave, intenção de busca, hipótese de CTR e just
 Na VPS, a mesma combinação é processada pelo `youtube_growth_specialist`, com contexto compacto e
 raciocínio médio. O contrato visual e a complementaridade entre título e capa permanecem iguais.
 
-Nos projetos novos, o título usa `Enfoque concreto | Passagem`. O enfoque pode ser fato,
-personagem, curiosidade, pergunta, comparação, dilema, tese ou promessa prática. A descrição abre
+Nos projetos novos, o título usa `Enfoque concreto | Passagem`. A passagem aparece uma única vez e
+somente no final, depois da barra; a referência bíblica nunca é repetida dentro do enfoque. O enfoque
+pode ser fato, personagem, curiosidade, pergunta, comparação, dilema, tese ou promessa prática. A descrição abre
 com resumo curto e, em vídeos longos, recebe uma timeline das citações no ponto em que entram na
 narrativa.
 
@@ -521,8 +522,9 @@ Pillow. A primeira saída válida é mantida; nova tentativa automática ocorre 
 a capa ocupa exatamente o frame zero.
 
 Projetos novos usam também `search_first_unique_v2`. A descrição abre com a consulta principal,
-passagem e valor concreto do vídeo, contém ao menos dois parágrafos e não aceita CTAs genéricos como
-“Compartilhe esta mensagem”. O comentário fixado concentra uma pergunta específica. O especialista
+passagem e valor concreto, contém ao menos dois parágrafos e não aceita CTAs genéricos como
+“Compartilhe esta mensagem”. Também não usa metalinguagem como “este Short”, “neste vídeo”, “este
+conteúdo” ou “o vídeo mostra”: começa diretamente pelo assunto. O comentário fixado concentra uma pergunta específica. O especialista
 entrega de oito a quinze tags relevantes — consulta, passagem, livro e variações reais — sem tratar
 tags como motor principal de distribuição nem despejá-las na descrição. Hashtags são opcionais e
 limitadas a três diretamente relacionadas.

@@ -45,8 +45,8 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-GROWTH_QUEUE_SCHEMA_VERSION = "1.14"
-GROWTH_ALGORITHM_VERSION = "1.14"
+GROWTH_QUEUE_SCHEMA_VERSION = "1.15"
+GROWTH_ALGORITHM_VERSION = "1.15"
 SHORT_TITLE_MAX_CHARACTERS = 70
 SHORT_DESCRIPTION_MAX_CHARACTERS = 600
 SHORT_DESCRIPTION_MIN_CHARACTERS = 260
@@ -84,6 +84,12 @@ _GENERIC_DESCRIPTION_CTA_PATTERNS = (
     r"\binscreva-se no canal\b",
     r"\bdeixe seu like\b",
     r"\bcurta o v[ií]deo\b",
+)
+
+_SELF_REFERENTIAL_DESCRIPTION_PATTERNS = (
+    r"\b(?:este|esse|aquele|neste|nesse|naquele)\s+(?:short|v[ií]deo|conte[uú]do)\b",
+    r"\b(?:o|um)\s+(?:short|v[ií]deo|conte[uú]do)\s+"
+    r"(?:mostra|explica|apresenta|revela|aborda|acompanha)\b",
 )
 
 _PHOTOGRAPHIC_THUMBNAIL_STYLE_MARKERS = (
@@ -433,6 +439,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 "tag_total_max_characters": SEO_TAG_MAX_CHARACTERS,
                 "maximum_description_hashtags": 3,
                 "generic_description_cta_forbidden": True,
+                "self_referential_description_forbidden": True,
                 "tags_are_secondary_metadata": True,
                 "shorts_primary_ranking_signals": [
                     "chose_to_view",
@@ -542,6 +549,11 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                     "em um pinned_comment específico ao tema."
                 ),
                 (
+                    "Nunca trate a publicação como objeto da descrição: não use 'este Short', "
+                    "'neste vídeo', 'este conteúdo', 'o vídeo mostra' ou construções equivalentes. "
+                    "Comece diretamente pelo assunto, pela passagem e pelo esclarecimento entregue."
+                ),
+                (
                     f"Preencha metadata.topics com {SEO_TAG_MIN_COUNT} a {SEO_TAG_MAX_COUNT} "
                     f"tags distintas e diretamente relevantes, em no máximo "
                     f"{SEO_TAG_MAX_CHARACTERS} caracteres no total. Inclua a palavra-chave "
@@ -556,7 +568,9 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 ),
                 (
                     "Escolha primary_keyword como uma consulta realmente coerente com o foco "
-                    "do vídeo e coloque-a nos primeiros 55 caracteres do título. Registre em "
+                    "do vídeo, sem repetir nela a referência da passagem, e coloque-a nos "
+                    "primeiros 55 caracteres do título. A passagem fica reservada ao sufixo. "
+                    "Registre em "
                     "description_rationale, tag_strategy e discovery_hypothesis por que o pacote "
                     "é relevante, sem alegar que metadados garantem alcance."
                 ),
@@ -730,7 +744,9 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                     "Todos os títulos devem seguir 'Enfoque concreto | "
                     f"{main_passage}'. Antes da barra, adapte a forma ao creative_mode: fato "
                     "narrativo, personagem, curiosidade, pergunta específica, comparação, dilema, "
-                    "tese interpretativa ou promessa prática. Não force tensão motivacional."
+                    "tese interpretativa ou promessa prática. A passagem deve aparecer exatamente "
+                    "uma vez e somente depois da barra; nunca repita a referência no enfoque. Não "
+                    "force tensão motivacional."
                 ),
                 (
                     "Preencha strategy.promise_match copiando content_promise, opening_hook como "
@@ -1035,6 +1051,13 @@ def _normalized_search_text(value: str) -> str:
     return " ".join(re.findall(r"\w+", value.casefold(), flags=re.UNICODE))
 
 
+def _normalized_biblical_reference_text(value: str) -> str:
+    ignored = {"capítulo", "capitulo", "versículo", "versiculo", "versículos", "versiculos"}
+    return " ".join(
+        token for token in _normalized_search_text(value).split() if token not in ignored
+    )
+
+
 _PAIRING_STOP_WORDS = {
     "a",
     "as",
@@ -1130,6 +1153,10 @@ def _validate_search_first_seo(
     opening = _normalized_search_text(description[:DESCRIPTION_SEARCH_WINDOW])
     primary_keyword = _normalized_search_text(strategy.primary_keyword)
     passage = _normalized_search_text(briefing.main_passage)
+    passage_reference = _normalized_biblical_reference_text(briefing.main_passage)
+    primary_reference = _normalized_biblical_reference_text(strategy.primary_keyword)
+    if passage_reference and passage_reference in primary_reference:
+        raise ValueError("primary_keyword deve descrever o enfoque sem repetir a passagem bíblica.")
     if not primary_keyword or primary_keyword not in opening:
         raise ValueError("A abertura da descrição precisa conter primary_keyword.")
     if passage and passage not in opening:
@@ -1143,6 +1170,11 @@ def _validate_search_first_seo(
         for pattern in _GENERIC_DESCRIPTION_CTA_PATTERNS
     ):
         raise ValueError("A descrição não pode usar CTA genérico de compartilhamento ou inscrição.")
+    if any(
+        re.search(pattern, normalized_description, flags=re.IGNORECASE)
+        for pattern in _SELF_REFERENTIAL_DESCRIPTION_PATTERNS
+    ):
+        raise ValueError("A descrição não pode se referir ao próprio Short, vídeo ou conteúdo.")
     hashtags = re.findall(r"(?<!\w)#[\wÀ-ÿ]+", description, flags=re.UNICODE)
     if len(hashtags) > 3:
         raise ValueError("A descrição pode usar no máximo três hashtags diretamente relevantes.")
@@ -1364,6 +1396,15 @@ def _validate_package(
                 else "Tensão concreta | Passagem principal"
             )
             raise ValueError(f"Todos os títulos precisam seguir '{expected}'.")
+        normalized_passage = _normalized_biblical_reference_text(briefing.main_passage)
+        if normalized_passage and any(
+            normalized_passage
+            in _normalized_biblical_reference_text(title.removesuffix(suffix).strip())
+            for title in titles
+        ):
+            raise ValueError(
+                "A passagem principal deve aparecer uma única vez, somente no final do título."
+            )
         promise_match = package.strategy.promise_match
         if promise_match is None:
             raise ValueError("Este padrão de título exige strategy.promise_match.")

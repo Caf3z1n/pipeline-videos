@@ -110,8 +110,9 @@ Nunca regenere item já importado ou aprovado.
 
 ## Crescimento e thumbnail
 
-A fila exige exatamente um par complementar. O título segue `Enfoque concreto | Passagem` e adapta
-o enfoque ao modo criativo, sem forçar tensão motivacional. Em Shorts, a capa acrescenta conflito,
+A fila exige exatamente um par complementar. O título segue `Enfoque concreto | Passagem`: a
+passagem aparece uma única vez, somente no final, e nunca é repetida no enfoque. O enfoque se adapta
+ao modo criativo, sem forçar tensão motivacional. Em Shorts, a capa acrescenta conflito,
 decisão, detalhe, contraste ou consequência, edita a imagem ativa da abertura e nasce no Imagegen
 com texto, palavra vermelha e seta, X, sublinhado ou pincel incorporados.
 
@@ -133,7 +134,8 @@ o remoto permite um único checkpoint de correção por tentativa antes de volta
 
 Metadados novos usam `search_first_unique_v2`: consulta principal nos primeiros 55 caracteres do
 título, descrição única com passagem e valor concreto na abertura, dois parágrafos, sem CTA
-genérico, oito a quinze tags relevantes e comentário fixado específico. O contrato exige
+genérico e sem autorreferência ao formato como “este Short”, “neste vídeo”, “este conteúdo” ou “o
+vídeo mostra”; oito a quinze tags relevantes e comentário fixado específico. O contrato exige
 justificativa de descrição, estratégia de tags e hipótese de descoberta. Tags continuam
 secundárias; o especialista não promete viralização nem inventa volume de busca.
 

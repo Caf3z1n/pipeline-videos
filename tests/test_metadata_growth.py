@@ -203,10 +203,10 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
             alternative_titles=titles[1:],
             description=(
                 "Davi e Golias em 1 Samuel 17 revela como a confiança em Deus muda a forma "
-                "de enfrentar um desafio que parece maior do que nossas forças. O vídeo "
-                "acompanha o confronto, a decisão de Davi e o sentido bíblico de sua coragem.\n\n"
-                "Esta explicação destaca coragem e fé sem transformar a passagem em promessa "
-                "de vitória automática. Você verá o contexto do relato, a diferença entre "
+                "de enfrentar um desafio que parece maior do que nossas forças. O confronto "
+                "expõe a decisão de Davi e o sentido bíblico de sua coragem.\n\n"
+                "A passagem destaca coragem e fé sem transformar o relato em promessa "
+                "de vitória automática. O contexto esclarece a diferença entre "
                 "autoconfiança e confiança em Deus e os detalhes centrais da história bíblica."
             ),
             chapters=[],
@@ -367,6 +367,7 @@ def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path
     assert queue["outputs"]["seo_contract"]["description_min_characters"] == 350
     assert queue["outputs"]["seo_contract"]["tag_count"] == [8, 15]
     assert queue["outputs"]["seo_contract"]["generic_description_cta_forbidden"] is True
+    assert queue["outputs"]["seo_contract"]["self_referential_description_forbidden"] is True
     assert queue["outputs"]["thumbnail_standard"] == "biblical_cinematic_landscape_v1"
     assert queue["outputs"]["thumbnail_typography_standard"] == "no_text_v1"
     assert queue["outputs"]["title_thumbnail_pairing_standard"] == "complementary_v1"
@@ -383,6 +384,8 @@ def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path
     assert any("texto, letras, números" in item for item in queue["instructions"])
     assert any("um par editorial completo" in item for item in queue["instructions"])
     assert any("CTA genérico" in item for item in queue["instructions"])
+    assert any("este Short" in item for item in queue["instructions"])
+    assert any("exatamente uma vez" in item for item in queue["instructions"])
     assert any("metadata.topics" in item for item in queue["instructions"])
     assert any("Não passe referenced_image_paths" in item for item in queue["instructions"])
     assert layout.load_manifest().stages["youtube_growth"].attempts == 1
@@ -593,6 +596,54 @@ def test_growth_seo_v2_rejects_generic_description_cta(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="CTA genérico"):
         _validate_package(layout, package.model_copy(update={"metadata": metadata}), queue)
+
+
+@pytest.mark.parametrize(
+    "self_reference",
+    ["este Short mostra", "neste vídeo", "o vídeo apresenta"],
+)
+def test_growth_seo_v2_rejects_self_referential_description(tmp_path, self_reference: str) -> None:
+    layout = _project_with_editorial_inputs(tmp_path, video_format="short")
+    queue = prepare_growth_queue(layout)
+    package = _package(queue, format_name="short")
+    description = package.metadata.description.replace(
+        "Davi e Golias em 1 Samuel 17 revela",
+        f"Davi e Golias em 1 Samuel 17: {self_reference}",
+    )
+    metadata = package.metadata.model_copy(update={"description": description})
+
+    with pytest.raises(ValueError, match="próprio Short"):
+        _validate_package(layout, package.model_copy(update={"metadata": metadata}), queue)
+
+
+def test_growth_rejects_main_passage_repeated_before_title_suffix(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(tmp_path, video_format="short")
+    queue = prepare_growth_queue(layout)
+    package = _package(queue, format_name="short")
+    duplicated_title = "Davi e Golias em 1 Samuel capítulo 17 | 1 Samuel 17"
+    metadata = package.metadata.model_copy(update={"title": duplicated_title})
+    assert package.strategy.promise_match is not None
+    promise_match = package.strategy.promise_match.model_copy(
+        update={"title_delivery": "Davi e Golias em 1 Samuel capítulo 17"}
+    )
+    strategy = package.strategy.model_copy(update={"promise_match": promise_match})
+
+    with pytest.raises(ValueError, match="uma única vez"):
+        _validate_package(
+            layout,
+            package.model_copy(update={"metadata": metadata, "strategy": strategy}),
+            queue,
+        )
+
+
+def test_growth_rejects_primary_keyword_that_repeats_main_passage(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(tmp_path, video_format="short")
+    queue = prepare_growth_queue(layout)
+    package = _package(queue, format_name="short")
+    strategy = package.strategy.model_copy(update={"primary_keyword": "Davi e Golias 1 Samuel 17"})
+
+    with pytest.raises(ValueError, match="sem repetir a passagem"):
+        _validate_package(layout, package.model_copy(update={"strategy": strategy}), queue)
 
 
 def test_growth_seo_v2_requires_relevant_tag_set(tmp_path) -> None:

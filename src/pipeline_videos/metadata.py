@@ -170,16 +170,16 @@ def build_metadata(layout: ProjectLayout, *, force: bool = False) -> YouTubeMeta
         part
         for part in (
             (
-                f"{subject_title} em {briefing.main_passage}: este vídeo apresenta uma "
-                f"{mode_label.casefold()} fiel à passagem e explica seu ponto central com clareza."
+                f"{subject_title} em {briefing.main_passage}: uma abordagem "
+                f"{mode_label.casefold()} fiel à passagem esclarece seu ponto central."
             ),
             briefing.viewer_outcome or briefing.practical_application,
             (
-                f"O conteúdo diferencia o que a Bíblia afirma em {briefing.main_passage}, "
+                f"A análise diferencia o que a Bíblia afirma em {briefing.main_passage}, "
                 "o contexto verificado e as interpretações usadas para organizar a explicação."
             ),
             "Referências consultadas:\n" + "\n".join(source_lines) if source_lines else "",
-            "Este conteúdo distingue texto bíblico, contexto verificado, interpretação e "
+            "A apresentação distingue texto bíblico, contexto verificado, interpretação e "
             "elaboração criativa. Consulte a passagem completa na tradução de sua preferência.",
         )
         if part
