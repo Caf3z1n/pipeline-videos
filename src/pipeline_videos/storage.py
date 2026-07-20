@@ -112,6 +112,22 @@ class ProjectLayout:
         return self.root / "reviews" / "biblical-consistency.json"
 
     @property
+    def shorts_biblical_review_queue(self) -> Path:
+        return self.root / "reviews" / "shorts-review-queue.json"
+
+    @property
+    def shorts_biblical_review_context(self) -> Path:
+        return self.root / "reviews" / "shorts-review-context.json"
+
+    @property
+    def shorts_biblical_review_staging(self) -> Path:
+        return self.root / "reviews" / "staging" / "biblical-reviewer"
+
+    @property
+    def shorts_biblical_review_staging_file(self) -> Path:
+        return self.shorts_biblical_review_staging / "review.json"
+
+    @property
     def style_profile(self) -> Path:
         return self.root / "visual" / "style-profile.json"
 
@@ -273,6 +289,7 @@ class ProjectLayout:
             self.script.parent,
             self.shorts_script_staging,
             self.biblical_review.parent,
+            self.shorts_biblical_review_staging,
             self.style_profile.parent,
             self.scenes.parent,
             self.image_assets,

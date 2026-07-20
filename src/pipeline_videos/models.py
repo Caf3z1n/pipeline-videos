@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from enum import StrEnum
 from typing import Any, Literal, cast
@@ -84,6 +85,8 @@ type InterpretiveStance = Literal[
 
 type HookPolicy = Literal["auto", "required", "optional", "none"]
 
+type HookContract = Literal["mode_compatible_v1", "user_six_v1"]
+
 type HookFamily = Literal[
     "auto",
     "none",
@@ -100,6 +103,19 @@ type HookFamily = Literal[
     "consequence_first",
     "quote_first",
 ]
+
+USER_SIX_HOOK_FAMILIES: tuple[HookFamily, ...] = (
+    "if_you_want_do_this",
+    "what_happens_if_you_stop",
+    "still_doing_losing",
+    "nobody_talks_but",
+    "want_to_learn_start",
+    "never_do_this",
+)
+
+MIN_SHORT_DURATION_SECONDS = 15
+MIN_LONG_DURATION_SECONDS = 30
+COMPACT_SHORT_THRESHOLD_SECONDS = 45
 
 type ResolutionTiming = Literal["distributed", "late", "final_quarter"]
 
@@ -163,6 +179,16 @@ class RenderConfig(PipelineModel):
     motion_pan_strength: float = Field(default=0.32, ge=0.0, le=1.0)
     motion_supersample: int = Field(default=3, ge=1, le=4)
     background_music_path: str | None = None
+    audio_mix_standard: Literal[
+        "legacy_gain_v1",
+        "voice_music_loudness_v1",
+    ] = "legacy_gain_v1"
+    narration_target_lufs: float = Field(default=-18.0, ge=-30.0, le=-12.0)
+    background_music_gap_lu: float = Field(default=16.0, ge=10.0, le=24.0)
+    narration_true_peak_dbfs: float = Field(default=-2.0, ge=-9.0, le=-1.0)
+    background_music_true_peak_dbfs: float = Field(default=-9.0, ge=-9.0, le=-1.0)
+    audio_loudness_range_lu: float = Field(default=7.0, ge=1.0, le=20.0)
+    narration_gain_db: float = Field(default=0.0, ge=-20.0, le=20.0)
     background_music_gain_db: float = Field(default=-12.0, ge=-60.0, le=0.0)
     background_music_fade_in_seconds: float = Field(default=2.0, ge=0.0, le=10.0)
     background_music_fade_out_seconds: float = Field(default=3.0, ge=0.0, le=10.0)
@@ -296,7 +322,10 @@ class YouTubeGrowthConfig(PipelineModel):
         "tension_pipe_passage_v2",
         "creative_pipe_passage_v3",
     ] = "passage_pipe_topic_v1"
-    description_standard: Literal["scripture_timeline_v1"] = "scripture_timeline_v1"
+    description_standard: Literal[
+        "scripture_timeline_v1",
+        "search_first_unique_v2",
+    ] = "scripture_timeline_v1"
     thumbnail_standard: Literal[
         "direct_conflict_red_v1",
         "biblical_cinematic_landscape_v1",
@@ -382,8 +411,10 @@ class ShortsScriptConfig(PipelineModel):
     enabled: bool = True
     use_specialist_subagent: bool = True
     specialist_role: Literal["shorts_script_specialist"] = "shorts_script_specialist"
-    min_words: int = Field(default=105, ge=60, le=180)
-    max_words: int = Field(default=130, ge=80, le=200)
+    require_independent_biblical_review: bool = False
+    duration_profile: Literal["standard_45_55_v1", "adaptive_compact_v1"] = "standard_45_55_v1"
+    min_words: int = Field(default=105, ge=24, le=180)
+    max_words: int = Field(default=130, ge=28, le=200)
     hook_max_words: int = Field(default=12, ge=4, le=24)
     hook_target_seconds: float = Field(default=2.0, ge=1.0, le=4.0)
     narrative_standard: Literal[
@@ -397,11 +428,15 @@ class ShortsScriptConfig(PipelineModel):
     verse_opening_max_seconds: float = Field(default=12.0, ge=4.0, le=15.0)
     scripture_citation_min_start_seconds: float = Field(default=8.0, ge=0.0, le=15.0)
     scripture_citation_max_end_seconds: float = Field(default=20.0, ge=6.0, le=30.0)
-    verse_visual_change_seconds: float = Field(default=5.5, ge=3.5, le=8.0)
+    verse_visual_change_seconds: float = Field(default=5.5, ge=2.5, le=8.0)
+    max_literal_verse_words: int = Field(default=40, ge=8, le=80)
     minimum_retention_beats: int = Field(default=5, ge=3, le=10)
-    minimum_progression_beats: int = Field(default=2, ge=2, le=5)
-    retention_target_min_seconds: float = Field(default=45.0, ge=30.0, le=60.0)
-    retention_target_max_seconds: float = Field(default=55.0, ge=35.0, le=60.0)
+    minimum_progression_beats: int = Field(default=2, ge=1, le=5)
+    minimum_sections: int = Field(default=6, ge=4, le=10)
+    target_scene_min: int = Field(default=8, ge=4, le=12)
+    target_scene_max: int = Field(default=10, ge=4, le=14)
+    retention_target_min_seconds: float = Field(default=45.0, ge=10.0, le=60.0)
+    retention_target_max_seconds: float = Field(default=55.0, ge=12.0, le=60.0)
     require_comment_prompt: bool = False
     comment_response_max_words: int = Field(default=8, ge=1, le=12)
     require_subscribe_cta: bool = False
@@ -426,6 +461,8 @@ class ShortsScriptConfig(PipelineModel):
             raise ValueError("max_words deve ser maior ou igual a min_words")
         if self.retention_target_max_seconds < self.retention_target_min_seconds:
             raise ValueError("retention_target_max_seconds deve ser maior ou igual ao mínimo")
+        if self.target_scene_max < self.target_scene_min:
+            raise ValueError("target_scene_max deve ser maior ou igual a target_scene_min")
         if self.scripture_citation_max_end_seconds <= self.scripture_citation_min_start_seconds:
             raise ValueError(
                 "scripture_citation_max_end_seconds deve ser posterior ao início mínimo"
@@ -440,6 +477,8 @@ class ProductionConfig(PipelineModel):
     approval_policy: Literal["final_only"] = "final_only"
     optimization_profile: Literal["token_optimized_v1"] = "token_optimized_v1"
     worker_context_policy: Literal["compact_only"] = "compact_only"
+    coordinator_effective_token_budget: int = Field(default=120_000, ge=10_000)
+    total_effective_token_budget: int = Field(default=550_000, ge=50_000)
 
     @model_validator(mode="before")
     @classmethod
@@ -517,8 +556,21 @@ class Briefing(PipelineModel):
     interpretive_stance: InterpretiveStance = "expository"
     hook_policy: HookPolicy = "auto"
     hook_family: HookFamily = "auto"
+    hook_contract: HookContract = "mode_compatible_v1"
     viewer_outcome: str = ""
     creative_rationale: str = ""
+
+    @model_validator(mode="after")
+    def validate_hook_contract(self) -> Briefing:
+        if self.hook_contract == "user_six_v1" and self.hook_family not in {
+            "auto",
+            "none",
+            *USER_SIX_HOOK_FAMILIES,
+        }:
+            raise ValueError(
+                "hook_contract=user_six_v1 aceita somente uma das seis famílias oficiais."
+            )
+        return self
 
 
 class SourceEntry(PipelineModel):
@@ -533,10 +585,22 @@ class SourceEntry(PipelineModel):
     url: str | None = None
     accessed_at: str | None = None
     excerpt: str | None = None
+    content_hash: str | None = None
     use_in_video: str
     claim_scope: str
     rights_note: str | None = None
     verified: bool = False
+
+    @model_validator(mode="after")
+    def seal_excerpt_snapshot(self) -> SourceEntry:
+        if self.excerpt is None:
+            return self
+        digest = hashlib.sha256(self.excerpt.encode("utf-8")).hexdigest()
+        if self.content_hash is not None and self.content_hash != digest:
+            raise ValueError("content_hash não corresponde ao excerpt bíblico armazenado.")
+        if self.content_hash is None:
+            object.__setattr__(self, "content_hash", digest)
+        return self
 
 
 class SourceLibrary(PipelineModel):
@@ -873,6 +937,7 @@ class CreativePacingProfile(PipelineModel):
         "short_v1",
         "short_retention_v2",
         "short_creative_v3",
+        "short_compact_v1",
     ]
     default_scene_seconds: float = Field(gt=0.0)
     opening_scene_seconds: float = Field(gt=0.0)
@@ -1172,6 +1237,10 @@ class MusicManifest(PipelineModel):
     source_hash: str | None = None
     path: str | None = None
     library_track_count: int = 0
+    mix_standard: Literal["legacy_gain_v1", "voice_music_loudness_v1"] = "legacy_gain_v1"
+    narration_target_lufs: float | None = None
+    background_music_target_lufs: float | None = None
+    background_music_gap_lu: float | None = None
 
 
 class CaptionBlock(PipelineModel):
@@ -1328,6 +1397,9 @@ class YouTubeGrowthStrategy(PipelineModel):
     content_promise: str
     opening_hook: str
     title_rationale: str
+    description_rationale: str = ""
+    tag_strategy: str = ""
+    discovery_hypothesis: str = ""
     thumbnail_rationale: str
     title_thumbnail_complement: str
     promise_match: YouTubePromiseMatch | None = None
@@ -1497,7 +1569,7 @@ class ShortsCreativeDirection(PipelineModel):
     hook_family: HookFamily
     opening_section_id: str
     scripture_section_ids: list[str] = Field(min_length=1, max_length=2)
-    development_section_ids: list[str] = Field(min_length=2, max_length=6)
+    development_section_ids: list[str] = Field(min_length=1, max_length=6)
     reengagement_section_ids: list[str] = Field(min_length=1, max_length=2)
     resolution_section_id: str
     cta_section_id: str

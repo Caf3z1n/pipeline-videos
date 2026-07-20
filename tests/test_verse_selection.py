@@ -4,6 +4,7 @@ from datetime import date
 import pytest
 
 from pipeline_videos.models import (
+    USER_SIX_HOOK_FAMILIES,
     ApprovalStatus,
     Briefing,
     SourceLibrary,
@@ -119,7 +120,8 @@ def test_auto_short_reserves_different_verses_and_populates_verified_source(tmp_
     assert briefing.title_seed == first_candidate.title_seed
     assert briefing.creative_mode != "auto"
     assert briefing.hook_policy == "required"
-    assert briefing.hook_family not in {"auto", "none"}
+    assert briefing.hook_contract == "user_six_v1"
+    assert briefing.hook_family in USER_SIX_HOOK_FAMILIES
     assert briefing.viewer_outcome
     assert sources.entries[0].verified is True
     assert sources.entries[0].excerpt == first_candidate.verse_text
@@ -132,6 +134,19 @@ def test_auto_short_reserves_different_verses_and_populates_verified_source(tmp_
     assert manifest.config.images.visual_standard_id == "cinematic-family-3d-v1"
     assert (tmp_path / "verse-usage.json").is_file()
     assert first.root != second.root
+
+
+def test_auto_micro_short_selects_a_verse_that_fits_fifteen_seconds(tmp_path) -> None:
+    layout, candidate, _ = create_auto_short(
+        projects_dir=tmp_path,
+        target_duration_seconds=15,
+        project_date=date(2026, 7, 20),
+    )
+
+    config = layout.load_manifest().config.shorts_script
+    assert config.duration_profile == "adaptive_compact_v1"
+    assert len(candidate.verse_text.split()) <= config.max_literal_verse_words
+    assert read_model(layout.sources, SourceLibrary).entries[0].excerpt == candidate.verse_text
 
 
 def test_selector_prefers_short_familiar_clear_verse_when_other_factors_match() -> None:

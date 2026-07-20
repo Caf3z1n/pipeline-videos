@@ -4,7 +4,9 @@ from pipeline_videos.creative_direction import (
     CREATIVE_MODE_SPECS,
     HOOK_TEMPLATE_EXAMPLES,
     creative_evidence_errors,
+    hook_families_for_mode,
     hook_matches_family,
+    hook_matches_user_six_template,
 )
 from pipeline_videos.models import ScriptDocument, ScriptSection, SourceLibrary
 
@@ -61,6 +63,32 @@ def test_requested_hook_templates_are_available_and_recognized() -> None:
 
     assert list(HOOK_TEMPLATE_EXAMPLES)[:6] == list(concrete_hooks)
     assert all(hook_matches_family(hook, family) for family, hook in concrete_hooks.items())
+
+
+def test_new_shorts_use_only_the_six_literal_hook_structures() -> None:
+    families = hook_families_for_mode(
+        "character_portrait",
+        short=True,
+        hook_contract="user_six_v1",
+    )
+
+    assert families == ("nobody_talks_but", "want_to_learn_start")
+    assert hook_matches_user_six_template(
+        "Ninguém fala sobre a primeira escolha de Judas, mas ela veio antes.",
+        "nobody_talks_but",
+    )
+    assert hook_matches_user_six_template(
+        "Nunca faça uma leitura de Judas sem acompanhar a sequência.",
+        "never_do_this",
+    )
+    assert not hook_matches_user_six_template(
+        "As moedas voltaram ao templo, mas a decisão veio antes.",
+        "consequence_first",
+    )
+    assert not hook_matches_user_six_template(
+        "Se você ainda faz isso, talvez esteja perdendo o ponto.",
+        "still_doing_losing",
+    )
 
 
 def test_evidence_rules_separate_factual_narration_from_interpretation() -> None:

@@ -16,16 +16,26 @@ Depois de briefing, fontes, roteiro e revisão válidos:
 ```powershell
 uv run pipeline-videos autopilot <projeto> --allow-external
 uv run pipeline-videos autopilot <projeto> --allow-external --wait-external
+# Quando o pedido já inclui upload privado, conclua o fluxo na mesma execução guardada:
+uv run pipeline-videos autopilot <projeto> --allow-external --wait-external `
+  --upload-private --confirm-upload <id-exato-do-projeto> --json
 ```
 
 `run --dry-run` mostra o plano sem mutação. O autopilot prepara filas, executa áudio, legendas e
 música, aguarda os ativos criativos, importa cada lote uma vez, renderiza e valida. Hashes e staging
-válido tornam a retomada idempotente.
+válido tornam a retomada idempotente. `--wait-external` monitora os stagings no próprio processo;
+não abra novas rodadas do coordenador apenas para consultar arquivos. `status --json` entrega o
+estado compacto quando uma integração realmente precisar consultar o projeto.
+
+`--upload-private` exige `--allow-external`, validação final aprovada e confirmação com o ID exato.
+Ele usa o caminho de revisão automatizada privada e nunca registra aprovação humana.
 
 ## Produção local
 
 No cenário local, o roteiro de Short usa exatamente um `shorts_script_specialist` com raciocínio
-alto. Imagens podem usar até dois workers com `fork_turns=none`; cada worker recebe somente seu job
+alto e uma revisão posterior usa exatamente um `biblical_reviewer`, também com contexto isolado.
+Imagens podem usar até dois workers com `fork_turns=none`; Shorts de 15 segundos usam somente um.
+Cada worker recebe somente seu job
 compacto e escreve no staging declarado. O especialista de crescimento usa raciocínio médio e gera
 exatamente um par título+thumbnail. Shorts recebem a imagem ativa da abertura; vídeos longos
 recebem somente o tema central já inserido no prompt horizontal versionado.
@@ -39,8 +49,10 @@ Na VPS, o fluxo, os contratos e a orquestração criativa são os mesmos:
 
 - uma sessão persistente do coordenador por job;
 - coordenador e especialistas em `gpt-5.6-sol`;
-- coordenador em `medium`, roteirista em `high`, imagens em `low` e crescimento em `medium`;
-- exatamente um roteirista, até dois workers de imagem e exatamente um especialista de crescimento;
+- coordenador em `medium`, roteirista e revisor bíblico em `high`, imagens em `low` e crescimento em
+  `medium`;
+- exatamente um roteirista, um revisor bíblico, até dois workers de imagem e exatamente um
+  especialista de crescimento;
 - imagens processadas em até dois lotes paralelos com staging separado;
 - exatamente um título e uma thumbnail.
 
@@ -54,11 +66,18 @@ Prepare `script/shorts-queue.json`. O escritor autorizado produz
 `script/staging/shorts-script-specialist/package.json` e executa o comando `preflight.command`
 declarado na fila. O preflight é somente leitura e agrega todos os erros detectáveis. Normalizações
 seguras são aplicadas deterministicamente; uma falha restante permite uma única correção antes de
-encerrar.
+encerrar. Depois desse preflight, `script shorts-review-prepare` cria um contexto selado e um único
+`biblical_reviewer` grava `reviews/staging/biblical-reviewer/review.json`. O segundo preflight
+valida pacote e revisão juntos; somente então o agente principal faz um único `shorts-import`.
 
 Projetos novos usam `creative_retention_v3`. O seletor resolve modo criativo, postura e família de
-hook antes de abrir a fila. O hook continua obrigatório, a citação literal entra entre 8 e 20
-segundos, mas aplicação e callback passam a ser condicionais ao modo.
+hook antes de abrir a fila. `hook_contract=user_six_v1` aceita exclusivamente as seis estruturas
+documentadas; uma família declarada que não corresponda à primeira fala bloqueia o preflight antes
+de imagens, áudio, render ou upload. A citação literal entra entre 8 e 20 segundos no perfil padrão;
+o perfil compacto calcula a janela pela duração, filtra o catálogo por tamanho do versículo e reduz
+palavras, cenas e orçamento do coordenador sem reduzir a qualidade final. Em 15 segundos, a janela
+é de 3 a 9 segundos, o limite é 18 palavras e são produzidas cinco a seis cenas. Aplicação e
+callback passam a ser condicionais ao modo.
 
 O contrato editorial completo está em [Padrão de roteiro de Shorts](shorts-script-standard.md).
 
@@ -84,8 +103,10 @@ Em `moderation_blocked`, repita o mesmo prompt uma vez; somente após o segundo 
 alternativa de ação ou enquadramento, preservando identidade, idade aparente, rosto, cabelo,
 figurino, proporções, estilo, paleta, ambiente e sentido narrativo.
 
-Cada ativo é salvo no `staging_path`; `images import-batch` importa o lote uma vez. Nunca regenere
-item já importado ou aprovado.
+Cada ativo é salvo no `staging_path`; `images import-batch` importa o lote uma vez. Os arquivos
+compactos de worker armazenam o prefixo comum dos prompts uma única vez e os deltas por cena; o
+worker reconstrói `common_prompt_prefix + prompt_delta` sem alterar um byte do prompt original.
+Nunca regenere item já importado ou aprovado.
 
 ## Crescimento e thumbnail
 
@@ -110,6 +131,20 @@ desconsidera marcadores fotográficos declarados dentro de seções negativas co
 pacote pedir fotografia como estilo positivo ou falhar em outra regra determinística de crescimento,
 o remoto permite um único checkpoint de correção por tentativa antes de voltar ao backoff.
 
+Metadados novos usam `search_first_unique_v2`: consulta principal nos primeiros 55 caracteres do
+título, descrição única com passagem e valor concreto na abertura, dois parágrafos, sem CTA
+genérico, oito a quinze tags relevantes e comentário fixado específico. O contrato exige
+justificativa de descrição, estratégia de tags e hipótese de descoberta. Tags continuam
+secundárias; o especialista não promete viralização nem inventa volume de busca.
+
+## Mixagem de áudio
+
+Projetos novos usam `voice_music_loudness_v1`. A narração é normalizada para -18 LUFS e a música
+para um alvo derivado 16 LU abaixo (-34 LUFS por padrão), com true peak limitado antes da mistura.
+O mesmo contrato vale para Shorts e vídeos longos, inclusive quando a faixa anexada tem masterização
+muito mais alta que a voz. Trims em dB continuam possíveis como override explícito; projetos legados
+mantêm `legacy_gain_v1`.
+
 ## Áudio manual
 
 Quando `audio.provider=local_manual`, o pipeline prepara `audio/manual-queue.json`, apresenta
@@ -124,3 +159,18 @@ proporcional silencioso.
 - projetos diferentes podem rodar em paralelo;
 - subagentes locais e remotos escrevem somente em staging;
 - nunca publicar, agendar, aprovar ou alterar faturamento sem autorização persistida.
+
+## Auditoria e orçamento de tokens
+
+O `autopilot` grava a auditoria local ao concluir. Para recalcular sem chamar modelo nem serviço
+externo:
+
+```powershell
+uv run pipeline-videos audit tokens <projeto>
+```
+
+O comando lê os contadores cumulativos das sessões Codex relacionadas ao ID do projeto e atualiza
+`audit/production-metrics.json` e uma seção marcada de `audit/report.md`. A seção é substituída de
+forma idempotente e não apaga análises escritas anteriormente. O relatório separa coordenação,
+roteiro, revisão bíblica, imagens e crescimento; também compara tokens efetivos com os orçamentos
+persistidos do coordenador e da produção completa.

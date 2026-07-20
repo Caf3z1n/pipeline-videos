@@ -28,6 +28,9 @@ from pipeline_videos.creative_direction import (
 from pipeline_videos.imagegen_retry import imagegen_retry_instructions
 from pipeline_videos.models import (
     APPLICATION_REQUIRED_CREATIVE_MODES,
+    MIN_LONG_DURATION_SECONDS,
+    MIN_SHORT_DURATION_SECONDS,
+    USER_SIX_HOOK_FAMILIES,
     BiblicalReview,
     Briefing,
     CreativeMode,
@@ -137,7 +140,7 @@ class RemoteVideoRequest(PipelineModel):
     creative_mode: CreativeMode = "auto"
     hook_policy: HookPolicy = "auto"
     hook_family: HookFamily = "auto"
-    duration_seconds: int | None = Field(default=None, ge=30, le=3600)
+    duration_seconds: int | None = Field(default=None, ge=MIN_SHORT_DURATION_SECONDS, le=3600)
     start_policy: Literal["immediate", "overnight"] = "immediate"
     not_before: datetime | None = None
     publication_mode: Literal["private_review", "scheduled"] = "private_review"
@@ -157,11 +160,22 @@ class RemoteVideoRequest(PipelineModel):
                 50 if self.video_format == "short" else 540,
             )
         if self.video_format == "short" and self.duration_seconds > 180:
-            raise ValueError("Shorts precisam ter duração entre 30 e 180 segundos.")
+            raise ValueError(
+                f"Shorts precisam ter duração entre {MIN_SHORT_DURATION_SECONDS} e 180 segundos."
+            )
+        if self.video_format == "long" and self.duration_seconds < MIN_LONG_DURATION_SECONDS:
+            raise ValueError(
+                f"Vídeos longos precisam ter ao menos {MIN_LONG_DURATION_SECONDS} segundos."
+            )
         if self.video_format == "short" and (
             self.hook_policy == "none" or self.hook_family == "none"
         ):
             raise ValueError("Shorts exigem hook inicial; use auto ou uma família concreta.")
+        if self.video_format == "short" and self.hook_family not in {
+            "auto",
+            *USER_SIX_HOOK_FAMILIES,
+        }:
+            raise ValueError("Shorts novos aceitam somente uma das seis famílias oficiais de hook.")
         if self.hook_policy == "required" and self.hook_family == "none":
             raise ValueError("hook_policy=required não aceita hook_family=none.")
         if self.hook_policy == "none" and self.hook_family not in {"auto", "none"}:
@@ -399,7 +413,8 @@ def prepare_job_project(
         write_json(layout.briefing, briefing.model_copy(update=briefing_updates))
     manifest = layout.load_manifest()
     manifest.config.production.use_subagents = True
-    manifest.config.production.image_workers = 3
+    if manifest.config.shorts_script.duration_profile != "adaptive_compact_v1":
+        manifest.config.production.image_workers = 3
     manifest.config.shorts_script.use_specialist_subagent = True
     manifest.config.youtube_growth.use_specialist_subagent = True
     manifest.config.audio.provider = request.audio_provider
@@ -420,6 +435,7 @@ def prepare_job_project(
             "publication_mode": request.publication_mode,
             "publish_at": request.publish_at.isoformat() if request.publish_at else None,
             "title_thumbnail_variants": 1,
+            "short_duration_profile": manifest.config.shorts_script.duration_profile,
             "creative_mode": request.creative_mode,
             "hook_policy": request.hook_policy,
             "hook_family": request.hook_family,
@@ -430,6 +446,7 @@ def prepare_job_project(
             "coordinator_reasoning_effort": DEFAULT_REMOTE_REASONING_EFFORT,
             "specialist_reasoning_effort": {
                 "shorts_script_specialist": "high",
+                "biblical_reviewer": "high",
                 "image_worker": "low",
                 "youtube_growth_specialist": "medium",
             },
@@ -530,6 +547,12 @@ def _available_verse_candidates(
         catalog,
         usage,
         video_format=project.video_format,
+        max_verse_words=(
+            project.config.shorts_script.max_literal_verse_words
+            if project.video_format == "short"
+            and project.config.shorts_script.duration_profile == "adaptive_compact_v1"
+            else None
+        ),
     )
     if current_main:
         main_eligible.add(current_main)
@@ -774,8 +797,11 @@ def _import_editorial_source_selection(
             usage,
             video_format=project.video_format,
             hook_policy=hook_policy,
+            hook_contract=current.hook_contract,
         )
     )
+    if current.hook_contract == "user_six_v1" and hook_family not in USER_SIX_HOOK_FAMILIES:
+        raise ValueError("Novos Shorts aceitam somente uma das seis famílias oficiais de hook.")
     reserve_project_candidates(
         projects_root,
         project_id=project.project_id,
@@ -836,6 +862,7 @@ def _import_editorial_source_selection(
         interpretive_stance=interpretive_stance,
         hook_policy=hook_policy,
         hook_family=hook_family,
+        hook_contract=current.hook_contract,
         viewer_outcome=viewer_outcome,
         creative_rationale=f"{creative_spec.label}: {creative_spec.purpose}",
     )
@@ -913,6 +940,40 @@ def _shorts_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
             },
         },
         expected_outputs=(package,),
+    )
+
+
+def _biblical_review_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
+    queue = read_json(layout.shorts_biblical_review_queue)
+    context = _project_file(layout, queue["inputs"]["compact_context"])
+    review = _project_file(layout, queue["outputs"]["review"])
+    return CodexPhaseSpec(
+        phase="biblical_review",
+        item_id=str(queue.get("job_id")),
+        model=DEFAULT_REMOTE_CODEX_MODEL,
+        reasoning_effort="medium",
+        payload={
+            "delegation": {
+                "required": True,
+                "role": "biblical_reviewer",
+                "count": 1,
+                "fork_turns": "none",
+                "reasoning_effort": "high",
+                "model": DEFAULT_REMOTE_CODEX_MODEL,
+            },
+            "allowed_inputs": [str(layout.shorts_biblical_review_queue), str(context)],
+            "task": {
+                "kind": "review_shorts_script_biblical_accuracy",
+                "queue_path": str(layout.shorts_biblical_review_queue),
+                "compact_context_path": str(context),
+                "instructions": [
+                    "Siga integralmente instructions e o schema da fila.",
+                    "Escreva somente outputs.review; o executor fará o preflight e o import.",
+                    "Não reescreva o roteiro e não registre aprovação humana.",
+                ],
+            },
+        },
+        expected_outputs=(review,),
     )
 
 
@@ -1185,7 +1246,9 @@ def _repair_shorts_pipeline_failure(
     timeout_seconds: int,
 ) -> RemoteVideoJob:
     from pipeline_videos.shorts_script import (
+        check_reviewed_shorts_script_staging,
         import_shorts_script_package,
+        prepare_shorts_biblical_review_queue,
         prepare_shorts_script_queue,
         validate_shorts_script_package_staging,
     )
@@ -1205,6 +1268,20 @@ def _repair_shorts_pipeline_failure(
         timeout_seconds=timeout_seconds,
     )
     validate_shorts_script_package_staging(layout)
+    prepare_shorts_biblical_review_queue(layout, force=True)
+    latest = _execute_agent_checkpoint(
+        latest,
+        _biblical_review_phase_spec(layout),
+        store,
+        repo_root=repo_root,
+        timeout_seconds=timeout_seconds,
+    )
+    reviewed = check_reviewed_shorts_script_staging(layout)
+    if not reviewed.valid:
+        raise RuntimeError(
+            "A revisão bíblica independente bloqueou o pacote corrigido: "
+            + "; ".join(reviewed.errors)
+        )
     import_shorts_script_package(layout, force=True)
     layout.append_event(
         {
@@ -2422,6 +2499,15 @@ def _produce_remote_candidate(
                 job = _execute_agent_checkpoint(
                     job,
                     _shorts_script_phase_spec(layout),
+                    store,
+                    repo_root=repo_root,
+                    timeout_seconds=timeout_seconds,
+                )
+                progressed = True
+            elif kind == "biblical_review":
+                job = _execute_agent_checkpoint(
+                    job,
+                    _biblical_review_phase_spec(layout),
                     store,
                     repo_root=repo_root,
                     timeout_seconds=timeout_seconds,

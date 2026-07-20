@@ -70,6 +70,17 @@ def collect_external_waits(layout: ProjectLayout) -> list[dict[str, Any]]:
         and project.config.shorts_script.enabled
         and project.stages["shorts_script"].status != StageStatus.COMPLETED
     ):
+        if project.config.shorts_script.require_independent_biblical_review and _is_nonempty_file(
+            layout.shorts_script_package_staging
+        ):
+            waits.append(
+                {
+                    "kind": "biblical_review",
+                    "ready": _is_nonempty_file(layout.shorts_biblical_review_staging_file),
+                    "queue": relative_posix(layout.shorts_biblical_review_queue, layout.root),
+                }
+            )
+            return waits
         waits.append(
             {
                 "kind": "shorts_script",
@@ -150,12 +161,22 @@ def run_autopilot_once(
     ):
         from pipeline_videos.shorts_script import (
             import_shorts_script_package,
+            prepare_shorts_biblical_review_queue,
             prepare_shorts_script_queue,
         )
 
         prepare_shorts_script_queue(layout, force=force)
         if _is_nonempty_file(layout.shorts_script_package_staging):
-            import_shorts_script_package(layout, force=force)
+            if project.config.shorts_script.require_independent_biblical_review:
+                prepare_shorts_biblical_review_queue(layout, force=force)
+                if _is_nonempty_file(layout.shorts_biblical_review_staging_file):
+                    import_shorts_script_package(layout, force=force)
+                else:
+                    result = AutopilotResult("waiting_external", collect_external_waits(layout))
+                    _write_state(layout, result)
+                    return result
+            else:
+                import_shorts_script_package(layout, force=force)
         else:
             result = AutopilotResult("waiting_external", collect_external_waits(layout))
             _write_state(layout, result)

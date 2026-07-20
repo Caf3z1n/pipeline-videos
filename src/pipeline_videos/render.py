@@ -35,7 +35,7 @@ from pipeline_videos.utils import (
     sha256_value,
 )
 
-RENDER_ALGORITHM_VERSION = "6"
+RENDER_ALGORITHM_VERSION = "7"
 MAX_SEGMENT_RENDER_WORKERS = 2
 OUTPUT_PIXEL_FORMAT = "yuv420p"
 OUTPUT_AUDIO_CODEC = "aac"
@@ -651,14 +651,47 @@ def _escape_filter_path(value: str) -> str:
     return value.replace("\\", "/").replace("'", r"\'")
 
 
+def _voice_filters(config: RenderConfig) -> list[str]:
+    filters = [
+        "aresample=48000",
+        "aformat=channel_layouts=stereo",
+        "asetpts=PTS-STARTPTS",
+    ]
+    if config.audio_mix_standard == "voice_music_loudness_v1":
+        filters.append(
+            "loudnorm="
+            f"I={config.narration_target_lufs:.2f}:"
+            f"LRA={config.audio_loudness_range_lu:.2f}:"
+            f"TP={config.narration_true_peak_dbfs:.2f}"
+        )
+        filters.append("aresample=48000")
+    if config.narration_gain_db:
+        filters.append(f"volume={config.narration_gain_db:.2f}dB")
+    return filters
+
+
+def _narration_filter(config: RenderConfig) -> str:
+    return f"[1:a]{','.join(_voice_filters(config))}[voice_audio]"
+
+
 def _background_music_filter(audio: AudioManifest, config: RenderConfig) -> str:
     music_filters = [
         f"atrim=duration={audio.duration:.6f}",
         "aresample=48000",
         "aformat=channel_layouts=stereo",
         "asetpts=PTS-STARTPTS",
-        f"volume={config.background_music_gain_db:.2f}dB",
     ]
+    if config.audio_mix_standard == "voice_music_loudness_v1":
+        music_target_lufs = config.narration_target_lufs - config.background_music_gap_lu
+        music_filters.append(
+            "loudnorm="
+            f"I={music_target_lufs:.2f}:"
+            f"LRA={config.audio_loudness_range_lu:.2f}:"
+            f"TP={config.background_music_true_peak_dbfs:.2f}"
+        )
+        music_filters.append("aresample=48000")
+    if config.background_music_gain_db:
+        music_filters.append(f"volume={config.background_music_gain_db:.2f}dB")
     if config.background_music_fade_in_seconds > 0:
         music_filters.append(f"afade=t=in:st=0:d={config.background_music_fade_in_seconds:.6f}")
     if config.background_music_fade_out_seconds > 0:
@@ -667,8 +700,7 @@ def _background_music_filter(audio: AudioManifest, config: RenderConfig) -> str:
             f"afade=t=out:st={fade_out_start:.6f}:d={config.background_music_fade_out_seconds:.6f}"
         )
     return (
-        "[1:a]aresample=48000,aformat=channel_layouts=stereo,"
-        "asetpts=PTS-STARTPTS[voice];"
+        f"[1:a]{','.join(_voice_filters(config))}[voice];"
         f"[2:a]{','.join(music_filters)}[music];"
         "[voice][music]amix=inputs=2:duration=first:dropout_transition=0:"
         "normalize=0[mixed_audio]"
@@ -775,8 +807,11 @@ def _render_final(
             ]
         )
         filter_graph = _short_cover_video_filter(ass_filter, config, cover_input_index)
-        if background_music is not None:
-            filter_graph += ";" + _background_music_filter(audio, config)
+        filter_graph += ";" + (
+            _background_music_filter(audio, config)
+            if background_music is not None
+            else _narration_filter(config)
+        )
         args.extend(
             [
                 "-filter_complex",
@@ -784,7 +819,7 @@ def _render_final(
                 "-map",
                 "[video_out]",
                 "-map",
-                "[mixed_audio]" if background_music is not None else "1:a:0",
+                "[mixed_audio]" if background_music is not None else "[voice_audio]",
             ]
         )
     else:
@@ -799,7 +834,14 @@ def _render_final(
                 ]
             )
         else:
-            args.extend(["-map", "1:a:0"])
+            args.extend(
+                [
+                    "-filter_complex",
+                    _narration_filter(config),
+                    "-map",
+                    "[voice_audio]",
+                ]
+            )
     video_filter_args = [] if short_cover is not None else ["-vf", ass_filter]
     args.extend(
         [

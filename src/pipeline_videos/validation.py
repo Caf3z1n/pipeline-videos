@@ -336,6 +336,15 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                 "Há mais de dois segundos entre a última palavra e o fim do áudio."
             )
 
+        render_mix = manifest.config.render
+        report.checks["audio_mix_standard"] = render_mix.audio_mix_standard
+        if render_mix.audio_mix_standard == "voice_music_loudness_v1":
+            report.checks["narration_target_lufs"] = render_mix.narration_target_lufs
+            report.checks["background_music_gap_lu"] = render_mix.background_music_gap_lu
+            report.checks["background_music_target_lufs"] = (
+                render_mix.narration_target_lufs - render_mix.background_music_gap_lu
+            )
+
         if manifest.config.music.enabled:
             if manifest.stages["music"].status != StageStatus.COMPLETED:
                 report.errors.append("A etapa de música ainda não selecionou uma faixa.")
@@ -362,6 +371,25 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                             report.errors.append("O arquivo da música selecionada foi alterado.")
                         else:
                             report.checks["music_track"] = music.source_name or music_path.name
+                            if music.mix_standard != render_mix.audio_mix_standard:
+                                report.errors.append(
+                                    "O padrão de mixagem da música difere da configuração "
+                                    "do render."
+                                )
+                            if render_mix.audio_mix_standard == "voice_music_loudness_v1":
+                                expected_music_target = (
+                                    render_mix.narration_target_lufs
+                                    - render_mix.background_music_gap_lu
+                                )
+                                if music.narration_target_lufs != render_mix.narration_target_lufs:
+                                    report.errors.append(
+                                        "O alvo de loudness da narração difere do manifesto "
+                                        "da música."
+                                    )
+                                if music.background_music_target_lufs != expected_music_target:
+                                    report.errors.append(
+                                        "O alvo de loudness da música difere do manifesto da etapa."
+                                    )
         else:
             report.checks["music_track"] = "disabled"
 

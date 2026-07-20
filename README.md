@@ -4,7 +4,8 @@ Aplicação local, headless e orientada por arquivos para planejar, produzir, re
 vídeos bíblicos. O chat ajuda na criação; a pasta de cada vídeo é a fonte de verdade.
 
 O modo único é `final_candidate_one_shot`: o Codex produz diretamente um candidato final V4.
-Localmente e na VPS, cada vídeo usa um coordenador persistente e subagentes de roteiro, imagens e crescimento, todos em
+Localmente e na VPS, cada vídeo usa um coordenador persistente e especialistas de roteiro, revisão
+bíblica, imagens e crescimento, todos em
 `gpt-5.6-sol` e com o raciocínio próprio da função. Shorts editam a imagem ativa da abertura;
 vídeos longos geram uma thumbnail horizontal nova, baseada somente no tema central.
 
@@ -29,9 +30,9 @@ incorporados; vídeos longos recebem uma imagem cinematográfica limpa, sem text
 formam uma única combinação complementar em todos os modos novos.
 
 O padrão editorial mantém toda a locução em português e exige citações bíblicas literais
-verificadas. Projetos novos escolhem entre 16 modos criativos e usam
+verificadas por uma revisão independente antes do import. Projetos novos escolhem entre 16 modos criativos e usam
 `Enfoque concreto | Passagem`, sem converter automaticamente a conclusão em aplicação
-motivacional. Shorts mantêm hook inicial obrigatório; longos usam hook adaptativo. Ambos encerram
+motivacional. Shorts novos começam exatamente com uma de seis estruturas de hook; longos usam hook adaptativo. Ambos encerram
 com CTA de uma única ação. Longos recebem também uma timeline bíblica iniciada por
 `00:00 - Abertura`. Nas capas de
 Shorts, a palavra de impacto e o elemento narrativo usam vermelho, com seta, X, sublinhado ou pincel
@@ -47,7 +48,9 @@ uv run pipeline-videos autopilot <projeto> --allow-external --wait-external
 ```
 
 O `autopilot` executa áudio, música e legendas enquanto os workers produzem staging; depois aguarda,
-importa cada lote uma única vez, renderiza e valida. O contrato completo está em
+importa cada lote uma única vez, renderiza e valida. O próprio processo monitora os arquivos, sem
+novas rodadas do coordenador para polling. Ao concluir, ele registra a auditoria local de tokens.
+O contrato completo está em
 [Produção otimizada](docs/optimized-production.md).
 
 Se uma cena ou thumbnail retornar `moderation_blocked`, o executor repete exatamente o mesmo prompt
@@ -102,6 +105,29 @@ Para um Short vertical 9:16, o fluxo recomendado agora não exige tema, título 
 uv run pipeline-videos new-short
 ```
 
+Para pedir um Short de 15 segundos, informe a duração na criação:
+
+```powershell
+uv run pipeline-videos new-short --duration 15
+```
+
+Entre 15 e 44 segundos, o pipeline ativa `adaptive_compact_v1`. Em 15 segundos, ele trabalha com
+30 a 38 palavras, cinco a seis cenas, citação entre 3 e 9 segundos, versículo de até 18 palavras,
+CTA de até três segundos e um único trabalhador de imagens. Hook, revisão bíblica independente,
+qualidade visual, render final e validações de upload permanecem iguais ao perfil padrão.
+
+Quando tema, modo, hook, voz e música já forem conhecidos, configure tudo atomicamente na criação.
+Por exemplo, para um retrato de Judas com a segunda voz de Jesus:
+
+```powershell
+uv run pipeline-videos new judas --title "O preço da escolha de Judas" --duration 50 `
+  --format short --creative-mode character_portrait --hook-family nobody_talks_but `
+  --voice-variant jesus_2 --music-file "C:\Users\Pedro Henrique\Downloads\Leaning.mp3"
+```
+
+As opções são validadas antes de criar a pasta ou reservar a passagem, evitando reconfigurações e
+imports intermediários.
+
 Para usar uma locução anexada sem ElevenLabs:
 
 ```powershell
@@ -129,9 +155,9 @@ eles são reutilizados. Consulte [Áudio manual local](docs/local-manual-audio.m
 ### Produção remota sob demanda
 
 Na VPS, o mesmo pipeline local roda com um coordenador persistente por job. O executor inicia
-`codex exec` uma vez e usa `codex exec resume`; o coordenador delega roteiro, até dois lotes de
-imagens e crescimento aos mesmos especialistas locais. Todos usam `gpt-5.6-sol`, com raciocínio
-alto, baixo e médio conforme a função.
+`codex exec` uma vez e usa `codex exec resume`; o coordenador delega roteiro, revisão bíblica, até
+dois lotes de imagens e crescimento aos mesmos especialistas locais. Todos usam `gpt-5.6-sol`, com
+raciocínio alto, baixo e médio conforme a função.
 
 Cada checkpoint recebe um JSON compacto. Áudio, música, legendas, imports, render, validação e upload
 rodam diretamente no Python. O status soma o uso por checkpoint e registra também o identificador
@@ -227,14 +253,18 @@ uv run pipeline-videos approve salmo-121 briefing --by "Pedro"
 
 ### 2. Roteiro e revisão bíblica
 
-Em Shorts reais, use primeiro a etapa especializada. O subagente lê somente a fila e grava um pacote
-no staging; o processo principal valida referências, contagem de palavras, gancho, beats, resolução,
-modo criativo, resolução, CTA e revisão bíblica antes de promover a nova versão:
+Em Shorts reais, use primeiro a etapa especializada. O roteirista lê somente a fila e grava um
+pacote no staging; o processo principal agrega as falhas determinísticas. Depois, um revisor bíblico
+independente lê um contexto selado e grava somente a revisão no staging. O import acontece uma vez,
+apenas quando roteiro e revisão passam juntos:
 
 ```powershell
 uv run pipeline-videos script shorts-prepare davi-e-golias
-# O subagente escreve apenas em script/staging/shorts-script-specialist/package.json
+# O roteirista escreve apenas em script/staging/shorts-script-specialist/package.json
 uv run pipeline-videos script shorts-check-staging davi-e-golias
+uv run pipeline-videos script shorts-review-prepare davi-e-golias
+# O biblical_reviewer escreve apenas em reviews/staging/biblical-reviewer/review.json
+uv run pipeline-videos script shorts-check-reviewed-staging davi-e-golias
 uv run pipeline-videos script shorts-import davi-e-golias
 ```
 
@@ -251,9 +281,12 @@ Toda importação também deriva `script/creative-contract.json` sem chamada ext
 primeira fala, resolução, função de cada seção, componentes críticos e perfil de ritmo passam a ser reutilizados por
 cenas, crescimento e validação, em vez de serem decididos novamente.
 
-Novos Shorts seguem `creative_retention_v3`: selecionam uma direção editorial, abrem com hook
-obrigatório em até dois segundos, inserem a citação verificada entre 8 e 20 segundos e fazem o valor
-crescer até um reengajamento entre 40% e 60% da duração. A resolução pode ser factual,
+Novos Shorts seguem `creative_retention_v3`: selecionam uma direção editorial e salvam
+`hook_contract=user_six_v1`. A primeira fala precisa corresponder exatamente a uma das seis
+estruturas documentadas e terminar em até dois segundos. No perfil padrão, a citação verificada
+entra entre 8 e 20 segundos; no perfil compacto, a janela é calculada pela duração e persistida no
+projeto — de 3 a 9 segundos em um Short de 15 segundos. O valor cresce até um reengajamento entre
+40% e 60% da duração. A resolução pode ser factual,
 explicativa, analítica, filosófica ou devocional. Aplicação e callback só entram quando servem ao
 modo. O encerramento pede somente comentar, inscrever-se ou compartilhar, em até quatro segundos.
 Contratos anteriores continuam válidos nos projetos que já os armazenam.
@@ -399,11 +432,35 @@ essa etapa:
 uv run pipeline-videos music select salmo-121
 # Sorteia novamente, preservando o arquivo anteriormente copiado:
 uv run pipeline-videos music select salmo-121 --force
+# Registra diretamente um anexo, sem copiá-lo antes para a biblioteca global:
+uv run pipeline-videos music import salmo-121 "C:\caminho\musica.mp3"
 ```
 
 A escolha é copiada para `audio/music/` dentro do projeto e registrada no manifesto da etapa. Ela é
 reutilizada nas execuções seguintes, mesmo que a biblioteca mude. O render usa -12 dB, com fades de
 entrada e saída de 2 e 3 segundos, preservando a narração como faixa principal.
+
+Para encerrar uma produção já autorizada com render, validação e upload privado no mesmo processo:
+
+```powershell
+uv run pipeline-videos autopilot <projeto> --allow-external --wait-external `
+  --upload-private --confirm-upload <id-exato-do-projeto> --json
+```
+
+O guard exige o ID exato, validação final aprovada e privacidade `private`; esse caminho não registra
+aprovação humana nem autoriza publicação pública ou agendamento.
+
+#### Mixagem padronizada
+
+Projetos novos usam `voice_music_loudness_v1`. O FFmpeg normaliza a narração para **-18 LUFS** e
+deriva o alvo da música pela diferença persistida de **16 LU**, resultando em **-34 LUFS** por
+padrão. Limites de true peak protegem contra clipping; os campos de ganho permanecem disponíveis
+somente como trims deliberados. Assim, uma música originalmente masterizada mais alta não cobre a
+voz, e a proporção se mantém entre faixas e vídeos diferentes. Projetos antigos continuam usando o
+contrato salvo, sem migração implícita.
+
+O manifesto de música e a validação final registram padrão, alvo da voz, alvo da música e diferença
+em LU. Qualquer divergência entre o projeto e o manifesto bloqueia a validação.
 
 ### 7. Especialista de título, descrição, SEO e thumbnail
 
@@ -463,6 +520,13 @@ Pillow. A primeira saída válida é mantida; nova tentativa automática ocorre 
 `moderation_blocked` não produz imagem. Projetos legados preservam o contrato armazenado. Em Shorts,
 a capa ocupa exatamente o frame zero.
 
+Projetos novos usam também `search_first_unique_v2`. A descrição abre com a consulta principal,
+passagem e valor concreto do vídeo, contém ao menos dois parágrafos e não aceita CTAs genéricos como
+“Compartilhe esta mensagem”. O comentário fixado concentra uma pergunta específica. O especialista
+entrega de oito a quinze tags relevantes — consulta, passagem, livro e variações reais — sem tratar
+tags como motor principal de distribuição nem despejá-las na descrição. Hashtags são opcionais e
+limitadas a três diretamente relacionadas.
+
 Nos Shorts, a tipografia integrada segue `integrated_extruded_3d_v1`: as letras são modeladas como
 objetos 3D da própria cena, com extrusão espessa, bordas chanfradas, textura material, highlights, sombras de
 contato/oclusão e perspectiva coerentes com a câmera e a iluminação. A palavra dominante recebe
@@ -472,7 +536,9 @@ overlay genérico nas próximas thumbnails.
 
 As regras seguem as orientações oficiais de [títulos e thumbnails](https://support.google.com/youtube/answer/12340300),
 [descrições](https://support.google.com/youtube/answer/12948449),
-[busca](https://support.google.com/youtube/answer/16090438) e
+[busca](https://support.google.com/youtube/answer/16090438),
+[tags](https://support.google.com/youtube/answer/146402),
+[descoberta de Shorts](https://support.google.com/youtube/answer/11914225) e
 [A/B tests](https://support.google.com/youtube/answer/16391400).
 
 ### 8. Legendas, metadados e render
@@ -579,7 +645,19 @@ Para conferir tudo sem alterar arquivos nem consumir créditos:
 
 ```powershell
 uv run pipeline-videos run salmo-121 --dry-run
+uv run pipeline-videos status salmo-121 --json
 ```
+
+O status JSON é a interface compacta para automações. A auditoria de tokens é atualizada pelo
+`autopilot` concluído e também pode ser recalculada localmente, sem chamar modelo:
+
+```powershell
+uv run pipeline-videos audit tokens salmo-121
+```
+
+Ela separa coordenação, roteiro, revisão bíblica, imagens e crescimento em
+`audit/production-metrics.json`, compara o uso efetivo aos orçamentos persistidos e atualiza uma
+seção idempotente de `audit/report.md` sem apagar conteúdo anterior.
 
 ## Estrutura de cada vídeo
 
@@ -598,9 +676,14 @@ projects/
 │   ├── script.json
 │   ├── creative-contract.json
 │   ├── shorts-context.json
+│   ├── shorts-queue.json
 │   ├── narration.txt
 │   └── versions/
-├── reviews/biblical-consistency.json
+├── reviews/
+│   ├── biblical-consistency.json
+│   ├── shorts-review-queue.json
+│   ├── shorts-review-context.json
+│   └── staging/biblical-reviewer/review.json
 ├── visual/
 │   ├── style-profile.json
 │   ├── palette.json
@@ -638,6 +721,9 @@ projects/
 │   ├── thumbnail.png
 │   └── publication.json
 ├── analytics/experiments.json
+├── audit/
+│   ├── production-metrics.json
+│   └── report.md
 ├── validation/report.json
 └── logs/events.jsonl
 ```

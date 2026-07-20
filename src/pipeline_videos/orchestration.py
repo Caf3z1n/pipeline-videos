@@ -72,6 +72,8 @@ def _queue_output_paths(
     candidates: list[object] = []
     if outputs.get("package") is not None:
         candidates.append(outputs["package"])
+    if outputs.get("review") is not None:
+        candidates.append(outputs["review"])
     thumbnails = outputs.get("thumbnails")
     if isinstance(thumbnails, list):
         candidates.extend(thumbnails)
@@ -281,8 +283,12 @@ def build_one_shot_plan(
     """Build a deterministic, serializable and read-only one-shot execution plan."""
     manifest = layout.load_manifest()
     shorts_enabled = manifest.video_format == "short" and manifest.config.shorts_script.enabled
+    review_required = (
+        shorts_enabled and manifest.config.shorts_script.require_independent_biblical_review
+    )
     growth_enabled = not manifest.demo and manifest.config.youtube_growth.enabled
     shorts_queue = _read_optional_queue(layout.shorts_script_queue)
+    review_queue = _read_optional_queue(layout.shorts_biblical_review_queue)
     image_queue = _read_optional_queue(layout.image_queue)
     growth_queue = _read_optional_queue(layout.growth_queue)
 
@@ -291,6 +297,12 @@ def build_one_shot_plan(
         shorts_queue,
         expected_prefix=("script", "staging", "shorts-script-specialist"),
         label="shorts_script",
+    )
+    review_outputs = _queue_output_paths(
+        layout,
+        review_queue,
+        expected_prefix=("reviews", "staging", "biblical-reviewer"),
+        label="biblical_review",
     )
     growth_outputs = _queue_output_paths(
         layout,
@@ -307,6 +319,13 @@ def build_one_shot_plan(
         shorts_outputs,
         layout,
         enabled=shorts_enabled,
+    )
+    review_external_status = _external_task_status(
+        shorts_stage,
+        review_queue,
+        review_outputs,
+        layout,
+        enabled=review_required,
     )
     growth_external_status = _external_task_status(
         growth_stage,
@@ -406,9 +425,12 @@ def build_one_shot_plan(
             "worker_id": "first_free_worker",
         }
 
+    shorts_ready_for_import = shorts_external_status == "ready_for_import" and (
+        not review_required or review_external_status == "ready_for_import"
+    )
     shorts_import_status = _import_status(
         shorts_stage,
-        shorts_external_status,
+        "ready_for_import" if shorts_ready_for_import else "blocked",
         enabled=shorts_enabled,
     )
     script_generation_task_id = "shorts_script_generation"
@@ -425,36 +447,54 @@ def build_one_shot_plan(
             writes_project_state=False,
             staging_paths=shorts_outputs,
         ),
-        _task(
-            "shorts_script_import",
-            owner="main",
-            status=shorts_import_status,
-            depends_on=(script_generation_task_id,),
-            writes_project_state=True,
-            command="script shorts-import",
-        ),
-        _task(
-            "script",
-            owner="main",
-            status=_stage_status(manifest, "script"),
-            depends_on=("shorts_script_import" if shorts_enabled else "briefing",),
-            writes_project_state=True,
-        ),
-        _task(
-            "biblical_review",
-            owner="main",
-            status=_stage_status(manifest, "biblical_review"),
-            depends_on=("script",),
-            writes_project_state=True,
-        ),
-        _task(
-            "scenes",
-            owner="main",
-            status=_stage_status(manifest, "scenes"),
-            depends_on=("script", "biblical_review"),
-            writes_project_state=True,
-        ),
     ]
+    script_import_dependency = script_generation_task_id
+    if review_required:
+        script_import_dependency = "independent_biblical_review"
+        script_tasks.append(
+            _task(
+                script_import_dependency,
+                owner="biblical_reviewer",
+                status=review_external_status,
+                depends_on=(script_generation_task_id,),
+                writes_project_state=False,
+                staging_paths=review_outputs,
+                command="script shorts-review-prepare",
+            )
+        )
+    script_tasks.extend(
+        [
+            _task(
+                "shorts_script_import",
+                owner="main",
+                status=shorts_import_status,
+                depends_on=(script_import_dependency,),
+                writes_project_state=True,
+                command="script shorts-import",
+            ),
+            _task(
+                "script",
+                owner="main",
+                status=_stage_status(manifest, "script"),
+                depends_on=("shorts_script_import" if shorts_enabled else "briefing",),
+                writes_project_state=True,
+            ),
+            _task(
+                "biblical_review",
+                owner="main",
+                status=_stage_status(manifest, "biblical_review"),
+                depends_on=("script",),
+                writes_project_state=True,
+            ),
+            _task(
+                "scenes",
+                owner="main",
+                status=_stage_status(manifest, "scenes"),
+                depends_on=("script", "biblical_review"),
+                writes_project_state=True,
+            ),
+        ]
+    )
 
     image_task_ids: list[str] = []
     parallel_tasks: list[dict[str, Any]] = []
@@ -686,11 +726,12 @@ def build_one_shot_plan(
         if not job["staging_ready"] and job["status"] != StageStatus.COMPLETED.value
     ]
     if shorts_enabled and shorts_stage not in _DONE_STATUSES:
-        plan["current_pause"] = (
-            "shorts_script_import"
-            if shorts_external_status == "ready_for_import"
-            else script_generation_task_id
-        )
+        if shorts_external_status != "ready_for_import":
+            plan["current_pause"] = script_generation_task_id
+        elif review_required and review_external_status != "ready_for_import":
+            plan["current_pause"] = "independent_biblical_review"
+        else:
+            plan["current_pause"] = "shorts_script_import"
     elif pending_image_jobs or (
         growth_enabled and growth_external_status == StageStatus.WAITING_EXTERNAL.value
     ):

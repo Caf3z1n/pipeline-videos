@@ -202,11 +202,27 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
             title=titles[0],
             alternative_titles=titles[1:],
             description=(
-                "Entenda a história de Davi e Golias e o que ela ensina sobre coragem e fé."
+                "Davi e Golias em 1 Samuel 17 revela como a confiança em Deus muda a forma "
+                "de enfrentar um desafio que parece maior do que nossas forças. O vídeo "
+                "acompanha o confronto, a decisão de Davi e o sentido bíblico de sua coragem.\n\n"
+                "Esta explicação destaca coragem e fé sem transformar a passagem em promessa "
+                "de vitória automática. Você verá o contexto do relato, a diferença entre "
+                "autoconfiança e confiança em Deus e os detalhes centrais da história bíblica."
             ),
             chapters=[],
-            topics=["Davi e Golias", "1 Samuel 17"],
-            pinned_comment="Qual parte dessa história mais falou com você?",
+            topics=[
+                "Davi e Golias",
+                "1 Samuel 17",
+                "história de Davi",
+                "Golias",
+                "coragem e fé",
+                "confiança em Deus",
+                "estudo bíblico",
+                "Bíblia",
+                "Antigo Testamento",
+                "Davi enfrentou Golias",
+            ],
+            pinned_comment="Em Davi e Golias, qual decisão de Davi mais chama sua atenção?",
             thumbnail_concept=(
                 "Davi pequeno diante da paisagem do vale"
                 if clean_theme_art
@@ -237,6 +253,16 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
             content_promise=queue["contract_guard"]["content_promise"],
             opening_hook=queue["contract_guard"]["opening_hook"],
             title_rationale="Combina busca clara e curiosidade legítima.",
+            description_rationale=(
+                "A abertura identifica tema, passagem e valor antes de aprofundar o contexto."
+            ),
+            tag_strategy=(
+                "Combina consulta principal, passagem, personagens e variações temáticas reais."
+            ),
+            discovery_hypothesis=(
+                "Metadados melhoram relevância em busca; desempenho depende de retenção "
+                "e satisfação."
+            ),
             thumbnail_rationale="O contraste de escala comunica o conflito rapidamente.",
             title_thumbnail_complement="O título explica; a imagem dramatiza a escala.",
             promise_match=promise_match,
@@ -246,7 +272,7 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
             short_cover_timestamp_seconds=0.0 if format_name == "short" else None,
             experiment_plan=["Comparar três combinações por watch time no Studio."],
             compliance_checks=["Promessa fiel ao conteúdo", "Sem clickbait enganoso"],
-            official_guidelines=list(OFFICIAL_YOUTUBE_GUIDELINES[:3]),
+            official_guidelines=list(OFFICIAL_YOUTUBE_GUIDELINES),
         ),
     )
 
@@ -337,7 +363,10 @@ def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path
     assert queue["outputs"]["imagegen_text_authority"] is False
     assert queue["outputs"]["text_forbidden"] is True
     assert queue["outputs"]["title_standard"] == "creative_pipe_passage_v3"
-    assert queue["outputs"]["description_standard"] == "scripture_timeline_v1"
+    assert queue["outputs"]["description_standard"] == "search_first_unique_v2"
+    assert queue["outputs"]["seo_contract"]["description_min_characters"] == 350
+    assert queue["outputs"]["seo_contract"]["tag_count"] == [8, 15]
+    assert queue["outputs"]["seo_contract"]["generic_description_cta_forbidden"] is True
     assert queue["outputs"]["thumbnail_standard"] == "biblical_cinematic_landscape_v1"
     assert queue["outputs"]["thumbnail_typography_standard"] == "no_text_v1"
     assert queue["outputs"]["title_thumbnail_pairing_standard"] == "complementary_v1"
@@ -353,6 +382,8 @@ def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path
     assert any("bitmap completo" in item for item in queue["instructions"])
     assert any("texto, letras, números" in item for item in queue["instructions"])
     assert any("um par editorial completo" in item for item in queue["instructions"])
+    assert any("CTA genérico" in item for item in queue["instructions"])
+    assert any("metadata.topics" in item for item in queue["instructions"])
     assert any("Não passe referenced_image_paths" in item for item in queue["instructions"])
     assert layout.load_manifest().stages["youtube_growth"].attempts == 1
 
@@ -545,8 +576,33 @@ def test_short_growth_rejects_generic_title_without_primary_search_phrase(tmp_pa
     )
     generic_package = package.model_copy(update={"metadata": generic_metadata})
 
-    with pytest.raises(ValueError, match="conter primary_keyword"):
+    with pytest.raises(ValueError, match="primeiros 55 caracteres"):
         _validate_package(layout, generic_package, queue)
+
+
+def test_growth_seo_v2_rejects_generic_description_cta(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(tmp_path, video_format="short")
+    queue = prepare_growth_queue(layout)
+    package = _package(queue, format_name="short")
+    metadata = package.metadata.model_copy(
+        update={
+            "description": package.metadata.description
+            + "\n\nCompartilhe esta mensagem com alguém que precisa ouvir isso."
+        }
+    )
+
+    with pytest.raises(ValueError, match="CTA genérico"):
+        _validate_package(layout, package.model_copy(update={"metadata": metadata}), queue)
+
+
+def test_growth_seo_v2_requires_relevant_tag_set(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(tmp_path, video_format="short")
+    queue = prepare_growth_queue(layout)
+    package = _package(queue, format_name="short")
+    metadata = package.metadata.model_copy(update={"topics": ["Davi e Golias", "1 Samuel 17"]})
+
+    with pytest.raises(ValueError, match="8 a 15 tags"):
+        _validate_package(layout, package.model_copy(update={"metadata": metadata}), queue)
 
 
 def test_short_growth_rejects_promise_match_that_changes_opening_scene(tmp_path) -> None:
@@ -708,14 +764,12 @@ def test_growth_rejects_title_that_repeats_the_paired_thumbnail_text(tmp_path) -
     layout = _project_with_editorial_inputs(tmp_path, video_format="short")
     queue = prepare_growth_queue(layout)
     package = _package(queue, format_name="short")
-    repeated_metadata = package.metadata.model_copy(
-        update={"title": "Davi enfrenta Golias | 1 Samuel 17"}
-    )
+    repeated_metadata = package.metadata.model_copy(update={"title": "Davi e Golias | 1 Samuel 17"})
     repeated_design = package.strategy.thumbnail_designs[0].model_copy(
         update={
-            "text": "DAVI ENFRENTA GOLIAS",
+            "text": "DAVI E GOLIAS",
             "accent_word": "GOLIAS",
-            "text_lines": ["DAVI ENFRENTA", "GOLIAS"],
+            "text_lines": ["DAVI E", "GOLIAS"],
         }
     )
     repeated_strategy = package.strategy.model_copy(

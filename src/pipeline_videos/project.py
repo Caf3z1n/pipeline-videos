@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Literal
 
 from pipeline_videos.models import (
+    COMPACT_SHORT_THRESHOLD_SECONDS,
+    MIN_LONG_DURATION_SECONDS,
+    MIN_SHORT_DURATION_SECONDS,
     Briefing,
     ContinuityBible,
     ExperimentMemory,
@@ -37,6 +40,64 @@ DEFAULT_PALETTE = "noite-azul-dourada"
 DEFAULT_FONT_FILE = "visual/fonts/files/Montserrat-ExtraBold.ttf"
 DEFAULT_FONT_LICENSE = "visual/fonts/OFL-Montserrat.txt"
 DATED_PROJECT_PATTERN = re.compile(r"^(\d{2}-\d{2}-\d{4})_(.+)$")
+
+
+def short_literal_verse_word_limit(duration_seconds: int) -> int | None:
+    if duration_seconds >= COMPACT_SHORT_THRESHOLD_SECONDS:
+        return None
+    if duration_seconds <= 20:
+        return 18
+    if duration_seconds <= 30:
+        return 24
+    return 32
+
+
+def configure_short_duration_profile(config: ProjectConfig, duration_seconds: int) -> None:
+    """Persist a duration-aware Short contract before any specialist queue is built."""
+
+    if duration_seconds >= COMPACT_SHORT_THRESHOLD_SECONDS:
+        return
+    shorts = config.shorts_script
+    target_words = round(duration_seconds * shorts.estimated_narration_wpm / 60)
+    scripture_start = max(3.0, min(8.0, round(duration_seconds * 0.2, 1)))
+    scripture_end = max(
+        scripture_start + 3.0,
+        min(20.0, duration_seconds - 5.0, round(duration_seconds * 0.6, 1)),
+    )
+    if duration_seconds <= 20:
+        target_scene_min, target_scene_max = 5, 6
+        config.production.image_workers = 1
+        config.production.coordinator_effective_token_budget = 90_000
+        config.production.total_effective_token_budget = 380_000
+    elif duration_seconds <= 30:
+        target_scene_min, target_scene_max = 6, 8
+        config.production.image_workers = 2
+        config.production.coordinator_effective_token_budget = 100_000
+        config.production.total_effective_token_budget = 450_000
+    else:
+        target_scene_min, target_scene_max = 7, 9
+        config.production.image_workers = 2
+    max_literal_verse_words = short_literal_verse_word_limit(duration_seconds)
+    assert max_literal_verse_words is not None
+    shorts.duration_profile = "adaptive_compact_v1"
+    shorts.min_words = max(24, round(target_words * 0.82))
+    shorts.max_words = max(shorts.min_words + 4, target_words + 2)
+    shorts.hook_max_words = 10
+    shorts.scripture_citation_min_start_seconds = scripture_start
+    shorts.scripture_citation_max_end_seconds = scripture_end
+    shorts.verse_opening_max_seconds = min(15.0, scripture_end)
+    shorts.verse_visual_change_seconds = 3.0 if duration_seconds <= 20 else 4.0
+    shorts.max_literal_verse_words = max_literal_verse_words
+    shorts.minimum_retention_beats = 5
+    shorts.minimum_progression_beats = 1
+    shorts.minimum_sections = 5
+    shorts.target_scene_min = target_scene_min
+    shorts.target_scene_max = target_scene_max
+    shorts.retention_target_min_seconds = max(10.0, duration_seconds - 2.0)
+    shorts.retention_target_max_seconds = float(duration_seconds)
+    shorts.cta_max_words = 5 if duration_seconds <= 20 else 8
+    shorts.cta_max_seconds = min(3.0, duration_seconds * 0.2)
+    shorts.duration_tolerance_seconds = 2.0
 
 
 def project_topic_slug(topic: str) -> str:
@@ -94,8 +155,10 @@ O modo padrão é `final_candidate_one_shot`: trabalhadores de imagem escrevem a
 O candidato final usa os ativos selecionados sem registrar aprovação humana automaticamente.
 
 Projetos novos usam `token_optimized_v1`. Depois de roteiro e revisão, use `autopilot`; entregue a
-cada trabalhador somente `images/jobs/image-worker-N.json`, sem histórico herdado. O pipeline
-produz diretamente o candidato final na qualidade V4.
+cada trabalhador somente sua fila compacta, sem histórico herdado. Use `--wait-external` para o
+próprio processo monitorar os stagings e `status --json` somente quando outra integração precisar
+consultar o estado. O pipeline produz diretamente o candidato final na qualidade V4 e registra a
+auditoria local de tokens ao concluir.
 
 A etapa `music` sorteia uma faixa da biblioteca local do pipeline e preserva uma cópia em
 `audio/music/`. Uma escolha já registrada é reutilizada, salvo quando `--force` for deliberado.
@@ -106,13 +169,16 @@ Em produção remota, o coordenador permanece na sessão do job e cria o mesmo e
 crescimento do fluxo local, que entrega exatamente um par título+thumbnail no staging.
 
 Em projetos Short, `script/shorts-queue.json` contrata o `shorts_script_specialist`. Ele escreve
-somente no staging; o agente principal valida gancho obrigatório, modo criativo, retenção, valor,
-CTA e revisão bíblica antes de promover uma nova versão do roteiro.
+somente no staging; o agente principal executa o preflight agregado e prepara
+`reviews/shorts-review-queue.json` para exatamente um `biblical_reviewer`. O roteiro só é importado
+depois que pacote e revisão independente passam juntos no preflight final.
 
 Vídeos novos usam direção criativa explícita. Shorts seguem `creative_retention_v3`, sempre com um
-hook inicial honesto. Longos seguem `creative_retention_long_v2`; o hook é adaptativo e pode ser
-dispensado quando uma abertura narrativa, factual ou contemplativa servir melhor ao tema. Retenção,
-informação nova e citações verificadas continuam obrigatórias. Consulte
+hook inicial honesto. Novos Shorts salvam `hook_contract=user_six_v1`: a primeira fala precisa
+corresponder exatamente a uma das seis estruturas aceitas. Longos seguem
+`creative_retention_long_v2`; o hook é adaptativo e pode ser dispensado quando uma abertura
+narrativa, factual ou contemplativa servir melhor ao tema. Retenção, informação nova e citações
+verificadas continuam obrigatórias. Consulte
 `docs/creative-direction.md` e o padrão de roteiro do formato.
 """
 
@@ -132,8 +198,13 @@ def create_project(
 ) -> ProjectLayout:
     topic_id = project_topic_slug(project_id)
     project_id = project_directory_name(project_id, project_date=project_date)
-    if target_duration_seconds < 30:
-        raise ValueError("A duração-alvo deve ter pelo menos 30 segundos.")
+    minimum_duration = (
+        MIN_SHORT_DURATION_SECONDS if video_format == "short" else MIN_LONG_DURATION_SECONDS
+    )
+    if target_duration_seconds < minimum_duration:
+        raise ValueError(
+            f"A duração-alvo de {video_format} deve ter pelo menos {minimum_duration} segundos."
+        )
     category = SHORT_PROJECTS_DIRNAME if video_format == "short" else LONG_PROJECTS_DIRNAME
     root = (projects_dir or DEFAULT_PROJECTS_DIR).expanduser().resolve() / category / project_id
     if root.exists() and any(root.iterdir()):
@@ -199,13 +270,23 @@ def create_project(
         config.captions.comment_response_hold_seconds = 0.0
         config.audio.comment_response_silence_seconds = 0.0
         config.render.background_blur_profile = "functional_caption_focus_v1"
+        config.render.audio_mix_standard = "voice_music_loudness_v1"
+        config.render.narration_target_lufs = -18.0
+        config.render.background_music_gap_lu = 16.0
+        config.render.narration_true_peak_dbfs = -2.0
+        config.render.background_music_true_peak_dbfs = -9.0
+        config.render.audio_loudness_range_lu = 7.0
+        config.render.narration_gain_db = 0.0
+        config.render.background_music_gain_db = 0.0
         config.youtube_growth.title_variants = 1
         config.youtube_growth.thumbnail_variants = 1
         config.youtube_growth.title_standard = "creative_pipe_passage_v3"
-        config.youtube_growth.description_standard = "scripture_timeline_v1"
+        config.youtube_growth.description_standard = "search_first_unique_v2"
         config.youtube_growth.title_thumbnail_pairing_standard = "complementary_v1"
         if video_format == "short":
             config.shorts_script.narrative_standard = "creative_retention_v3"
+            config.shorts_script.require_independent_biblical_review = True
+            configure_short_duration_profile(config, target_duration_seconds)
             config.youtube_growth.thumbnail_generation_mode = "integrated_imagegen_v1"
             config.youtube_growth.thumbnail_reference_mode = "opening_scene_edit_v1"
             config.youtube_growth.thumbnail_standard = "direct_conflict_red_v1"
@@ -234,7 +315,13 @@ def create_project(
         stages=stages,
         approvals=initial_approvals(),
     )
-    briefing = Briefing(title=title, target_duration_seconds=target_duration_seconds)
+    briefing = Briefing(
+        title=title,
+        target_duration_seconds=target_duration_seconds,
+        hook_contract=(
+            "user_six_v1" if video_format == "short" and not demo else "mode_compatible_v1"
+        ),
+    )
     continuity = ContinuityBible(
         global_rules=[
             "Manter roupas, proporções e silhuetas consistentes entre cenas consecutivas.",

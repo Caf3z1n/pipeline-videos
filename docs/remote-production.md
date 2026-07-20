@@ -12,8 +12,10 @@ Cada pedido declara:
 - `topic`: tema opcional; vazio usa o catálogo local e evita repetir passagens;
 - `creative_mode`: modo editorial explícito ou `auto` para variar conforme passagem e histórico;
 - `hook_policy`: `auto`, `required`, `optional` ou `none`; Shorts não aceitam `none`;
-- `hook_family`: família concreta ou `auto`; Shorts sempre resolvem uma família antes do roteiro;
-- `duration_seconds`: opcional, com padrão de 50 s para Short e 540 s para longo;
+- `hook_family`: família concreta ou `auto`; Shorts novos aceitam somente as seis famílias de
+  `hook_contract=user_six_v1` e resolvem uma delas antes de reservar a passagem;
+- `duration_seconds`: opcional, mínimo de 15 s e padrão de 50 s para Short; mínimo de 30 s e padrão
+  de 540 s para longo;
 - `voice_variant`: `jesus_1` (padrão) ou `jesus_2`;
 - `start_policy`: `immediate` ou `overnight`;
 - `publication_mode`: `private_review` ou `scheduled`;
@@ -28,8 +30,14 @@ e fontes a partir dos IDs escolhidos.
 
 O primeiro checkpoint inicia `codex exec`. O executor captura o identificador da sessão raiz e o
 salva em `codex_session_id`. Os checkpoints retomam essa sessão com `codex exec resume`. O
-coordenador cria exatamente um roteirista em raciocínio alto, até dois workers de imagem em baixo e
-um especialista de crescimento em médio, todos com `fork_turns=none`.
+coordenador cria exatamente um roteirista em raciocínio alto, exatamente um revisor bíblico
+independente após o preflight do pacote, até dois workers de imagem em baixo e um especialista de
+crescimento em médio, todos com `fork_turns=none`.
+
+O remoto usa o mesmo perfil adaptativo local. Um Short de 15 segundos preserva um único worker de
+imagem, seleciona apenas passagens cujo trecho literal caiba no limite de 18 palavras e envia ao
+roteirista os limites persistidos de 30 a 38 palavras, cinco a seis cenas e citação de 3 a 9
+segundos.
 
 O modelo não varia: coordenador e especialistas usam Sol. O esforço varia somente pelo contrato da
 função. Áudio, música, legendas, imports, render, validação e YouTube não são entregues aos agentes.

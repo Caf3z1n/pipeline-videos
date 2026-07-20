@@ -75,6 +75,14 @@
 
 - Pedido simples de Short usa `new-short`, seguido de `status`, `run --dry-run` e one-shot; não peça
   novamente versículo, CTA, estilo ou fluxo já padronizados.
+- Shorts aceitam duração mínima de 15 segundos. De 15 a 44 segundos, respeite o perfil persistido
+  `adaptive_compact_v1`; em 15 segundos ele usa 30 a 38 palavras, cinco a seis cenas, citação de 3 a
+  9 segundos, trecho literal de até 18 palavras, CTA de até três segundos e um worker de imagens.
+- Shorts novos usam `hook_contract=user_six_v1` e começam exatamente com uma destas seis estruturas:
+  `Se você quer [X], faça isso.`, `O que acontece se você parar de [X]?`,
+  `Se você ainda faz [X], está perdendo [Y].`, `Ninguém fala sobre [X], mas...`,
+  `Quer aprender [X]? Comece...` ou `Nunca faça [X].`. Outras famílias ficam restritas a projetos
+  legados e vídeos longos; o preflight deve bloquear qualquer divergência antes da produção.
 - O seletor automático usa o catálogo local verificado, combina as pastas com o registro Git
   compartilhado, reserva por compare-and-swap antes de criar o projeto e favorece variedade de
   livro, tema, personagem, testamento, modo criativo e família de hook. Falha do registro bloqueia a
@@ -82,7 +90,10 @@
 - O briefing automático não equivale a aprovação humana.
 - No modo completo, prepare `script/shorts-queue.json` e crie exatamente um
   `shorts_script_specialist`, com raciocínio alto e staging exclusivo; o agente principal valida e
-  importa uma única vez com `script shorts-import`.
+  agrega todos os erros em um único preflight. Em seguida, prepare
+  `reviews/shorts-review-queue.json`, crie exatamente um `biblical_reviewer` com staging exclusivo e
+  execute o preflight final de pacote+revisão; somente então importe uma única vez com
+  `script shorts-import`.
 - `new-short-audio-manual` mantém o fluxo completo, mas usa `audio.provider=local_manual`: mostre
   integralmente `script/narration.txt`, aguarde um único arquivo de voz do usuário e importe com
   `audio import-manual`. O alinhamento usa WhisperX isolado em CPU, sem ElevenLabs e sem
@@ -95,7 +106,8 @@
 ## Contratos dos especialistas
 
 - O roteirista de Shorts novos usa `creative_retention_v3`: modo e postura explícitos, hook inicial
-  obrigatório, citação literal entre 8 e 20 segundos, desenvolvimento com informação nova,
+  obrigatório, citação literal entre 8 e 20 segundos no perfil padrão ou na janela persistida pelo
+  perfil compacto, desenvolvimento com informação nova,
   reengajamento, resolução coerente com o modo e exatamente uma ação de CTA em até quatro segundos.
   Aplicação e callback são opcionais, salvo nos modos devocionais.
 - O roteirista de vídeos longos novos usa `creative_retention_long_v2`: modo e postura explícitos,
@@ -131,6 +143,17 @@
   `creative_pipe_passage_v3`, a capa de Short não repete o enfoque situado antes de `|`; projetos
   legados com passagem primeiro continuam sem repetir a frase temática depois de `|`. Em longos, o
   conceito visual complementa o título sem texto no bitmap.
+- Projetos novos usam `search_first_unique_v2` para SEO. A descrição é única, abre com a consulta
+  principal, passagem e entrega concreta, usa ao menos dois parágrafos e não repete CTA genérico
+  como “Compartilhe esta mensagem”. Em vídeos longos, preserve também a timeline bíblica.
+- `metadata.topics` contém de oito a quinze tags distintas e diretamente relevantes, incluindo
+  consulta principal, passagem, livro e variações reais de busca. Tags são metadado secundário:
+  não use `#` nelas, não cole listas na descrição e não invente volume de busca. Hashtags na
+  descrição são opcionais, no máximo três e nunca `#viral`/`#fyp`.
+- O comentário fixado formula uma pergunta específica ao tema ou passagem. O pacote registra
+  `description_rationale`, `tag_strategy` e `discovery_hypothesis`; nunca afirma que SEO garante
+  viralização. Para Shorts, trate escolha de assistir, duração média, percentual assistido e
+  satisfação como sinais principais de distribuição.
 - Thumbnails novas de Shorts usam conflito/personagem reconhecível, destaque vermelho e ao menos uma
   seta, X, sublinhado ou pincel com alvo real; evite frases abstratas quando o confronto for mais forte.
 - Planeje espaço negativo real e tente não cobrir rosto, corpo, ação principal ou o alvo narrativo.
@@ -147,13 +170,19 @@
   câmera, enquadramento ou objetos não essenciais, sem trocar nem envelhecer o personagem.
 - Copie cada ativo ao `staging_path`; não o deixe apenas em `$CODEX_HOME`. O agente principal faz
   `images import-batch` uma vez.
+- Quando o job compacto declarar `common_prompt_prefix`, reconstrua cada prompt exatamente como
+  `common_prompt_prefix + prompt_delta`; não duplique o prefixo nos jobs nem altere o texto.
 - Não regenere item importado/aprovado. Uma versão ativa pode entrar na prévia, mas segue sem
   aprovação humana.
 - O `worker_id` é afinidade inicial; ao liberar, o trabalhador pode assumir o próximo job pendente
   do plano sem compartilhar staging.
-- Consulte `run --dry-run` para diagnóstico e use `autopilot` para execução retomável. Lane local e
-  escrita de estado continuam serializadas; dentro da lane de imagens, workers podem gerar em
-  paralelo com staging separado.
+- Consulte `run --dry-run` para diagnóstico e use `autopilot --wait-external` para execução e espera
+  retomáveis no mesmo processo. Não abra rodadas do coordenador só para polling; quando uma
+  integração precisar consultar estado, use `status --json`. Lane local e escrita de estado
+  continuam serializadas; dentro da lane de imagens, workers podem gerar em paralelo com staging
+  separado.
+- Ao concluir, mantenha `audit/production-metrics.json` e a seção automática de `audit/report.md`
+  atualizados com `audit tokens`; a atualização deve ser idempotente e preservar análise anterior.
 
 ## Produção remota com paridade local
 
@@ -164,7 +193,7 @@
   não devem ser entregues ao Codex. Hooks remotos apenas medem eventos/tamanhos e não escrevem em
   `stdout`.
 - Coordenador e especialistas usam obrigatoriamente `gpt-5.6-sol`. O coordenador usa raciocínio
-  médio; `shorts_script_specialist`, alto; cada `image_worker`, baixo; e
+  médio; `shorts_script_specialist` e `biblical_reviewer`, alto; cada `image_worker`, baixo; e
   `youtube_growth_specialist`, médio. Use até dois workers de imagem em paralelo e importe o lote
   uma única vez.
 - Agendas diárias materializam um ou dois jobs independentes por data e slot. Cada ocorrência deve
@@ -213,7 +242,12 @@
   PERSISTÊNCIA, CONFIANÇA, FIDELIDADE, ESPERANÇA, PERSEVERANÇA, RECOMEÇO, DESCANSO ou CORAGEM,
   derivada da resolução; nunca use isoladamente BEM, SIM, AMÉM, EU, AQUI, PERTO, FÉ, PAZ, FORÇA
   ou FIEL.
-- Música é sorteada da biblioteca local, persistida, inicia em -12 dB e preserva a narração.
+- Projetos novos usam `voice_music_loudness_v1`: a narração é normalizada para -18 LUFS e a
+  música fica 16 LU abaixo dela (-34 LUFS por padrão), com limites de true peak antes do `amix`.
+  `narration_gain_db` e `background_music_gain_db` são apenas trims explícitos; não substituem a
+  normalização. Projetos legados preservam o padrão salvo.
+- A validação e o manifesto da música registram `audio_mix_standard`, alvo da voz, alvo da música e
+  diferença em LU; divergência bloqueia o candidato final.
 
 ## Convenções técnicas
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -28,7 +29,7 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-METADATA_ALGORITHM_VERSION = "1.2"
+METADATA_ALGORITHM_VERSION = "1.3"
 
 
 def _timestamp(seconds: float) -> str:
@@ -168,8 +169,15 @@ def build_metadata(layout: ProjectLayout, *, force: bool = False) -> YouTubeMeta
     description = "\n\n".join(
         part
         for part in (
-            f"{mode_label} em português sobre {briefing.main_passage}. Tema central: {subject}.",
+            (
+                f"{subject_title} em {briefing.main_passage}: este vídeo apresenta uma "
+                f"{mode_label.casefold()} fiel à passagem e explica seu ponto central com clareza."
+            ),
             briefing.viewer_outcome or briefing.practical_application,
+            (
+                f"O conteúdo diferencia o que a Bíblia afirma em {briefing.main_passage}, "
+                "o contexto verificado e as interpretações usadas para organizar a explicação."
+            ),
             "Referências consultadas:\n" + "\n".join(source_lines) if source_lines else "",
             "Este conteúdo distingue texto bíblico, contexto verificado, interpretação e "
             "elaboração criativa. Consulte a passagem completa na tradução de sua preferência.",
@@ -198,6 +206,20 @@ def build_metadata(layout: ProjectLayout, *, force: bool = False) -> YouTubeMeta
             f"Avoid: {'; '.join(style.negative_constraints)}; composição congestionada",
         )
     )
+    book_name = re.sub(r"\s+\d.*$", "", briefing.main_passage).strip()
+    topic_candidates = [
+        subject,
+        briefing.main_passage,
+        f"{subject} na Bíblia",
+        f"{briefing.main_passage} explicado",
+        f"livro de {book_name}" if book_name else "Bíblia",
+        "estudo bíblico",
+        "explicação bíblica",
+        "Bíblia em português",
+        "contexto bíblico",
+        mode_label,
+    ]
+    topics = list(dict.fromkeys(item.strip() for item in topic_candidates if item.strip()))
     metadata = YouTubeMetadata(
         title=title,
         alternative_titles=alternatives,
@@ -207,13 +229,13 @@ def build_metadata(layout: ProjectLayout, *, force: bool = False) -> YouTubeMeta
             audio,
             script,
             scripture_timeline=(
-                project.config.youtube_growth.description_standard == "scripture_timeline_v1"
+                project.config.youtube_growth.description_standard
+                in {"scripture_timeline_v1", "search_first_unique_v2"}
             ),
         ),
-        topics=[briefing.main_passage, subject, "reflexão bíblica", "fé", "esperança"],
+        topics=topics,
         pinned_comment=(
-            f"Qual parte de {briefing.main_passage} mais falou com você hoje? "
-            "Compartilhe sua reflexão com respeito nos comentários."
+            f"O que {briefing.main_passage} esclarece sobre {subject.casefold()} para você?"
         ),
         thumbnail_concept=concept,
         thumbnail_prompt=thumbnail_prompt,

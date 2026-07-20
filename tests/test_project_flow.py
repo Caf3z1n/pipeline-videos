@@ -9,6 +9,7 @@ from pipeline_videos.models import (
     ApprovalStatus,
     Briefing,
     ProjectConfig,
+    SourceEntry,
     StageStatus,
     StyleProfile,
 )
@@ -16,6 +17,24 @@ from pipeline_videos.project import create_project
 from pipeline_videos.review import approve_briefing
 from pipeline_videos.state import set_approval
 from pipeline_videos.storage import read_json, read_model, resolve_project, write_json
+
+
+def test_biblical_source_excerpt_is_sealed_by_content_hash() -> None:
+    source = SourceEntry(
+        source_id="bpm-mateus-26-16",
+        kind="biblical_text",
+        title="Mateus 26:16",
+        excerpt="Daquele momento em diante, ele buscava uma oportunidade para traí-lo.",
+        use_in_video="Citação literal.",
+        claim_scope="Mateus 26:16.",
+        verified=True,
+    )
+
+    assert source.content_hash is not None
+    tampered = source.model_dump(mode="json")
+    tampered["excerpt"] = "Texto alterado depois da verificação."
+    with pytest.raises(ValueError, match="content_hash"):
+        SourceEntry.model_validate(tampered)
 
 
 def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -> None:
@@ -58,7 +77,7 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     assert manifest.config.youtube_growth.title_variants == 1
     assert manifest.config.youtube_growth.thumbnail_variants == 1
     assert manifest.config.youtube_growth.title_standard == "creative_pipe_passage_v3"
-    assert manifest.config.youtube_growth.description_standard == "scripture_timeline_v1"
+    assert manifest.config.youtube_growth.description_standard == "search_first_unique_v2"
     assert manifest.config.youtube_growth.thumbnail_standard == "biblical_cinematic_landscape_v1"
     assert manifest.config.youtube_growth.thumbnail_typography_standard == "no_text_v1"
     assert manifest.config.youtube_growth.title_thumbnail_pairing_standard == "complementary_v1"
@@ -177,7 +196,13 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.render.motion_pan_strength == 0.32
     assert manifest.config.render.motion_supersample == 3
     assert manifest.config.render.background_music_path is None
-    assert manifest.config.render.background_music_gain_db == -12.0
+    assert manifest.config.render.audio_mix_standard == "voice_music_loudness_v1"
+    assert manifest.config.render.narration_target_lufs == -18.0
+    assert manifest.config.render.background_music_gap_lu == 16.0
+    assert manifest.config.render.narration_true_peak_dbfs == -2.0
+    assert manifest.config.render.background_music_true_peak_dbfs == -9.0
+    assert manifest.config.render.narration_gain_db == 0.0
+    assert manifest.config.render.background_music_gain_db == 0.0
     assert manifest.config.render.short_cover_enabled is True
     assert manifest.config.render.short_cover_duration_seconds == pytest.approx(1 / 30)
     assert manifest.config.render.background_blur_profile == "functional_caption_focus_v1"
@@ -189,6 +214,7 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.render.caption_focus_blur_extra_sigma == 0.0
     assert manifest.config.youtube_growth.title_variants == 1
     assert manifest.config.youtube_growth.thumbnail_variants == 1
+    assert manifest.config.youtube_growth.description_standard == "search_first_unique_v2"
     assert manifest.config.youtube_growth.thumbnail_reference_mode == "opening_scene_edit_v1"
     assert manifest.config.youtube_growth.title_standard == "creative_pipe_passage_v3"
     assert manifest.config.youtube_growth.thumbnail_typography_standard == (
@@ -242,3 +268,40 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     legacy_manifest["config"]["captions"].pop("vertical_position")
     write_json(layout.manifest, legacy_manifest)
     assert layout.load_manifest().config.captions.vertical_position == "center"
+
+
+def test_fifteen_second_short_uses_compact_duration_profile(tmp_path) -> None:
+    layout = create_project(
+        "micro-short",
+        "Short de quinze segundos",
+        projects_dir=tmp_path,
+        target_duration_seconds=15,
+        video_format="short",
+        project_date=date(2026, 7, 20),
+    )
+
+    manifest = layout.load_manifest()
+    config = manifest.config.shorts_script
+
+    assert manifest.target_duration_seconds == 15
+    assert config.duration_profile == "adaptive_compact_v1"
+    assert (config.min_words, config.max_words) == (30, 38)
+    assert (config.retention_target_min_seconds, config.retention_target_max_seconds) == (13, 15)
+    assert (
+        config.scripture_citation_min_start_seconds,
+        config.scripture_citation_max_end_seconds,
+    ) == (3, 9)
+    assert config.max_literal_verse_words == 18
+    assert (config.minimum_sections, config.minimum_progression_beats) == (5, 1)
+    assert (config.target_scene_min, config.target_scene_max) == (5, 6)
+    assert config.cta_max_words == 5
+    assert manifest.config.production.image_workers == 1
+
+    with pytest.raises(ValueError, match="pelo menos 30 segundos"):
+        create_project(
+            "longo-curto-demais",
+            "Longo inválido",
+            projects_dir=tmp_path,
+            target_duration_seconds=15,
+            video_format="landscape",
+        )

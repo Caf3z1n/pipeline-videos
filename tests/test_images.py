@@ -151,6 +151,31 @@ def test_manifest_and_codex_queue_are_idempotent_and_can_target_one_scene(
     assert saved_scenes.scenes[1].generation_status == StageStatus.WAITING_EXTERNAL
 
 
+def test_worker_jobs_deduplicate_common_prompt_without_changing_reconstructed_text(
+    tmp_path: Path,
+) -> None:
+    layout = _create_layout(tmp_path, scene_count=4)
+    scenes = read_model(layout.scenes, SceneManifest)
+    common = "Visual standard: cinematic-family-3d-v1\n" + ("continuidade premium; " * 20) + "\n"
+    expected: dict[str, str] = {}
+    for scene in scenes.scenes:
+        prompt = common + f"momento exclusivo da {scene.scene_id}"
+        scene.prompt.assembled_prompt = prompt
+        expected[scene.scene_id] = prompt
+    write_json(layout.scenes, scenes)
+
+    queue = build_codex_queue(layout)
+
+    for relative in queue["orchestration"]["worker_job_files"].values():
+        worker = read_json(layout.root / relative)
+        prefix = worker["common_prompt_prefix"]
+        assert prefix == common
+        for job in worker["jobs"]:
+            assert "prompt" not in job
+            reconstructed = prefix + job["prompt_delta"]
+            assert reconstructed == expected[job["scene_id"]]
+
+
 def test_fixture_png_is_marked_idempotent_and_force_preserves_approved_version(
     tmp_path: Path,
 ) -> None:

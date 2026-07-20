@@ -5,6 +5,13 @@ import unicodedata
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from pipeline_videos.models import (
+    USER_SIX_HOOK_FAMILIES as MODEL_USER_SIX_HOOK_FAMILIES,
+)
+from pipeline_videos.models import (
+    HookContract,
+)
+
 
 @dataclass(frozen=True)
 class CreativeModeSpec:
@@ -262,14 +269,34 @@ HOOK_TEMPLATE_EXAMPLES: dict[str, str] = {
     "quote_first": "Abra com uma citação curta e verificada que funcione como ponto de partida.",
 }
 
-USER_TEMPLATE_HOOK_FAMILIES = (
-    "if_you_want_do_this",
-    "what_happens_if_you_stop",
-    "still_doing_losing",
-    "nobody_talks_but",
-    "want_to_learn_start",
-    "never_do_this",
-)
+USER_TEMPLATE_HOOK_FAMILIES = MODEL_USER_SIX_HOOK_FAMILIES
+
+USER_SIX_FALLBACKS_BY_MODE: dict[str, tuple[str, ...]] = {
+    "biblical_storytelling": ("nobody_talks_but", "want_to_learn_start"),
+    "character_portrait": ("nobody_talks_but", "want_to_learn_start"),
+    "passage_explainer": ("want_to_learn_start", "nobody_talks_but"),
+    "biblical_curiosity": ("nobody_talks_but", "want_to_learn_start"),
+    "historical_context": ("nobody_talks_but", "want_to_learn_start"),
+    "philosophical_reflection": ("what_happens_if_you_stop", "nobody_talks_but"),
+    "thematic_investigation": ("what_happens_if_you_stop", "nobody_talks_but"),
+    "comparison_contrast": ("nobody_talks_but", "still_doing_losing"),
+    "ethical_dilemma": ("never_do_this", "what_happens_if_you_stop"),
+    "misconception_correction": (
+        "still_doing_losing",
+        "never_do_this",
+        "nobody_talks_but",
+    ),
+    "literary_exploration": ("nobody_talks_but", "want_to_learn_start"),
+    "question_driven_essay": ("what_happens_if_you_stop", "nobody_talks_but"),
+    "chronological_reconstruction": ("nobody_talks_but", "want_to_learn_start"),
+    "cause_and_consequence": ("what_happens_if_you_stop", "nobody_talks_but"),
+    "devotional_application": (
+        "if_you_want_do_this",
+        "what_happens_if_you_stop",
+        "never_do_this",
+    ),
+    "pastoral_encouragement": ("if_you_want_do_this", "what_happens_if_you_stop"),
+}
 
 DEVELOPMENT_MODE_TO_CREATIVE_MODES: dict[str, tuple[str, ...]] = {
     "context": (
@@ -350,7 +377,12 @@ def viewer_outcome_for_mode(mode: str, *, theme: str, reveal: str = "") -> str:
     return f"Compreender uma perspectiva bíblica mais precisa sobre {subject}."
 
 
-def hook_families_for_mode(mode: str, *, short: bool) -> tuple[str, ...]:
+def hook_families_for_mode(
+    mode: str,
+    *,
+    short: bool,
+    hook_contract: HookContract = "mode_compatible_v1",
+) -> tuple[str, ...]:
     families: dict[str, tuple[str, ...]] = {
         "biblical_storytelling": ("start_in_scene", "consequence_first"),
         "character_portrait": ("start_in_scene", "contradiction", "consequence_first"),
@@ -383,6 +415,9 @@ def hook_families_for_mode(mode: str, *, short: bool) -> tuple[str, ...]:
         ),
     }
     selected = families[mode]
+    if short and hook_contract == "user_six_v1":
+        compatible = tuple(family for family in selected if family in USER_TEMPLATE_HOOK_FAMILIES)
+        return compatible or USER_SIX_FALLBACKS_BY_MODE[mode]
     if short:
         return tuple(family for family in selected if family != "quote_first")
     return selected
@@ -409,6 +444,25 @@ def hook_matches_family(hook: str, family: str) -> bool:
     if family == "never_do_this":
         return normalized.startswith("nunca ")
     return bool(normalized)
+
+
+def hook_matches_user_six_template(hook: str, family: str) -> bool:
+    """Apply the literal structural contract requested for all new Shorts."""
+
+    if family not in USER_TEMPLATE_HOOK_FAMILIES:
+        return False
+    normalized = _plain(hook)
+    if family == "if_you_want_do_this":
+        return bool(re.match(r"^se voce quer .+ faca isso(?: .*)?$", normalized))
+    if family == "what_happens_if_you_stop":
+        return bool(re.match(r"^o que acontece se voce parar de .+$", normalized))
+    if family == "still_doing_losing":
+        return bool(re.match(r"^se voce ainda faz .+ esta perdendo .+$", normalized))
+    if family == "nobody_talks_but":
+        return bool(re.match(r"^ninguem fala sobre .+ mas(?: .*)?$", normalized))
+    if family == "want_to_learn_start":
+        return bool(re.match(r"^quer aprender .+ comece(?: .*)?$", normalized))
+    return bool(re.match(r"^nunca faca .+$", normalized))
 
 
 def creative_evidence_errors(

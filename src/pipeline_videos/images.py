@@ -302,6 +302,29 @@ def _worker_job_paths(layout: ProjectLayout, items: list[dict[str, Any]]) -> dic
     }
 
 
+def _compact_worker_prompts(
+    jobs: list[dict[str, Any]],
+) -> tuple[str | None, list[dict[str, Any]]]:
+    """Deduplicate an exact common prefix while preserving byte-identical final prompts."""
+
+    if len(jobs) < 2:
+        return None, jobs
+    prompts = [str(job.get("prompt") or "") for job in jobs]
+    prefix = os.path.commonprefix(prompts)
+    newline = prefix.rfind("\n")
+    if newline >= 0:
+        prefix = prefix[: newline + 1]
+    if len(prefix.encode("utf-8")) < 256:
+        return None, jobs
+    compacted: list[dict[str, Any]] = []
+    for job, prompt in zip(jobs, prompts, strict=True):
+        item = dict(job)
+        item.pop("prompt", None)
+        item["prompt_delta"] = prompt[len(prefix) :]
+        compacted.append(item)
+    return prefix, compacted
+
+
 def _write_worker_job_files(layout: ProjectLayout, queue: dict[str, Any]) -> list[str]:
     declared = queue.get("orchestration", {}).get("worker_job_files", {})
     if not isinstance(declared, dict):
@@ -313,6 +336,7 @@ def _write_worker_job_files(layout: ProjectLayout, queue: dict[str, Any]) -> lis
         if not isinstance(worker_id, str) or not isinstance(relative_path, str):
             raise ValueError("Arquivo compacto de trabalhador inválido na fila de imagens.")
         jobs = [item for item in queue.get("items", []) if item.get("worker_id") == worker_id]
+        common_prompt_prefix, compacted_jobs = _compact_worker_prompts(jobs)
         path = (layout.root / relative_path).resolve()
         try:
             path.relative_to(layout.image_jobs.resolve())
@@ -321,7 +345,7 @@ def _write_worker_job_files(layout: ProjectLayout, queue: dict[str, Any]) -> lis
         write_json(
             path,
             {
-                "schema_version": "1.0",
+                "schema_version": "1.1",
                 "project_id": queue["project_id"],
                 "batch_id": queue["batch_id"],
                 "worker_id": worker_id,
@@ -333,12 +357,21 @@ def _write_worker_job_files(layout: ProjectLayout, queue: dict[str, Any]) -> lis
                 "generation_retry_policy": imagegen_retry_policy(),
                 "instructions": [
                     "Leia somente este arquivo; não leia o histórico da conversa ou manifestos.",
+                    (
+                        "Quando common_prompt_prefix existir, reconstrua cada prompt exatamente "
+                        "como "
+                        "common_prompt_prefix + jobs[].prompt_delta e confira prompt_hash antes da "
+                        "chamada de imagegen."
+                        if common_prompt_prefix is not None
+                        else "Use jobs[].prompt integralmente, sem resumir ou reescrever."
+                    ),
                     *imagegen_retry_instructions(asset_label="job de imagem"),
                     "Salve cada PNG somente no staging_path declarado.",
                     "Não importe, aprove ou modifique o estado compartilhado do projeto.",
                     "Processe o lote em uma única execução retomável sempre que possível.",
                 ],
-                "jobs": jobs,
+                "common_prompt_prefix": common_prompt_prefix,
+                "jobs": compacted_jobs,
             },
         )
         artifacts.append(relative_path)

@@ -14,10 +14,14 @@ from pipeline_videos.creative_direction import (
     creative_evidence_errors,
     creative_mode_payload,
     hook_matches_family,
+    hook_matches_user_six_template,
 )
 from pipeline_videos.editorial import quoted_comment_response
 from pipeline_videos.models import (
+    USER_SIX_HOOK_FAMILIES,
+    BiblicalReview,
     Briefing,
+    ShortsScriptConfig,
     ShortsScriptPackage,
     SourceEntry,
     SourceLibrary,
@@ -114,6 +118,71 @@ _BIBLICAL_REFERENCE_PATTERN = re.compile(
     r"(?:\s*[-–—]\s*(?P<end_verse>\d+))?$"
 )
 _RAW_NUMERIC_REFERENCE_PATTERN = re.compile(r"\b\d+\s*:\s*\d+\b")
+
+
+def _short_timeline_seconds(
+    duration_seconds: int,
+    config: ShortsScriptConfig,
+) -> dict[str, list[float | int]]:
+    if config.duration_profile == "standard_45_55_v1":
+        return {
+            "hook": [0, 2],
+            "orientation_or_stakes": [2, 8],
+            "scripture": [8, 20],
+            "development_and_reengagement": [20, 36],
+            "resolution_or_synthesis": [32, 48],
+            "single_action_cta": [45, 55],
+        }
+    cta_start = round(duration_seconds - config.cta_max_seconds, 1)
+    resolution_start = round(max(config.scripture_citation_max_end_seconds, cta_start - 2.0), 1)
+    development_end = round(max(config.scripture_citation_max_end_seconds, cta_start - 1.0), 1)
+    return {
+        "hook": [0, config.hook_target_seconds],
+        "orientation_or_stakes": [
+            config.hook_target_seconds,
+            config.scripture_citation_min_start_seconds,
+        ],
+        "scripture": [
+            config.scripture_citation_min_start_seconds,
+            config.scripture_citation_max_end_seconds,
+        ],
+        "development_and_reengagement": [
+            config.scripture_citation_max_end_seconds,
+            development_end,
+        ],
+        "resolution_or_synthesis": [resolution_start, cta_start],
+        "single_action_cta": [cta_start, duration_seconds],
+    }
+
+
+def _target_scene_instruction(config: ShortsScriptConfig) -> str:
+    if config.target_scene_min == 8 and config.target_scene_max == 10:
+        return "oito a dez cenas"
+    return f"{config.target_scene_min} a {config.target_scene_max} cenas"
+
+
+def _retention_timeline_seconds(
+    duration_seconds: int,
+    config: ShortsScriptConfig,
+) -> dict[str, list[float | int]]:
+    if config.duration_profile == "standard_45_55_v1":
+        return {
+            "cold_open": [0, 2],
+            "conflict_or_action": [2, 8],
+            "scripture": [8, 20],
+            "progression_and_reengagement": [20, 32],
+            "payoff_and_application": [32, 45],
+            "single_action_cta": [45, 55],
+        }
+    creative = _short_timeline_seconds(duration_seconds, config)
+    return {
+        "cold_open": creative["hook"],
+        "conflict_or_action": creative["orientation_or_stakes"],
+        "scripture": creative["scripture"],
+        "progression_and_reengagement": creative["development_and_reengagement"],
+        "payoff_and_application": creative["resolution_or_synthesis"],
+        "single_action_cta": creative["single_action_cta"],
+    }
 
 
 def spoken_biblical_reference(reference: str) -> str:
@@ -250,6 +319,17 @@ def prepare_shorts_script_queue(
         if config.require_verified_scripture or config.require_literal_verse_opening
         else _literal_opening_candidates(layout)
     )
+    if config.duration_profile == "adaptive_compact_v1":
+        literal_candidates = [
+            source
+            for source in literal_candidates
+            if len(tokenize_words(source.excerpt or "")) <= config.max_literal_verse_words
+        ]
+        if not literal_candidates:
+            raise ValueError(
+                "O Short compacto exige uma fonte bíblica verificada com no máximo "
+                f"{config.max_literal_verse_words} palavras no excerpt literal."
+            )
     input_hash = shorts_script_input_hash(layout)
     stage = project.stages["shorts_script"]
     if (
@@ -276,6 +356,11 @@ def prepare_shorts_script_queue(
             unresolved.append("hook_policy")
         if briefing.hook_family in {"auto", "none"}:
             unresolved.append("hook_family")
+        if (
+            briefing.hook_contract == "user_six_v1"
+            and briefing.hook_family not in USER_SIX_HOOK_FAMILIES
+        ):
+            unresolved.append("hook_family precisa ser uma das seis famílias oficiais")
         if unresolved:
             raise ValueError(
                 "Resolva a direção criativa do briefing antes de preparar o Short: "
@@ -328,6 +413,18 @@ def prepare_shorts_script_queue(
             ),
             "success_condition": "valid=true",
             "returns_all_detectable_errors": True,
+            "independent_biblical_review_required": (config.require_independent_biblical_review),
+            "independent_review_prepare_command": (
+                f'uv run pipeline-videos script shorts-review-prepare "{project.project_id}"'
+                if config.require_independent_biblical_review
+                else None
+            ),
+            "final_reviewed_preflight_command": (
+                "uv run pipeline-videos script shorts-check-reviewed-staging "
+                f'"{project.project_id}"'
+                if config.require_independent_biblical_review
+                else None
+            ),
         },
         "scripture_candidates": [source.source_id for source in literal_candidates],
         "verse_opening_candidates": [source.source_id for source in literal_candidates],
@@ -351,29 +448,39 @@ def prepare_shorts_script_queue(
         "retention_contract": (
             {
                 "standard": "creative_retention_v3",
+                "duration_profile": config.duration_profile,
                 "creative_mode": briefing.creative_mode,
                 "interpretive_stance": briefing.interpretive_stance,
                 "mode_guidance": creative_mode_payload(briefing.creative_mode),
                 "hook": {
                     "required": True,
+                    "contract": briefing.hook_contract,
                     "selected_family": briefing.hook_family,
+                    "allowed_families": (
+                        list(USER_SIX_HOOK_FAMILIES)
+                        if briefing.hook_contract == "user_six_v1"
+                        else list(HOOK_TEMPLATE_EXAMPLES)
+                    ),
                     "target_end_seconds": config.hook_target_seconds,
-                    "templates": HOOK_TEMPLATE_EXAMPLES,
+                    "templates": (
+                        {
+                            family: HOOK_TEMPLATE_EXAMPLES[family]
+                            for family in USER_SIX_HOOK_FAMILIES
+                        }
+                        if briefing.hook_contract == "user_six_v1"
+                        else HOOK_TEMPLATE_EXAMPLES
+                    ),
                 },
-                "timeline_seconds": {
-                    "hook": [0, 2],
-                    "orientation_or_stakes": [2, 8],
-                    "scripture": [8, 20],
-                    "development_and_reengagement": [20, 36],
-                    "resolution_or_synthesis": [32, 48],
-                    "single_action_cta": [45, 55],
-                },
+                "timeline_seconds": _short_timeline_seconds(
+                    project.target_duration_seconds,
+                    config,
+                ),
                 "application_required": creative_mode_payload(briefing.creative_mode)[
                     "application_required"
                 ],
                 "cta_max_words": config.cta_max_words,
                 "cta_max_seconds": config.cta_max_seconds,
-                "target_scene_count": [8, 10],
+                "target_scene_count": [config.target_scene_min, config.target_scene_max],
             }
             if is_creative_v3
             else {
@@ -384,17 +491,13 @@ def prepare_shorts_script_queue(
                     "counterintuitive_reveal",
                     "stair_step_progression",
                 ],
-                "timeline_seconds": {
-                    "cold_open": [0, 2],
-                    "conflict_or_action": [2, 8],
-                    "scripture": [8, 20],
-                    "progression_and_reengagement": [20, 32],
-                    "payoff_and_application": [32, 45],
-                    "single_action_cta": [45, 55],
-                },
+                "timeline_seconds": _retention_timeline_seconds(
+                    project.target_duration_seconds,
+                    config,
+                ),
                 "cta_max_words": config.cta_max_words,
                 "cta_max_seconds": config.cta_max_seconds,
-                "target_scene_count": [8, 10],
+                "target_scene_count": [config.target_scene_min, config.target_scene_max],
             }
             if is_retention_v2
             else None
@@ -449,6 +552,11 @@ def prepare_shorts_script_queue(
                 "verificada e se a segunda citação realmente acrescentar algo sem apertar o ritmo."
             ),
             (
+                "Neste perfil de duração, verse_text pode ter no máximo "
+                f"{config.max_literal_verse_words} palavras. Não corte, resuma ou complete o "
+                "excerpt; escolha integralmente uma das scripture_candidates já filtradas."
+            ),
+            (
                 "Toda referência bíblica falada deve escrever capítulo e versículo por extenso "
                 "na locução. Nunca narre apenas 'Livro X:Y'. Use o padrão 'Livro, capítulo X, "
                 "versículo Y'; por exemplo: "
@@ -485,9 +593,10 @@ def prepare_shorts_script_queue(
                         "O Short exige um hook inicial forte e honesto. Copie-o como prefixo exato "
                         "da primeira seção, use no máximo "
                         f"{config.hook_max_words} palavras, termine até "
-                        f"{config.hook_target_seconds:.1f}s e siga a selected_family. Os seis "
-                        "modelos fornecidos pelo usuário são referências prioritárias, nunca "
-                        "moldes para clickbait ou promessa que o vídeo não entrega."
+                        f"{config.hook_target_seconds:.1f}s e siga a selected_family. Nos Shorts "
+                        "novos, os seis modelos fornecidos pelo usuário são o contrato exclusivo: "
+                        "a primeira fala reproduz literalmente a estrutura selecionada, sem "
+                        "clickbait ou promessa que o vídeo não entrega."
                         if is_creative_v3
                         else "O texto exato de strategy.hook deve abrir uma cena já em movimento, "
                         "copiar o início da primeira seção, ter no máximo "
@@ -562,11 +671,15 @@ def prepare_shorts_script_queue(
                 "promise_boundary para explicar o que o texto afirma e o que ele não promete."
             ),
             (
-                "Faça a citação começar entre 8 e 20 segundos e registre seu início e fim em "
+                "Faça a citação ocupar a janela entre "
+                f"{config.scripture_citation_min_start_seconds:g}s e "
+                f"{config.scripture_citation_max_end_seconds:g}s e registre seu início e fim em "
                 "verse_opening. A Bíblia entra como evidência narrativa, explicativa ou "
                 "argumentativa coerente com o modo, não como bloco decorativo."
                 if is_creative_v3
-                else "Faça a citação começar entre 8 e 20 segundos e registre seu início e "
+                else "Faça a citação ocupar a janela entre "
+                f"{config.scripture_citation_min_start_seconds:g}s e "
+                f"{config.scripture_citation_max_end_seconds:g}s e registre seu início e "
                 "fim em verse_opening. A Bíblia entra como evidência que muda a leitura do "
                 "conflito, não como bloco decorativo ou resposta entregue cedo demais."
                 if is_retention_v2
@@ -607,7 +720,8 @@ def prepare_shorts_script_queue(
                 "retenção, com valor real para o espectador e tempos crescentes."
             ),
             (
-                "Planeje a narração e as direções visuais para produzir de oito a dez cenas: "
+                "Planeje a narração e as direções visuais para produzir "
+                f"{_target_scene_instruction(config)}: "
                 "uma ação concreta por imagem e mudança visual no meio. Callback final é "
                 "obrigatório apenas no contrato v2 legado. A "
                 "thumbnail continua sendo uma edição da imagem ativa da abertura."
@@ -753,6 +867,13 @@ def prepare_shorts_script_queue(
             "Não prometa viralização, retenção ou CTR e não invente métricas.",
         ],
     }
+    if not config.require_independent_biblical_review:
+        for key in (
+            "independent_biblical_review_required",
+            "independent_review_prepare_command",
+            "final_reviewed_preflight_command",
+        ):
+            payload["preflight"].pop(key, None)
     start_stage(layout, "shorts_script", input_hash, provider=config.specialist_role)
     write_json(layout.shorts_script_queue, payload)
     wait_stage(
@@ -1467,9 +1588,23 @@ def _collect_retention_story_errors(
         if _normalized(story.scripture_anchor) != _normalized(verse.verse_text):
             _add_validation_error(errors, "scripture_anchor precisa copiar o versículo literal.")
         if verse.target_start_seconds < config.scripture_citation_min_start_seconds:
-            _add_validation_error(errors, "A citação bíblica começa antes de oito segundos.")
+            _add_validation_error(
+                errors,
+                "A citação bíblica começa antes da janela configurada de "
+                f"{config.scripture_citation_min_start_seconds:g}s.",
+            )
         if verse.target_end_seconds > config.scripture_citation_max_end_seconds:
-            _add_validation_error(errors, "A citação bíblica termina depois de vinte segundos.")
+            _add_validation_error(
+                errors,
+                "A citação bíblica termina depois da janela configurada de "
+                f"{config.scripture_citation_max_end_seconds:g}s.",
+            )
+        if len(tokenize_words(verse.verse_text)) > config.max_literal_verse_words:
+            _add_validation_error(
+                errors,
+                "A citação literal ultrapassa o limite de "
+                f"{config.max_literal_verse_words} palavras deste perfil.",
+            )
         if verse.source_id not in story.source_ids:
             _add_validation_error(errors, "retention_story não registra a fonte da citação.")
 
@@ -1478,7 +1613,9 @@ def _collect_retention_story_errors(
     if not config.retention_target_min_seconds <= final_end <= config.retention_target_max_seconds:
         _add_validation_error(
             errors,
-            "retention_story_v2 precisa terminar entre 45 e 55 segundos.",
+            "retention_story_v2 precisa terminar entre "
+            f"{config.retention_target_min_seconds:g} e "
+            f"{config.retention_target_max_seconds:g} segundos.",
         )
     engagement = story.engagement
     if engagement.target_end_seconds != final_end:
@@ -1557,7 +1694,12 @@ def _collect_creative_direction_errors(
         _add_validation_error(errors, "hook_family diverge da família resolvida no briefing.")
     if strategy.hook_family != direction.hook_family:
         _add_validation_error(errors, "strategy.hook_family precisa copiar creative_direction.")
-    if not hook_matches_family(strategy.hook, direction.hook_family):
+    hook_is_valid = (
+        hook_matches_user_six_template(strategy.hook, direction.hook_family)
+        if briefing.hook_contract == "user_six_v1"
+        else hook_matches_family(strategy.hook, direction.hook_family)
+    )
+    if not hook_is_valid:
         _add_validation_error(errors, "O hook não corresponde à família declarada.")
 
     core_ids = [
@@ -1568,10 +1710,11 @@ def _collect_creative_direction_errors(
     ]
     mapped_ids = [*core_ids, *direction.development_section_ids]
     structurally_valid = True
-    if len(sections) < 6:
+    if len(sections) < config.minimum_sections:
         _add_validation_error(
             errors,
-            "creative_retention_v3 exige ao menos seis movimentos editoriais.",
+            "creative_retention_v3 exige ao menos "
+            f"{config.minimum_sections} movimentos editoriais neste perfil.",
         )
     if len(set(direction.development_section_ids)) != len(direction.development_section_ids):
         _add_validation_error(errors, "development_section_ids contém seção repetida.")
@@ -1660,9 +1803,23 @@ def _collect_creative_direction_errors(
     if strategy.verse_opening is not None:
         verse = strategy.verse_opening
         if verse.target_start_seconds < config.scripture_citation_min_start_seconds:
-            _add_validation_error(errors, "A citação bíblica começa antes de oito segundos.")
+            _add_validation_error(
+                errors,
+                "A citação bíblica começa antes da janela configurada de "
+                f"{config.scripture_citation_min_start_seconds:g}s.",
+            )
         if verse.target_end_seconds > config.scripture_citation_max_end_seconds:
-            _add_validation_error(errors, "A citação bíblica termina depois de vinte segundos.")
+            _add_validation_error(
+                errors,
+                "A citação bíblica termina depois da janela configurada de "
+                f"{config.scripture_citation_max_end_seconds:g}s.",
+            )
+        if len(tokenize_words(verse.verse_text)) > config.max_literal_verse_words:
+            _add_validation_error(
+                errors,
+                "A citação literal ultrapassa o limite de "
+                f"{config.max_literal_verse_words} palavras deste perfil.",
+            )
         if verse.source_id not in direction.source_ids:
             _add_validation_error(errors, "creative_direction não registra a fonte da citação.")
 
@@ -1671,7 +1828,9 @@ def _collect_creative_direction_errors(
     if not config.retention_target_min_seconds <= final_end <= config.retention_target_max_seconds:
         _add_validation_error(
             errors,
-            "creative_retention_v3 precisa terminar entre 45 e 55 segundos.",
+            "creative_retention_v3 precisa terminar entre "
+            f"{config.retention_target_min_seconds:g} e "
+            f"{config.retention_target_max_seconds:g} segundos.",
         )
     engagement = direction.engagement
     if engagement.target_end_seconds != final_end:
@@ -2205,6 +2364,123 @@ def check_shorts_script_package_staging(layout: ProjectLayout) -> ShortsScriptSt
     return ShortsScriptStagingCheck(True, (), normalizations)
 
 
+def prepare_shorts_biblical_review_queue(
+    layout: ProjectLayout,
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Prepare one compact, independent biblical review before shared-state import."""
+
+    queue, package = validate_shorts_script_package_staging(layout)
+    package_hash = sha256_file(layout.shorts_script_package_staging)
+    if not force and layout.shorts_biblical_review_queue.is_file():
+        existing = read_json(layout.shorts_biblical_review_queue)
+        if (
+            isinstance(existing, dict)
+            and existing.get("package_hash") == package_hash
+            and layout.shorts_biblical_review_context.is_file()
+        ):
+            return existing
+    context = {
+        "project_id": layout.load_manifest().project_id,
+        "package_hash": package_hash,
+        "briefing": read_json(layout.briefing),
+        "sources": read_json(layout.sources),
+        "script": package.script.model_dump(mode="json"),
+        "strategy": package.strategy.model_dump(mode="json"),
+        "author_review": package.biblical_review.model_dump(mode="json"),
+    }
+    if layout.shorts_biblical_review_staging_file.is_file():
+        layout.shorts_biblical_review_staging_file.unlink()
+    write_json(layout.shorts_biblical_review_context, context)
+    payload = {
+        "schema_version": "1.0",
+        "generated_at": utc_now(),
+        "project_id": layout.load_manifest().project_id,
+        "job_id": f"biblical-review-{package_hash[:16]}",
+        "package_hash": package_hash,
+        "script_job_id": queue["job_id"],
+        "role": "biblical_reviewer",
+        "orchestration": {
+            "single_writer": True,
+            "may_modify_project_state": False,
+            "may_publish": False,
+            "recommended_model": "gpt-5.6-sol",
+            "reasoning_effort": "high",
+            "context_policy": "compact_only",
+            "fork_turns": "none",
+        },
+        "inputs": {
+            "compact_context": relative_posix(
+                layout.shorts_biblical_review_context,
+                layout.root,
+            )
+        },
+        "outputs": {
+            "review": relative_posix(
+                layout.shorts_biblical_review_staging_file,
+                layout.root,
+            )
+        },
+        "schema": compact_json_schema(BiblicalReview.model_json_schema()),
+        "instructions": [
+            "Leia somente inputs.compact_context e revise o roteiro antes de qualquer import.",
+            "Relate em uma única passagem todos os bloqueios de citação, contexto, interpretação, "
+            "elaboração criativa, direitos e referência.",
+            "Não reescreva o roteiro, não aprove em nome do usuário e não altere o projeto.",
+            "Grave somente outputs.review; script_version precisa copiar a versão do staging.",
+        ],
+    }
+    write_json(layout.shorts_biblical_review_queue, payload)
+    return payload
+
+
+def _load_independent_biblical_review(
+    layout: ProjectLayout,
+    package: ShortsScriptPackage,
+) -> BiblicalReview:
+    if not layout.shorts_biblical_review_queue.is_file():
+        raise FileNotFoundError(
+            "Revisão bíblica independente ausente; execute script shorts-review-prepare."
+        )
+    queue = read_json(layout.shorts_biblical_review_queue)
+    current_hash = sha256_file(layout.shorts_script_package_staging)
+    if queue.get("package_hash") != current_hash:
+        raise RuntimeError("A revisão bíblica independente pertence a um staging antigo.")
+    relative = queue.get("outputs", {}).get("review")
+    if not isinstance(relative, str):
+        raise ValueError("Fila de revisão bíblica independente inválida.")
+    path = (layout.root / relative).resolve()
+    try:
+        path.relative_to(layout.shorts_biblical_review_staging.resolve())
+    except ValueError as exc:
+        raise ValueError("Caminho inseguro para a revisão bíblica independente.") from exc
+    if not path.is_file():
+        raise FileNotFoundError(
+            "Revisão bíblica independente ausente; execute o biblical_reviewer declarado."
+        )
+    review = read_model(path, BiblicalReview)
+    if review.script_version != package.script.version:
+        raise ValueError("A revisão bíblica independente não corresponde ao roteiro em staging.")
+    if review.has_open_blockers:
+        raise ValueError("A revisão bíblica independente ainda possui bloqueios abertos.")
+    return review.model_copy(update={"approved": False, "approval_note": None})
+
+
+def check_reviewed_shorts_script_staging(layout: ProjectLayout) -> ShortsScriptStagingCheck:
+    """Validate author package plus independent review without mutating shared state."""
+
+    package_check = check_shorts_script_package_staging(layout)
+    if not package_check.valid:
+        return package_check
+    try:
+        _, package = validate_shorts_script_package_staging(layout)
+        _load_independent_biblical_review(layout, package)
+    except (FileNotFoundError, KeyError, RuntimeError, TypeError, ValueError) as exc:
+        return ShortsScriptStagingCheck(False, (str(exc),), package_check.normalizations)
+    return package_check
+
+
 def import_shorts_script_package(
     layout: ProjectLayout,
     *,
@@ -2213,10 +2489,14 @@ def import_shorts_script_package(
     if layout.load_manifest().stages["shorts_script"].status == StageStatus.COMPLETED and not force:
         return read_model(layout.shorts_script_package, ShortsScriptPackage)
     queue, package = validate_shorts_script_package_staging(layout)
+    config = layout.load_manifest().config.shorts_script
+    if config.require_independent_biblical_review:
+        package = package.model_copy(
+            update={"biblical_review": _load_independent_biblical_review(layout, package)}
+        )
     script = package.script.model_copy(deep=True)
     script.version = int(queue["next_script_version"])
     script.word_count = len(tokenize_words(script.narration_text()))
-    config = layout.load_manifest().config.shorts_script
     script.estimated_duration_seconds = round(
         script.word_count / config.estimated_narration_wpm * 60,
         2,
@@ -2241,7 +2521,12 @@ def import_shorts_script_package(
         provider="shorts-script-specialist",
         creative_strategy=final_package.strategy,
     )
-    save_biblical_review(layout, review, provider="shorts-script-specialist")
+    review_provider = (
+        "independent-biblical-reviewer"
+        if config.require_independent_biblical_review
+        else "shorts-script-specialist"
+    )
+    save_biblical_review(layout, review, provider=review_provider)
     write_json(layout.shorts_script_package, final_package)
     write_json(layout.shorts_script_strategy, final_package.strategy)
     completed_queue = dict(queue)

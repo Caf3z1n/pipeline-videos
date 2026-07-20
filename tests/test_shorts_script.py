@@ -25,13 +25,15 @@ from pipeline_videos.models import (
     SourceLibrary,
     StageStatus,
 )
-from pipeline_videos.project import create_project
+from pipeline_videos.project import configure_short_duration_profile, create_project
 from pipeline_videos.scenes import build_scenes
 from pipeline_videos.shorts_script import (
     LEGACY_SCRIPTURE_BOUNDARY_PHRASE,
     ShortsScriptPackageValidationError,
+    check_reviewed_shorts_script_staging,
     check_shorts_script_package_staging,
     import_shorts_script_package,
+    prepare_shorts_biblical_review_queue,
     prepare_shorts_script_queue,
     spoken_biblical_reference,
 )
@@ -50,6 +52,7 @@ def _short_project(tmp_path):
     )
     manifest = layout.load_manifest()
     manifest.config.shorts_script.narrative_standard = "human_hook_to_bible"
+    manifest.config.shorts_script.require_independent_biblical_review = False
     manifest.config.shorts_script.min_words = 60
     manifest.config.shorts_script.max_words = 140
     manifest.config.shorts_script.minimum_retention_beats = 3
@@ -319,6 +322,7 @@ def _retention_project(tmp_path):
     )
     manifest = layout.load_manifest()
     manifest.config.shorts_script.narrative_standard = "retention_story_v2"
+    manifest.config.shorts_script.require_independent_biblical_review = False
     layout.save_manifest(manifest)
     write_json(
         layout.briefing,
@@ -636,6 +640,7 @@ def _creative_project(tmp_path):
                 "interpretive_stance": "expository",
                 "hook_policy": "required",
                 "hook_family": "nobody_talks_but",
+                "hook_contract": "user_six_v1",
                 "viewer_outcome": "O detalhe gramatical muda a leitura do medo.",
                 "practical_application": "",
             }
@@ -717,6 +722,136 @@ def _creative_package(queue: dict) -> ShortsScriptPackage:
     )
     script = legacy.script.model_copy(update={"sections": sections})
     return legacy.model_copy(update={"script": script, "strategy": creative_strategy})
+
+
+def _micro_creative_project(tmp_path):
+    layout = _creative_project(tmp_path)
+    manifest = layout.load_manifest()
+    manifest.target_duration_seconds = 15
+    configure_short_duration_profile(manifest.config, 15)
+    layout.save_manifest(manifest)
+    briefing = read_model(layout.briefing, Briefing)
+    write_json(layout.briefing, briefing.model_copy(update={"target_duration_seconds": 15}))
+    return layout
+
+
+def _micro_creative_package(queue: dict) -> ShortsScriptPackage:
+    package = _creative_package(queue)
+    by_id = {section.section_id: section for section in package.script.sections}
+    hook = "Ninguém fala sobre medo, mas..."
+    promise = "Veja quando confiar."
+    resolution = "Confiar começa com medo."
+    cta = "Inscreva-se para continuar."
+    sections = [
+        by_id["section-001"].model_copy(update={"narration": f"{hook} {promise}"}),
+        by_id["section-003"],
+        by_id["section-005"].model_copy(update={"narration": "O medo vem primeiro."}),
+        by_id["section-006"].model_copy(update={"role": "reflection", "narration": resolution}),
+        by_id["section-007"].model_copy(update={"narration": cta}),
+    ]
+    engagement = ShortsEngagementPlan(
+        mode="subscribe",
+        spoken_text=cta,
+        objective="Convidar a acompanhar outros Shorts bíblicos objetivos.",
+        fit_reason="A próxima mensagem mantém o mesmo formato bíblico direto.",
+        target_start_seconds=12,
+        target_end_seconds=15,
+    )
+    direction = ShortsCreativeDirection(
+        creative_mode="biblical_curiosity",
+        interpretive_stance="expository",
+        hook_family="nobody_talks_but",
+        opening_section_id="section-001",
+        scripture_section_ids=["section-003"],
+        development_section_ids=["section-005"],
+        reengagement_section_ids=["section-005"],
+        resolution_section_id="section-006",
+        cta_section_id="section-007",
+        content_promise=promise,
+        resolution=resolution,
+        viewer_takeaway=resolution,
+        engagement=engagement,
+        source_ids=["bpm-salmos-56-3"],
+    )
+    beats = [
+        ShortsRetentionBeat(
+            section_id="section-001",
+            purpose="hook",
+            viewer_question="Quando a confiança começa?",
+            viewer_value="Abrir uma curiosidade específica.",
+            target_start_seconds=0,
+            target_end_seconds=2,
+            opens_loop=promise,
+            new_information="A pergunta nasce antes da citação.",
+            visual_change="Davi interrompe o movimento.",
+        ),
+        ShortsRetentionBeat(
+            section_id="section-003",
+            purpose="evidence",
+            viewer_question="O que a Bíblia afirma?",
+            viewer_value="Ouvir o versículo literal.",
+            target_start_seconds=2,
+            target_end_seconds=6,
+            new_information="O salmo situa a confiança durante o medo.",
+            visual_change="A evidência bíblica ocupa a cena.",
+        ),
+        ShortsRetentionBeat(
+            section_id="section-005",
+            purpose="reveal",
+            viewer_question="Qual é a ordem dos fatos?",
+            viewer_value="Perceber que o medo aparece primeiro.",
+            target_start_seconds=6,
+            target_end_seconds=9,
+            pattern_interrupt="A ordem esperada é invertida.",
+            new_information="O medo antecede a decisão de confiar.",
+            visual_change="Davi encara a sombra sem recuar.",
+        ),
+        ShortsRetentionBeat(
+            section_id="section-006",
+            purpose="resolution",
+            viewer_question="Onde está a resposta?",
+            viewer_value=resolution,
+            target_start_seconds=9,
+            target_end_seconds=12,
+            resolves_loop=promise,
+            new_information="A confiança começa na presença do medo.",
+            visual_change="A mão de Davi se abre.",
+        ),
+        ShortsRetentionBeat(
+            section_id="section-007",
+            purpose="cta",
+            viewer_question="Como acompanhar a série?",
+            viewer_value="Receber outros Shorts bíblicos.",
+            target_start_seconds=12,
+            target_end_seconds=15,
+            new_information="O convite encerra com uma única ação.",
+            visual_change="Davi segue pelo caminho.",
+        ),
+    ]
+    verse_opening = package.strategy.verse_opening
+    assert verse_opening is not None
+    strategy = package.strategy.model_copy(
+        update={
+            "content_promise": promise,
+            "hook": hook,
+            "hook_family": "nobody_talks_but",
+            "verse_opening": verse_opening.model_copy(
+                update={"target_start_seconds": 3, "target_end_seconds": 9}
+            ),
+            "creative_direction": direction,
+            "retention_story": None,
+            "narrative_spine": None,
+            "open_loop": promise,
+            "payoff": resolution,
+            "practical_value": resolution,
+            "comment_prompt": None,
+            "cta": cta,
+            "retention_beats": beats,
+            "section_ids": [section.section_id for section in sections],
+        }
+    )
+    script = package.script.model_copy(update={"sections": sections})
+    return package.model_copy(update={"script": script, "strategy": strategy})
 
 
 def test_shorts_specialist_queue_imports_script_review_and_retention_strategy(tmp_path) -> None:
@@ -888,6 +1023,93 @@ def test_creative_retention_v3_accepts_curiosity_without_practical_application(t
     assert contract.hook_used is True
     assert contract.pacing.profile_id == "short_creative_v3"
     assert all(section.role != "application" for section in imported.script.sections)
+
+
+def test_fifteen_second_profile_imports_and_builds_five_to_six_scenes(tmp_path) -> None:
+    layout = _micro_creative_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+
+    assert queue["retention_contract"]["duration_profile"] == "adaptive_compact_v1"
+    assert queue["retention_contract"]["timeline_seconds"] == {
+        "hook": [0, 2.0],
+        "orientation_or_stakes": [2.0, 3.0],
+        "scripture": [3.0, 9.0],
+        "development_and_reengagement": [9.0, 11.0],
+        "resolution_or_synthesis": [10.0, 12.0],
+        "single_action_cta": [12.0, 15],
+    }
+    assert queue["retention_contract"]["target_scene_count"] == [5, 6]
+    assert any("5 a 6 cenas" in instruction for instruction in queue["instructions"])
+
+    package = _micro_creative_package(queue)
+    write_json(layout.shorts_script_package_staging, package)
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is True, check.errors
+    imported = import_shorts_script_package(layout)
+    scenes = build_scenes(layout, skip_approvals=True)
+    contract = read_model(layout.creative_contract, CreativeContract)
+
+    assert 30 <= imported.script.word_count <= 38
+    assert imported.script.estimated_duration_seconds <= 15
+    assert contract.pacing.profile_id == "short_compact_v1"
+    assert 5 <= len(scenes.scenes) <= 6
+
+
+def test_new_short_import_waits_for_one_independent_biblical_review(tmp_path) -> None:
+    layout = _creative_project(tmp_path)
+    manifest = layout.load_manifest()
+    manifest.config.shorts_script.require_independent_biblical_review = True
+    layout.save_manifest(manifest)
+    queue = prepare_shorts_script_queue(layout)
+    package = _creative_package(queue)
+    write_json(layout.shorts_script_package_staging, package)
+
+    review_queue = prepare_shorts_biblical_review_queue(layout)
+    missing = check_reviewed_shorts_script_staging(layout)
+
+    assert missing.valid is False
+    assert "Revisão bíblica independente ausente" in missing.errors[0]
+    assert review_queue["role"] == "biblical_reviewer"
+    assert review_queue["orchestration"]["context_policy"] == "compact_only"
+    assert queue["preflight"]["independent_biblical_review_required"] is True
+
+    independent = package.biblical_review.model_copy(
+        update={"reviewer": "biblical_reviewer", "summary": "Revisão independente sem bloqueios."}
+    )
+    write_json(layout.shorts_biblical_review_staging_file, independent)
+
+    reviewed = check_reviewed_shorts_script_staging(layout)
+    imported = import_shorts_script_package(layout)
+
+    assert reviewed.valid is True
+    assert imported.biblical_review.reviewer == "biblical_reviewer"
+    assert read_model(layout.biblical_review, BiblicalReview).reviewer == "biblical_reviewer"
+
+
+def test_new_short_preflight_rejects_opening_outside_the_six_hook_contract(tmp_path) -> None:
+    layout = _creative_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+    package = _creative_package(queue)
+    invalid_hook = "As moedas voltaram ao templo, mas a decisão veio antes."
+    sections = [section.model_copy(deep=True) for section in package.script.sections]
+    sections[0] = sections[0].model_copy(
+        update={
+            "narration": f"{invalid_hook} {package.strategy.content_promise}",
+        }
+    )
+    invalid = package.model_copy(
+        update={
+            "script": package.script.model_copy(update={"sections": sections}),
+            "strategy": package.strategy.model_copy(update={"hook": invalid_hook}),
+        }
+    )
+    write_json(layout.shorts_script_package_staging, invalid)
+
+    result = check_shorts_script_package_staging(layout)
+
+    assert result.valid is False
+    assert "O hook não corresponde à família declarada." in result.errors
 
 
 def test_shorts_staging_preflight_aggregates_errors_and_is_read_only(tmp_path) -> None:

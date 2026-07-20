@@ -21,6 +21,7 @@ from pipeline_videos.remote_jobs import (
     RemoteJobStore,
     RemoteVideoRequest,
     _automatic_recovery_delay_seconds,
+    _biblical_review_phase_spec,
     _codex_agent_command,
     _editorial_sources_phase_spec,
     _execute_agent_checkpoint,
@@ -74,6 +75,13 @@ def test_remote_request_applies_safe_defaults_and_requires_explicit_external_aut
 
     with pytest.raises(ValueError, match="Shorts exigem hook inicial"):
         _request(hook_policy="none")
+
+    with pytest.raises(ValueError, match="seis famílias oficiais"):
+        _request(hook_family="consequence_first")
+
+    assert _request(duration_seconds=15).duration_seconds == 15
+    with pytest.raises(ValueError, match="Vídeos longos precisam"):
+        _request(video_format="long", duration_seconds=15)
 
 
 def test_scheduled_request_requires_timezone_and_publish_at() -> None:
@@ -145,6 +153,18 @@ def test_prepare_job_project_enables_local_specialists_without_human_approval(tm
     assert "mesma sessão" in prompt
     assert "AGENTS.md" in prompt
     assert "crie exatamente os subagentes" in prompt.casefold()
+
+
+def test_prepare_remote_micro_short_preserves_one_image_worker_profile(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(topic="Confiança", duration_seconds=15))
+
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+    manifest = layout.load_manifest()
+
+    assert manifest.target_duration_seconds == 15
+    assert manifest.config.shorts_script.duration_profile == "adaptive_compact_v1"
+    assert manifest.config.production.image_workers == 1
 
 
 def test_remote_job_can_select_second_jesus_voice(tmp_path) -> None:
@@ -480,6 +500,36 @@ def test_shorts_correction_is_a_checkpoint_in_the_same_sol_session(tmp_path) -> 
         str(layout.shorts_script_package_staging),
     ]
     assert "strategy.hook_type inválido" in spec.payload["task"]["validation_error"]
+
+
+def test_remote_biblical_review_uses_one_isolated_high_reasoning_reviewer(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(topic="Judas"))
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+    write_json(layout.shorts_biblical_review_context, {"project_id": job.job_id})
+    write_json(
+        layout.shorts_biblical_review_queue,
+        {
+            "job_id": "biblical-review-test",
+            "inputs": {"compact_context": "reviews/shorts-review-context.json"},
+            "outputs": {"review": "reviews/staging/biblical-reviewer/review.json"},
+        },
+    )
+
+    spec = _biblical_review_phase_spec(layout)
+
+    assert spec.phase == "biblical_review"
+    assert spec.model == "gpt-5.6-sol"
+    assert spec.reasoning_effort == "medium"
+    assert spec.payload["delegation"] == {
+        "required": True,
+        "role": "biblical_reviewer",
+        "count": 1,
+        "fork_turns": "none",
+        "reasoning_effort": "high",
+        "model": "gpt-5.6-sol",
+    }
+    assert spec.expected_outputs == (layout.shorts_biblical_review_staging_file,)
 
 
 def test_shorts_correction_allows_two_checkpoints_in_the_persistent_session(tmp_path) -> None:

@@ -28,8 +28,10 @@ from pipeline_videos.git_registry import (
     update_shared_registry,
 )
 from pipeline_videos.models import (
+    USER_SIX_HOOK_FAMILIES,
     Briefing,
     CreativeMode,
+    HookContract,
     HookFamily,
     ProductionMode,
     SourceEntry,
@@ -39,7 +41,11 @@ from pipeline_videos.models import (
     VerseUsageIndex,
     VerseUsageRecord,
 )
-from pipeline_videos.project import create_project, project_directory_name
+from pipeline_videos.project import (
+    create_project,
+    project_directory_name,
+    short_literal_verse_word_limit,
+)
 from pipeline_videos.state import complete_stage
 from pipeline_videos.storage import (
     DEFAULT_PROJECTS_DIR,
@@ -673,6 +679,7 @@ def select_hook_family(
     *,
     video_format: Literal["landscape", "short"],
     hook_policy: str,
+    hook_contract: HookContract = "mode_compatible_v1",
 ) -> HookFamily:
     """Resolve an ethical hook family; long-form optional modes may deliberately use none."""
     if hook_policy == "none":
@@ -688,7 +695,13 @@ def select_hook_family(
             return "none"
         if not recent:
             return "none"
-    preferred = list(hook_families_for_mode(creative_mode, short=video_format == "short"))
+    preferred = list(
+        hook_families_for_mode(
+            creative_mode,
+            short=video_format == "short",
+            hook_contract=hook_contract,
+        )
+    )
     last_three = {record.hook_family for record in recent[:3] if record.hook_family}
     frequencies = Counter(
         record.hook_family for record in recent if record.hook_family in preferred
@@ -750,13 +763,19 @@ def eligible_main_candidate_ids(
     usage: VerseUsageIndex,
     *,
     video_format: Literal["landscape", "short"],
+    max_verse_words: int | None = None,
 ) -> set[str]:
     counts, reserved = _main_candidate_usage(catalog, usage, video_format=video_format)
-    minimum_usage = min(counts.values(), default=0)
+    candidate_ids = {
+        candidate.candidate_id
+        for candidate in catalog.candidates
+        if max_verse_words is None or len(tokenize_words(candidate.verse_text)) <= max_verse_words
+    }
+    minimum_usage = min((counts[candidate_id] for candidate_id in candidate_ids), default=0)
     return {
         candidate_id
         for candidate_id, count in counts.items()
-        if count == minimum_usage and candidate_id not in reserved
+        if candidate_id in candidate_ids and count == minimum_usage and candidate_id not in reserved
     }
 
 
@@ -765,12 +784,22 @@ def select_unused_verse(
     usage: VerseUsageIndex,
     *,
     video_format: Literal["landscape", "short"] = "short",
+    max_verse_words: int | None = None,
 ) -> tuple[VerseCandidate, float]:
     counts, reserved = _main_candidate_usage(catalog, usage, video_format=video_format)
-    minimum_usage = min(counts.values(), default=0)
-    available = [
+    candidate_pool = [
         candidate
         for candidate in catalog.candidates
+        if max_verse_words is None or len(tokenize_words(candidate.verse_text)) <= max_verse_words
+    ]
+    if not candidate_pool:
+        raise RuntimeError(
+            "O catálogo não possui versículo curto o bastante para a duração solicitada."
+        )
+    minimum_usage = min(counts[candidate.candidate_id] for candidate in candidate_pool)
+    available = [
+        candidate
+        for candidate in candidate_pool
         if counts[candidate.candidate_id] == minimum_usage
         and candidate.candidate_id not in reserved
     ]
@@ -856,7 +885,18 @@ def create_auto_video(
     project_date: date | None = None,
     catalog_path: Path = DEFAULT_VERSE_CATALOG,
     production_mode: ProductionMode = "final_candidate_one_shot",
+    creative_mode_override: CreativeMode | None = None,
+    hook_family_override: HookFamily | None = None,
 ) -> tuple[ProjectLayout, VerseCandidate, float]:
+    if creative_mode_override == "auto":
+        creative_mode_override = None
+    if hook_family_override == "auto":
+        hook_family_override = None
+    if video_format == "short" and hook_family_override not in {
+        None,
+        *USER_SIX_HOOK_FAMILIES,
+    }:
+        raise ValueError("Novos Shorts aceitam somente uma das seis famílias oficiais de hook.")
     root = (projects_dir or DEFAULT_PROJECTS_DIR).expanduser().resolve()
     catalog = load_verse_catalog(catalog_path)
     with _selection_lock(root):
@@ -880,11 +920,16 @@ def create_auto_video(
                 catalog,
                 usage,
                 video_format=video_format,
+                max_verse_words=(
+                    short_literal_verse_word_limit(target_duration_seconds)
+                    if video_format == "short"
+                    else None
+                ),
             )
             retention_archetype = (
                 select_retention_archetype(candidate, usage) if video_format == "short" else None
             )
-            creative_mode = select_creative_mode(
+            creative_mode = creative_mode_override or select_creative_mode(
                 candidate,
                 usage,
                 video_format=video_format,
@@ -892,11 +937,12 @@ def create_auto_video(
             hook_policy = (
                 "required" if video_format == "short" else default_long_hook_policy(creative_mode)
             )
-            hook_family = select_hook_family(
+            hook_family = hook_family_override or select_hook_family(
                 creative_mode,
                 usage,
                 video_format=video_format,
                 hook_policy=hook_policy,
+                hook_contract=("user_six_v1" if video_format == "short" else "mode_compatible_v1"),
             )
             predicted_id = project_directory_name(candidate.slug, project_date=project_date)
             reservation = _reservation_record(
@@ -1027,6 +1073,7 @@ def create_auto_video(
             interpretive_stance=default_interpretive_stance(creative_mode),
             hook_policy=hook_policy,
             hook_family=hook_family,
+            hook_contract=("user_six_v1" if video_format == "short" else "mode_compatible_v1"),
             viewer_outcome=viewer_outcome,
             creative_rationale=(f"{creative_spec.label}: {creative_spec.purpose}"),
         )
@@ -1098,6 +1145,8 @@ def create_auto_short(
     project_date: date | None = None,
     catalog_path: Path = DEFAULT_VERSE_CATALOG,
     production_mode: ProductionMode = "final_candidate_one_shot",
+    creative_mode_override: CreativeMode | None = None,
+    hook_family_override: HookFamily | None = None,
 ) -> tuple[ProjectLayout, VerseCandidate, float]:
     return create_auto_video(
         projects_dir=projects_dir,
@@ -1106,4 +1155,6 @@ def create_auto_short(
         project_date=project_date,
         catalog_path=catalog_path,
         production_mode=production_mode,
+        creative_mode_override=creative_mode_override,
+        hook_family_override=hook_family_override,
     )

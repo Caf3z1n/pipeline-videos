@@ -468,10 +468,16 @@ def build_scenes(
             in {"retention_story_v2", "creative_retention_v3"}
             and target_scene_seconds is None
             and layout.shorts_script_strategy.is_file()
-            and not 8 <= len(scenes) <= 10
+            and not (
+                project.config.shorts_script.target_scene_min
+                <= len(scenes)
+                <= project.config.shorts_script.target_scene_max
+            )
         ):
             raise ValueError(
-                "O padrão criativo de Shorts precisa produzir de 8 a 10 cenas; "
+                "O padrão criativo de Shorts precisa produzir de "
+                f"{project.config.shorts_script.target_scene_min} a "
+                f"{project.config.shorts_script.target_scene_max} cenas; "
                 f"o roteiro atual produziu {len(scenes)}."
             )
         manifest = SceneManifest(

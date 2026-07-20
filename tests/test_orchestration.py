@@ -7,14 +7,14 @@ import pytest
 from typer.testing import CliRunner
 
 from pipeline_videos import cli
-from pipeline_videos.models import StageStatus
+from pipeline_videos.models import Briefing, StageStatus, elevenlabs_voice_id_for_variant
 from pipeline_videos.orchestration import (
     build_one_shot_plan,
     format_plan_lines,
     recommend_next_image_assignment,
 )
 from pipeline_videos.project import create_project
-from pipeline_videos.storage import write_json
+from pipeline_videos.storage import read_model, write_json
 
 
 def _short_layout(tmp_path):
@@ -116,6 +116,8 @@ def test_plan_is_read_only_serializable_and_exposes_dependency_waves(tmp_path) -
     assert first["waves"][1]["execution"] == "parallel_lanes"
     assert first["waves"][2]["execution"] == "sequential_single_writer"
     assert _task(first, "captions")["depends_on"] == ["audio"]
+    assert _task(first, "independent_biblical_review")["owner"] == "biblical_reviewer"
+    assert _task(first, "shorts_script_import")["depends_on"] == ["independent_biblical_review"]
     assert _task(first, "growth_import")["depends_on"] == [
         "youtube_growth_specialist",
         "images_import_batch",
@@ -124,6 +126,32 @@ def test_plan_is_read_only_serializable_and_exposes_dependency_waves(tmp_path) -
     assert _task(first, "validation")["depends_on"] == ["render"]
     assert first["dynamic_image_assignment"]["max_parallel_workers"] == 2
     assert all(line.encode("cp1252") for line in format_plan_lines(first))
+
+
+def test_plan_pauses_for_independent_review_before_the_single_script_import(tmp_path) -> None:
+    layout = _short_layout(tmp_path)
+    package = layout.shorts_script_package_staging
+    package.parent.mkdir(parents=True, exist_ok=True)
+    package.write_text("{}", encoding="utf-8")
+    write_json(
+        layout.shorts_script_queue,
+        {"outputs": {"package": "script/staging/shorts-script-specialist/package.json"}},
+    )
+    write_json(
+        layout.shorts_biblical_review_queue,
+        {"outputs": {"review": "reviews/staging/biblical-reviewer/review.json"}},
+    )
+
+    waiting = build_one_shot_plan(layout)
+
+    assert waiting["current_pause"] == "independent_biblical_review"
+    assert _task(waiting, "shorts_script_import")["status"] == "blocked"
+
+    layout.shorts_biblical_review_staging_file.write_text("{}", encoding="utf-8")
+    ready = build_one_shot_plan(layout)
+
+    assert ready["current_pause"] == "shorts_script_import"
+    assert _task(ready, "shorts_script_import")["status"] == "ready"
 
 
 def test_dynamic_pool_orders_jobs_and_recommends_next_free_worker(tmp_path) -> None:
@@ -285,6 +313,72 @@ def test_manual_audio_short_uses_current_production_mode(tmp_path) -> None:
     )
     assert script_queue["orchestration"]["mode"] == "subagent"
     assert script_queue["orchestration"]["reasoning_effort"] == "high"
+
+
+def test_manual_short_bootstrap_applies_mode_voice_hook_and_music_in_one_command(tmp_path) -> None:
+    runner = CliRunner()
+    music = tmp_path / "Leaning.mp3"
+    music.write_bytes(b"leaning")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "new",
+            "judas-retrato",
+            "--title",
+            "Judas em retrato",
+            "--duration",
+            "50",
+            "--format",
+            "short",
+            "--creative-mode",
+            "character_portrait",
+            "--voice-variant",
+            "jesus_2",
+            "--music-file",
+            str(music),
+            "--projects-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    project = next((tmp_path / "shorts").iterdir())
+    briefing = read_model(project / "editorial/briefing.json", Briefing)
+    manifest = json.loads((project / "project.json").read_text(encoding="utf-8"))
+
+    assert briefing.creative_mode == "character_portrait"
+    assert briefing.hook_contract == "user_six_v1"
+    assert briefing.hook_family == "nobody_talks_but"
+    assert manifest["config"]["audio"]["voice_id"] == elevenlabs_voice_id_for_variant("jesus_2")
+    assert manifest["config"]["render"]["background_music_path"] == "audio/music/Leaning.mp3"
+    assert (project / "audio/music/Leaning.mp3").read_bytes() == b"leaning"
+
+
+def test_manual_short_cli_accepts_fifteen_second_duration(tmp_path) -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "new",
+            "micro-quinze",
+            "--title",
+            "Micro Short",
+            "--duration",
+            "15",
+            "--format",
+            "short",
+            "--creative-mode",
+            "character_portrait",
+            "--projects-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    project = next((tmp_path / "shorts").iterdir())
+    manifest = json.loads((project / "project.json").read_text(encoding="utf-8"))
+    assert manifest["target_duration_seconds"] == 15
+    assert manifest["config"]["shorts_script"]["duration_profile"] == "adaptive_compact_v1"
 
 
 def test_image_pool_uses_third_slot_when_growth_specialist_is_disabled(tmp_path) -> None:

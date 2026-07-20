@@ -350,6 +350,7 @@ def test_background_music_filter_keeps_voice_primary_and_fades_music() -> None:
     )
     config = RenderConfig(
         background_music_path="audio/music/test.mp3",
+        narration_gain_db=5.0,
         background_music_gain_db=-12.0,
         background_music_fade_in_seconds=2.0,
         background_music_fade_out_seconds=3.0,
@@ -357,10 +358,51 @@ def test_background_music_filter_keeps_voice_primary_and_fades_music() -> None:
 
     filter_graph = render._background_music_filter(audio, config)
 
+    assert "asetpts=PTS-STARTPTS,volume=5.00dB[voice]" in filter_graph
     assert "volume=-12.00dB" in filter_graph
     assert "afade=t=in:st=0:d=2.000000" in filter_graph
     assert "afade=t=out:st=7.000000:d=3.000000" in filter_graph
     assert "amix=inputs=2:duration=first" in filter_graph
+
+
+def test_loudness_mix_targets_voice_and_music_with_a_fixed_gap() -> None:
+    audio = AudioManifest(
+        generated_at=utc_now(),
+        provider="mock",
+        sample_rate=48_000,
+        narration_path="audio/narration.wav",
+        duration=10.0,
+        segments=[],
+        words=[],
+    )
+    config = RenderConfig(
+        audio_mix_standard="voice_music_loudness_v1",
+        narration_target_lufs=-18.0,
+        background_music_gap_lu=16.0,
+        narration_true_peak_dbfs=-2.0,
+        background_music_true_peak_dbfs=-9.0,
+        background_music_gain_db=0.0,
+    )
+
+    filter_graph = render._background_music_filter(audio, config)
+
+    assert "loudnorm=I=-18.00:LRA=7.00:TP=-2.00" in filter_graph
+    assert "loudnorm=I=-34.00:LRA=7.00:TP=-9.00" in filter_graph
+    assert "volume=" not in filter_graph
+
+
+def test_loudness_standard_also_normalizes_narration_without_music() -> None:
+    config = RenderConfig(
+        audio_mix_standard="voice_music_loudness_v1",
+        narration_target_lufs=-18.0,
+        narration_true_peak_dbfs=-2.0,
+    )
+
+    filter_graph = render._narration_filter(config)
+
+    assert filter_graph.startswith("[1:a]")
+    assert "loudnorm=I=-18.00:LRA=7.00:TP=-2.00" in filter_graph
+    assert filter_graph.endswith("[voice_audio]")
 
 
 def test_short_cover_filter_overlays_after_captions_and_fades_out() -> None:

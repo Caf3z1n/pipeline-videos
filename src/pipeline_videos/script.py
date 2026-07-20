@@ -259,14 +259,24 @@ def build_creative_contract(
         else briefing.audience.strip() or "pessoas interessadas nesta mensagem bíblica"
     )
     if is_creative_short:
-        pacing = CreativePacingProfile(
-            profile_id="short_creative_v3",
-            default_scene_seconds=5.5,
-            opening_scene_seconds=2.0,
-            reengagement_scene_seconds=5.0,
-            contemplative_scene_seconds=6.0,
-            payoff_scene_seconds=5.5,
-        )
+        if project.config.shorts_script.duration_profile == "adaptive_compact_v1":
+            pacing = CreativePacingProfile(
+                profile_id="short_compact_v1",
+                default_scene_seconds=4.0,
+                opening_scene_seconds=2.0,
+                reengagement_scene_seconds=3.0,
+                contemplative_scene_seconds=4.0,
+                payoff_scene_seconds=3.0,
+            )
+        else:
+            pacing = CreativePacingProfile(
+                profile_id="short_creative_v3",
+                default_scene_seconds=5.5,
+                opening_scene_seconds=2.0,
+                reengagement_scene_seconds=5.0,
+                contemplative_scene_seconds=6.0,
+                payoff_scene_seconds=5.5,
+            )
     elif is_short and project.config.shorts_script.narrative_standard == "retention_story_v2":
         pacing = CreativePacingProfile(
             profile_id="short_retention_v2",

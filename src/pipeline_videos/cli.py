@@ -19,7 +19,10 @@ from rich.table import Table
 from pipeline_videos.models import (
     DEFAULT_ELEVENLABS_MODEL_ID,
     DEFAULT_ELEVENLABS_VOICE_ID,
+    MIN_SHORT_DURATION_SECONDS,
+    USER_SIX_HOOK_FAMILIES,
     ApprovalStatus,
+    Briefing,
     ImageManifest,
     Palette,
     StageStatus,
@@ -48,6 +51,7 @@ from pipeline_videos.state import invalidate, set_approval, stage_summary
 from pipeline_videos.storage import (
     DEFAULT_PROJECTS_DIR,
     ProjectLayout,
+    read_json,
     read_model,
     resolve_project,
     write_json,
@@ -73,6 +77,7 @@ youtube_app = typer.Typer(help="OAuth, upload, status e publicação segura no Y
 remote_app = typer.Typer(help="Fila remota de produção, revisão privada e agendamento.")
 analytics_app = typer.Typer(help="Importa métricas observadas para aprendizado editorial.")
 catalog_app = typer.Typer(help="Capacidade e ciclos do catálogo bíblico verificado.")
+audit_app = typer.Typer(help="Auditoria local de tokens, contextos e orçamento de produção.")
 app.add_typer(images_app, name="images")
 app.add_typer(script_app, name="script")
 app.add_typer(audio_app, name="audio")
@@ -83,6 +88,38 @@ app.add_typer(youtube_app, name="youtube")
 app.add_typer(remote_app, name="remote")
 app.add_typer(analytics_app, name="analytics")
 app.add_typer(catalog_app, name="catalog")
+app.add_typer(audit_app, name="audit")
+
+
+@audit_app.command("tokens")
+def audit_tokens(
+    project: str,
+    sessions_root: Annotated[Path | None, typer.Option("--sessions-root")] = None,
+    session_logs: Annotated[list[Path] | None, typer.Option("--session-log")] = None,
+) -> None:
+    """Descobre rollouts locais e persiste tokens totais e por etapa."""
+
+    from pipeline_videos.token_audit import write_local_token_audit
+
+    layout = _project(project)
+    payload = write_local_token_audit(
+        layout,
+        sessions_root=sessions_root,
+        session_logs=session_logs,
+    )
+    console.print_json(
+        json.dumps(
+            {
+                "metrics": str(layout.root / "audit" / "production-metrics.json"),
+                "report": str(layout.root / "audit" / "report.md"),
+                "sessions": payload["codex"]["sessions"],
+                "usage": payload["codex"]["usage"],
+                "by_stage": payload["codex"]["by_stage"],
+                "budget": payload["token_budget"],
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 @catalog_app.command("status")
@@ -251,7 +288,9 @@ def remote_schedule_create(
     ],
     publish_days_after: Annotated[int, typer.Option("--publish-days-after", min=0, max=30)] = 1,
     timezone: Annotated[str, typer.Option("--timezone")] = "America/Sao_Paulo",
-    duration_seconds: Annotated[int, typer.Option("--duration", min=30, max=180)] = 50,
+    duration_seconds: Annotated[
+        int, typer.Option("--duration", min=MIN_SHORT_DURATION_SECONDS, max=180)
+    ] = 50,
     enabled: Annotated[bool, typer.Option("--enabled/--disabled")] = True,
     authorize_external: Annotated[bool, typer.Option("--authorize-external")] = False,
     authorize_public_schedule: Annotated[bool, typer.Option("--authorize-public-schedule")] = False,
@@ -461,6 +500,80 @@ def doctor() -> None:
     console.print(table)
 
 
+def _validate_short_bootstrap_options(
+    *,
+    creative_mode: str,
+    hook_family: str,
+    voice_variant: str,
+    music_file: Path | None,
+) -> tuple[str | None, str | None, str]:
+    from pipeline_videos.creative_direction import CREATIVE_MODE_SPECS
+    from pipeline_videos.music import SUPPORTED_MUSIC_EXTENSIONS
+
+    mode = None if creative_mode == "auto" else creative_mode
+    if mode is not None and mode not in CREATIVE_MODE_SPECS:
+        raise typer.BadParameter(f"Modo criativo desconhecido: {creative_mode}")
+    family = None if hook_family == "auto" else hook_family
+    if family is not None and family not in USER_SIX_HOOK_FAMILIES:
+        choices = ", ".join(USER_SIX_HOOK_FAMILIES)
+        raise typer.BadParameter(f"Use uma das seis famílias oficiais: {choices}")
+    if family is not None and mode is None:
+        raise typer.BadParameter("--hook-family exige também --creative-mode.")
+    try:
+        variant = normalize_elevenlabs_voice_variant(voice_variant)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if music_file is not None:
+        resolved = music_file.expanduser().resolve()
+        if not resolved.is_file():
+            raise typer.BadParameter(f"Arquivo de música não encontrado: {resolved}")
+        if resolved.suffix.casefold() not in SUPPORTED_MUSIC_EXTENSIONS:
+            raise typer.BadParameter(f"Formato de música não suportado: {resolved.suffix}")
+    return mode, family, variant
+
+
+def _apply_short_bootstrap_settings(
+    layout: ProjectLayout,
+    *,
+    creative_mode: str | None,
+    hook_family: str | None,
+    voice_variant: str,
+    music_file: Path | None,
+) -> None:
+    from pipeline_videos.creative_direction import (
+        CREATIVE_MODE_SPECS,
+        default_interpretive_stance,
+        hook_families_for_mode,
+        narration_tone_for_mode,
+    )
+    from pipeline_videos.music import import_music
+
+    if creative_mode is not None:
+        briefing = read_model(layout.briefing, Briefing)
+        selected_family = (
+            hook_family
+            or hook_families_for_mode(
+                creative_mode,
+                short=True,
+                hook_contract="user_six_v1",
+            )[0]
+        )
+        spec = CREATIVE_MODE_SPECS[creative_mode]
+        briefing.creative_mode = creative_mode
+        briefing.interpretive_stance = default_interpretive_stance(creative_mode)
+        briefing.narration_tone = narration_tone_for_mode(creative_mode)
+        briefing.hook_policy = "required"
+        briefing.hook_family = selected_family
+        briefing.hook_contract = "user_six_v1"
+        briefing.creative_rationale = f"{spec.label}: {spec.purpose}"
+        write_json(layout.briefing, briefing)
+    manifest = layout.load_manifest()
+    manifest.config.audio.voice_id = elevenlabs_voice_id_for_variant(voice_variant)
+    layout.save_manifest(manifest)
+    if music_file is not None:
+        import_music(layout, music_file)
+
+
 @app.command("new")
 def new_project(
     project_id: Annotated[str, typer.Argument(help="Identificador curto do vídeo.")],
@@ -471,10 +584,33 @@ def new_project(
     video_format: Annotated[
         str, typer.Option("--format", help="Formato do vídeo: landscape ou short.")
     ] = "landscape",
+    creative_mode: Annotated[str, typer.Option("--creative-mode")] = "auto",
+    hook_family: Annotated[str, typer.Option("--hook-family")] = "auto",
+    voice_variant: Annotated[str, typer.Option("--voice-variant")] = "jesus_1",
+    music_file: Annotated[Path | None, typer.Option("--music-file")] = None,
     projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
 ) -> None:
     if video_format not in {"landscape", "short"}:
         raise typer.BadParameter("Use landscape ou short em --format.")
+    mode: str | None = None
+    family: str | None = None
+    variant = voice_variant
+    if video_format == "short":
+        mode, family, variant = _validate_short_bootstrap_options(
+            creative_mode=creative_mode,
+            hook_family=hook_family,
+            voice_variant=voice_variant,
+            music_file=music_file,
+        )
+    elif (
+        creative_mode != "auto"
+        or hook_family != "auto"
+        or voice_variant != "jesus_1"
+        or music_file is not None
+    ):
+        raise typer.BadParameter(
+            "As opções criativas e --music-file deste bootstrap são de Shorts."
+        )
     layout = create_project(
         project_id,
         title,
@@ -484,6 +620,14 @@ def new_project(
         palette_id=palette,
         video_format=video_format,
     )
+    if video_format == "short":
+        _apply_short_bootstrap_settings(
+            layout,
+            creative_mode=mode,
+            hook_family=family,
+            voice_variant=variant,
+            music_file=music_file,
+        )
     sync_shared_usage(layout.root.parent.parent)
     console.print(f"[green]Projeto criado:[/green] {layout.root}")
     console.print(
@@ -494,15 +638,59 @@ def new_project(
 @app.command("new-short")
 def new_short(
     duration: Annotated[
-        int, typer.Option("--duration", help="Duração-alvo em segundos.", min=30, max=180)
+        int,
+        typer.Option(
+            "--duration",
+            help="Duração-alvo em segundos.",
+            min=MIN_SHORT_DURATION_SECONDS,
+            max=180,
+        ),
     ] = 50,
+    creative_mode: Annotated[str, typer.Option("--creative-mode")] = "auto",
+    hook_family: Annotated[str, typer.Option("--hook-family")] = "auto",
+    voice_variant: Annotated[str, typer.Option("--voice-variant")] = "jesus_1",
+    music_file: Annotated[Path | None, typer.Option("--music-file")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
     projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
 ) -> None:
     """Cria um Short com versículo inédito, briefing e fonte verificada."""
+    mode, family, variant = _validate_short_bootstrap_options(
+        creative_mode=creative_mode,
+        hook_family=hook_family,
+        voice_variant=voice_variant,
+        music_file=music_file,
+    )
     layout, candidate, score = create_auto_short(
         projects_dir=projects_dir,
         target_duration_seconds=duration,
+        creative_mode_override=mode,
+        hook_family_override=family,
     )
+    _apply_short_bootstrap_settings(
+        layout,
+        creative_mode=mode,
+        hook_family=family,
+        voice_variant=variant,
+        music_file=music_file,
+    )
+    if json_output:
+        console.print_json(
+            json.dumps(
+                {
+                    "project_id": layout.load_manifest().project_id,
+                    "project_path": str(layout.root),
+                    "passage": candidate.reference,
+                    "creative_mode": read_model(layout.briefing, Briefing).creative_mode,
+                    "hook_family": read_model(layout.briefing, Briefing).hook_family,
+                    "hook_contract": "user_six_v1",
+                    "voice_variant": variant,
+                    "music": str(music_file.resolve()) if music_file else None,
+                    "next_command": f'uv run pipeline-videos run "{layout.root}" --dry-run',
+                },
+                ensure_ascii=False,
+            )
+        )
+        return
     console.print(f"[green]Short criado:[/green] {layout.root}")
     console.print(f"[bold]Versículo reservado:[/bold] {candidate.reference}")
     console.print(candidate.verse_text, markup=False)
@@ -516,7 +704,13 @@ def new_short(
 @app.command("new-short-audio-manual")
 def new_short_audio_manual(
     duration: Annotated[
-        int, typer.Option("--duration", help="Duração-alvo em segundos.", min=30, max=180)
+        int,
+        typer.Option(
+            "--duration",
+            help="Duração-alvo em segundos.",
+            min=MIN_SHORT_DURATION_SECONDS,
+            max=180,
+        ),
     ] = 50,
     projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
 ) -> None:
@@ -543,9 +737,29 @@ def new_short_audio_manual(
 def status(
     project: str,
     projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     layout = _project(project, projects_dir)
     manifest = layout.load_manifest()
+    if json_output:
+        console.print_json(
+            json.dumps(
+                {
+                    "project_id": manifest.project_id,
+                    "path": str(layout.root),
+                    "format": manifest.video_format,
+                    "stages": stage_summary(layout),
+                    "next_actions": next_actions(layout),
+                    "autopilot_state": (
+                        read_json(layout.autopilot_state)
+                        if layout.autopilot_state.is_file()
+                        else None
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return
     console.print(Panel(f"[bold]{manifest.title}[/bold]\n{layout.root}", title=manifest.project_id))
     table = Table(title="Etapas")
     table.add_column("Etapa")
@@ -607,8 +821,10 @@ Quando houver filas externas,
 crie apenas os papéis declarados, sempre com `fork_turns=none`: cada image_worker recebe somente
 seu `images/jobs/image-worker-N.json`, e o youtube_growth_specialist recebe somente
 `youtube/growth-queue.json`. Para Short completo, prepare antes o shorts_script_specialist usando
-somente `script/shorts-queue.json`. Não releia manifestos grandes, não importe por cena e não altere
-estado fora do agente principal. Depois de iniciar os workers, execute autopilot com
+somente `script/shorts-queue.json`; quando solicitado, crie o biblical_reviewer usando somente
+`reviews/shorts-review-queue.json` antes do único import. Não releia manifestos grandes, não
+importe por cena e não altere estado fora do agente principal. Depois de iniciar os workers,
+execute autopilot com
 `--wait-external` para importar, renderizar e validar automaticamente. Não publique nem registre
 aprovação humana."""
     console.print(Panel(prompt, title="Cole esta mensagem em uma conversa com o Codex"))
@@ -664,6 +880,42 @@ def shorts_script_check_staging(project: str) -> None:
     from pipeline_videos.shorts_script import check_shorts_script_package_staging
 
     result = check_shorts_script_package_staging(_project(project))
+    console.print_json(json.dumps(result.as_dict(), ensure_ascii=False))
+    if not result.valid:
+        raise typer.Exit(code=1)
+
+
+@script_app.command("shorts-review-prepare")
+def shorts_biblical_review_prepare(
+    project: str,
+    force: Annotated[bool, typer.Option("--force")] = False,
+) -> None:
+    """Prepara a revisão bíblica independente ainda no staging."""
+
+    from pipeline_videos.shorts_script import prepare_shorts_biblical_review_queue
+
+    layout = _project(project)
+    result = prepare_shorts_biblical_review_queue(layout, force=force)
+    console.print_json(
+        json.dumps(
+            {
+                "job_id": result["job_id"],
+                "queue": str(layout.shorts_biblical_review_queue),
+                "context": result["inputs"]["compact_context"],
+                "output": result["outputs"]["review"],
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+@script_app.command("shorts-check-reviewed-staging")
+def shorts_script_check_reviewed_staging(project: str) -> None:
+    """Valida roteiro e revisão independente sem importar o projeto."""
+
+    from pipeline_videos.shorts_script import check_reviewed_shorts_script_staging
+
+    result = check_reviewed_shorts_script_staging(_project(project))
     console.print_json(json.dumps(result.as_dict(), ensure_ascii=False))
     if not result.valid:
         raise typer.Exit(code=1)
@@ -959,6 +1211,17 @@ def music_select(
         console.print(f"Cópia do projeto: {result.path}")
     else:
         console.print("[yellow]Música desativada neste projeto.[/yellow]")
+
+
+@music_app.command("import")
+def music_import(project: str, source: Path) -> None:
+    """Importa diretamente uma faixa específica para o projeto."""
+
+    from pipeline_videos.music import import_music
+
+    result = import_music(_project(project), source)
+    console.print(f"[green]Música importada:[/green] {result.source_name}")
+    console.print(f"Cópia do projeto: {result.path}")
 
 
 @captions_app.command("build")
@@ -1438,29 +1701,55 @@ def autopilot_command(
     timeout_seconds: Annotated[int, typer.Option("--timeout-seconds", min=30, max=14_400)] = 3_600,
     poll_seconds: Annotated[int, typer.Option("--poll-seconds", min=1, max=60)] = 5,
     force: Annotated[bool, typer.Option("--force")] = False,
+    upload_private: Annotated[bool, typer.Option("--upload-private")] = False,
+    confirm_upload: Annotated[str | None, typer.Option("--confirm-upload")] = None,
+    token: Annotated[Path | None, typer.Option("--token-file")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Executa etapas determinísticas e retoma automaticamente após os workers."""
     from pipeline_videos.autopilot import run_autopilot_once, wait_until_external_ready
 
     layout = _project(project)
+    manifest = layout.load_manifest()
+    if upload_private:
+        if not allow_external:
+            raise typer.BadParameter("--upload-private exige --allow-external.")
+        if confirm_upload != manifest.project_id:
+            raise typer.BadParameter(
+                "--confirm-upload precisa ser exatamente o ID do projeto para upload privado."
+            )
     result = run_autopilot_once(
         layout,
         allow_external=allow_external,
         force=force,
     )
     if result.status == "waiting_external":
-        console.print("[yellow]Autopilot aguardando saídas externas.[/yellow]")
-        for wait in result.waits:
-            console.print_json(json.dumps(wait, ensure_ascii=False))
+        if not json_output:
+            console.print("[yellow]Autopilot aguardando saídas externas.[/yellow]")
+            for wait in result.waits:
+                console.print_json(json.dumps(wait, ensure_ascii=False))
         if not wait_external:
-            console.print(
-                f"Estado compacto: {layout.autopilot_state}. "
-                "Inicie os workers declarados e execute autopilot novamente."
-            )
+            if json_output:
+                console.print_json(
+                    json.dumps(
+                        {
+                            "status": result.status,
+                            "waits": result.waits,
+                            "state": str(layout.autopilot_state),
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            else:
+                console.print(
+                    f"Estado compacto: {layout.autopilot_state}. "
+                    "Inicie os workers declarados e execute autopilot novamente."
+                )
             return
-        console.print(
-            f"Aguardando por até {timeout_seconds} segundos; o processo continuará sozinho."
-        )
+        if not json_output:
+            console.print(
+                f"Aguardando por até {timeout_seconds} segundos; o processo continuará sozinho."
+            )
         wait_until_external_ready(
             layout,
             timeout_seconds=timeout_seconds,
@@ -1473,10 +1762,47 @@ def autopilot_command(
         )
     if result.status != "completed":
         raise RuntimeError("O autopilot ainda possui dependências externas pendentes.")
-    console.print(f"[green]Autopilot concluído:[/green] {result.render_path}")
-    console.print(
-        f"Validação: {'OK' if result.validation_ok else 'com erros em validation/report.md'}."
-    )
+    publication_url: str | None = None
+    if upload_private:
+        if result.validation_ok is not True:
+            raise RuntimeError("Upload privado bloqueado porque a validação final não está OK.")
+        from pipeline_videos.publication import authenticated_client, upload_project
+
+        record = upload_project(
+            layout,
+            client=authenticated_client(source=token),
+            allow_external=True,
+            confirmation=manifest.project_id,
+            privacy_status="private",
+            automated_review=True,
+        )
+        publication_url = record.youtube_url
+    from pipeline_videos.token_audit import write_local_token_audit
+
+    token_metrics = write_local_token_audit(layout)
+    if json_output:
+        console.print_json(
+            json.dumps(
+                {
+                    "status": result.status,
+                    "render_path": str(result.render_path) if result.render_path else None,
+                    "validation_ok": result.validation_ok,
+                    "publication_url": publication_url,
+                    "privacy": "private" if publication_url else None,
+                    "token_usage": token_metrics["codex"]["usage"],
+                    "token_metrics": str(layout.root / "audit" / "production-metrics.json"),
+                },
+                ensure_ascii=False,
+            )
+        )
+    else:
+        console.print(f"[green]Autopilot concluído:[/green] {result.render_path}")
+        console.print(
+            f"Validação: {'OK' if result.validation_ok else 'com erros em validation/report.md'}."
+        )
+        if publication_url:
+            console.print(f"[green]Upload privado concluído:[/green] {publication_url}")
+        console.print(f"Auditoria de tokens: {layout.root / 'audit' / 'production-metrics.json'}")
 
 
 @app.command("demo")

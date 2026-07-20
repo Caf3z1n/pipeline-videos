@@ -12,7 +12,7 @@ O pipeline usa o contrato salvo no `project.json` e não faz migração implíci
 
 ## Estrutura e tempo
 
-O contrato de 45 a 55 segundos é flexível dentro destes marcos:
+O perfil padrão `standard_45_55_v1`, de 45 a 55 segundos, é flexível dentro destes marcos:
 
 - **0–2s — hook obrigatório:** fala específica, honesta e coerente com a promessa;
 - **2–8s — orientação ou risco:** deixe claro personagem, fato, pergunta ou objeto investigado;
@@ -26,6 +26,20 @@ O roteiro usa de 105 a 130 palavras por padrão e produz de 8 a 10 cenas no perf
 `short_creative_v3`. Cada `retention_beat` declara pergunta ou expectativa do espectador, valor,
 informação nova, mudança visual, função e tempo. Reformular a mesma tese não conta como
 progressão.
+
+Pedidos entre 15 e 44 segundos usam `adaptive_compact_v1`. O pipeline deriva e persiste os limites
+antes de preparar a fila; o roteirista e os validadores leem esses valores em vez de comprimir o
+contrato de 50 segundos depois da escrita. Para 15 segundos, o contrato é:
+
+- **0–2s — hook obrigatório;**
+- **2–3s — orientação;**
+- **3–9s — citação bíblica literal, com até 18 palavras;**
+- **9–12s — desenvolvimento, reengajamento e resolução;**
+- **12–15s — CTA de uma única ação;**
+- **30 a 38 palavras e cinco a seis cenas.**
+
+O perfil compacto mantém informação nova e resolução, mas exige somente uma seção de progressão.
+Ele não remove hook, fonte verificada, revisão bíblica, thumbnail, legenda ou validação final.
 
 ## Contrato `creative_direction`
 
@@ -50,7 +64,8 @@ Callback também é opcional.
 ## Hook obrigatório
 
 O `hook` é o prefixo literal da primeira seção, tem no máximo 12 palavras e termina até a meta
-de dois segundos. A fila seleciona uma família e o texto precisa respeitá-la. Priorize:
+de dois segundos. Shorts novos salvam `hook_contract=user_six_v1`: a fila seleciona exatamente
+uma das seis famílias abaixo e a primeira fala precisa corresponder literalmente à estrutura dela:
 
 1. `Se você quer [X], faça isso.`
 2. `O que acontece se você parar de [X]?`
@@ -59,14 +74,16 @@ de dois segundos. A fila seleciona uma família e o texto precisa respeitá-la. 
 5. `Quer aprender [X]? Comece...`
 6. `Nunca faça [X].`
 
-Abertura em cena, fato surpreendente, pergunta específica, contradição e consequência primeiro
-também são válidas. Não use uma dessas formas para inventar perda, risco, proibição ou promessa.
-Registre de uma a três técnicas éticas em `hook_techniques`.
+Abertura em cena, fato surpreendente, pergunta específica, contradição, consequência primeiro e
+outras famílias permanecem disponíveis apenas para contratos legados e vídeos longos. No contrato
+novo, uma frase apenas parecida ou classificada com outro nome não passa no preflight. Não use as
+seis formas para inventar perda, risco, proibição ou promessa. Registre de uma a três técnicas
+éticas em `hook_techniques`.
 
 ## Citação e precisão bíblica
 
-Todo Short cita literalmente pelo menos um versículo verificado, normalmente entre 8 e 20
-segundos. Use:
+Todo Short cita literalmente pelo menos um versículo verificado. A janela é de 8 a 20 segundos no
+perfil padrão e vem de `shorts_script.scripture_citation_*` no perfil compacto. Use:
 
 > Em Salmos, capítulo 56, versículo 3, lemos: “Quando eu tiver medo, colocarei a minha confiança em
 > ti.”
@@ -105,10 +122,10 @@ sem obrigar o enfoque a ser motivacional.
 O roteiro está pronto quando:
 
 - usa o modo e a postura resolvidos no briefing;
-- começa com hook válido e cumpre a promessa;
+- começa exatamente com uma das seis estruturas aceitas e cumpre a promessa;
 - possui desenvolvimento real e ao menos um reengajamento;
-- cita um versículo verificado entre 8 e 20 segundos;
+- cita um versículo verificado dentro da janela persistida pelo perfil de duração;
 - entrega uma resolução coerente com o modo, com ou sem aplicação;
 - pede uma única ação de CTA;
-- produz de 8 a 10 cenas e termina entre 45 e 55 segundos;
-- não possui finding bíblico `blocking` aberto.
+- produz a quantidade de cenas e termina dentro da duração persistidas pelo perfil;
+- não possui finding bíblico `blocking` aberto na revisão independente.

@@ -61,12 +61,13 @@ continua impedindo aprovação.
 
 ## Política de hook
 
-Shorts sempre usam um hook inicial específico, honesto, com no máximo 12 palavras e até dois
-segundos. Vídeos longos resolvem `hook_policy` como `required`, `optional` ou `none` conforme o modo
-e o tema. Quando não há hook, `opening_line` ainda precisa orientar a cena e entregar valor nos
-primeiros 40 segundos; saudação genérica continua proibida.
+Shorts novos usam `hook_contract=user_six_v1`: a primeira fala é específica, honesta, tem no máximo
+12 palavras, termina até dois segundos e corresponde exatamente a uma das seis estruturas aceitas.
+Vídeos longos resolvem `hook_policy` como `required`, `optional` ou `none` conforme o modo e o tema.
+Quando não há hook, `opening_line` ainda precisa orientar a cena e entregar valor nos primeiros 40
+segundos; saudação genérica continua proibida.
 
-As seis famílias prioritárias são:
+As seis famílias exclusivas dos Shorts novos são:
 
 1. `Se você quer [X], faça isso.`
 2. `O que acontece se você parar de [X]?`
@@ -75,10 +76,10 @@ As seis famílias prioritárias são:
 5. `Quer aprender [X]? Comece...`
 6. `Nunca faça [X].`
 
-Também existem aberturas em cena, fato surpreendente verificável, pergunta específica,
-contradição, consequência primeiro e citação primeiro. A família escolhida precisa corresponder
-à fala real. Advertência, perda e urgência só podem ser usadas quando o roteiro realmente as
-sustenta; o hook não pode fabricar risco ou promessa.
+Contratos legados e vídeos longos também podem usar abertura em cena, fato surpreendente
+verificável, pergunta específica, contradição, consequência primeiro e citação primeiro. A família
+escolhida precisa corresponder à fala real. Advertência, perda e urgência só podem ser usadas quando
+o roteiro realmente as sustenta; o hook não pode fabricar risco ou promessa.
 
 ## Retenção que permanece obrigatória
 
@@ -91,7 +92,8 @@ Independentemente do modo:
 - o CTA pede exatamente uma ação e vem depois da conclusão;
 - a direção visual representa um momento, ambiente e ação por imagem.
 
-Shorts mantêm ao menos uma citação literal verificada entre 8 e 20 segundos. Vídeos longos
+Shorts mantêm ao menos uma citação literal verificada. O perfil padrão usa 8 a 20 segundos; perfis
+compactos persistem uma janela proporcional — de 3 a 9 segundos em 15 segundos. Vídeos longos
 mantêm o alvo de 0,8 a 1,2 citação por minuto, primeira âncora até 75 segundos, intervalo máximo
 de 105 segundos e no máximo 120 segundos entre a última citação e o fim.
 

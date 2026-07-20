@@ -55,6 +55,13 @@ def _selection_hash(layout: ProjectLayout, path: Path | None) -> str:
             "enabled": project.config.music.enabled,
             "selection_mode": project.config.music.selection_mode,
             "music_hash": sha256_file(path) if path else None,
+            "mix_standard": render.audio_mix_standard,
+            "narration_target_lufs": render.narration_target_lufs,
+            "background_music_gap_lu": render.background_music_gap_lu,
+            "narration_true_peak_dbfs": render.narration_true_peak_dbfs,
+            "background_music_true_peak_dbfs": render.background_music_true_peak_dbfs,
+            "audio_loudness_range_lu": render.audio_loudness_range_lu,
+            "narration_gain_db": render.narration_gain_db,
             "gain_db": render.background_music_gain_db,
             "fade_in_seconds": render.background_music_fade_in_seconds,
             "fade_out_seconds": render.background_music_fade_out_seconds,
@@ -70,6 +77,8 @@ def _write_selection(
     source_name: str | None,
     library_track_count: int,
 ) -> MusicManifest:
+    render = layout.load_manifest().config.render
+    uses_loudness_standard = render.audio_mix_standard == "voice_music_loudness_v1"
     selected = MusicManifest(
         selected_at=utc_now(),
         selection_mode=selection_mode,
@@ -77,18 +86,59 @@ def _write_selection(
         source_hash=sha256_file(path) if path else None,
         path=relative_posix(path, layout.root) if path else None,
         library_track_count=library_track_count,
+        mix_standard=render.audio_mix_standard,
+        narration_target_lufs=(render.narration_target_lufs if uses_loudness_standard else None),
+        background_music_target_lufs=(
+            render.narration_target_lufs - render.background_music_gap_lu
+            if uses_loudness_standard
+            else None
+        ),
+        background_music_gap_lu=(
+            render.background_music_gap_lu if uses_loudness_standard else None
+        ),
     )
     write_json(layout.music_manifest, selected)
     return selected
 
 
-def _copy_track_to_project(layout: ProjectLayout, source: Path) -> Path:
-    destination = layout.music_assets / source.name
+def _copy_track_to_project(
+    layout: ProjectLayout,
+    source: Path,
+    *,
+    destination_name: str | None = None,
+) -> Path:
+    destination = layout.music_assets / (destination_name or source.name)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".tmp")
     shutil.copy2(source, temporary)
     os.replace(temporary, destination)
     return destination
+
+
+def import_music(layout: ProjectLayout, source: Path) -> MusicManifest:
+    """Copy one explicit local track and register it without a temporary library."""
+
+    source = source.expanduser().resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"Arquivo de música não encontrado: {source}")
+    if source.suffix.casefold() not in SUPPORTED_MUSIC_EXTENSIONS:
+        allowed = ", ".join(sorted(SUPPORTED_MUSIC_EXTENSIONS))
+        raise ValueError(f"Formato de música não suportado: {source.suffix}. Use: {allowed}.")
+    destination_name = source.name
+    existing = layout.music_assets / destination_name
+    source_hash = sha256_file(source)
+    if existing.is_file() and sha256_file(existing) != source_hash:
+        destination_name = f"{source.stem}-{source_hash[:8]}{source.suffix.casefold()}"
+    destination = _copy_track_to_project(
+        layout,
+        source,
+        destination_name=destination_name,
+    )
+    project = layout.load_manifest()
+    project.config.music.enabled = True
+    project.config.render.background_music_path = relative_posix(destination, layout.root)
+    layout.save_manifest(project)
+    return select_music(layout)
 
 
 def select_music(

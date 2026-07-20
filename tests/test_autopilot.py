@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
+from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
@@ -96,3 +98,57 @@ def test_autopilot_cli_reports_compact_external_pause(tmp_path, monkeypatch) -> 
     assert "Autopilot aguardando" in result.stdout
     assert "image-worker-1.json" in result.stdout
     assert "autopilot-state.json" in result.stdout
+
+
+def test_autopilot_can_finish_validation_and_private_upload_in_one_explicit_command(
+    tmp_path, monkeypatch
+) -> None:
+    layout = _waiting_layout(tmp_path)
+    monkeypatch.setattr(cli, "_project", lambda project, projects_dir=None: layout)
+    import pipeline_videos.autopilot as autopilot
+    import pipeline_videos.publication as publication
+    import pipeline_videos.token_audit as token_audit
+
+    monkeypatch.setattr(
+        autopilot,
+        "run_autopilot_once",
+        lambda *args, **kwargs: AutopilotResult(
+            "completed",
+            [],
+            render_path=Path("render/final.mp4"),
+            validation_ok=True,
+        ),
+    )
+    monkeypatch.setattr(publication, "authenticated_client", lambda source=None: object())
+    captured = {}
+
+    def fake_upload(*args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(youtube_url="https://youtu.be/private-test")
+
+    monkeypatch.setattr(publication, "upload_project", fake_upload)
+    monkeypatch.setattr(
+        token_audit,
+        "write_local_token_audit",
+        lambda layout: {
+            "codex": {"usage": {"fresh_plus_output_tokens": 100}},
+        },
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "autopilot",
+            "autopilot-test",
+            "--allow-external",
+            "--upload-private",
+            "--confirm-upload",
+            layout.load_manifest().project_id,
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["privacy_status"] == "private"
+    assert captured["automated_review"] is True
+    assert "https://youtu.be/private-test" in result.stdout

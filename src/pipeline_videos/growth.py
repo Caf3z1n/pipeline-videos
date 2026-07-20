@@ -45,18 +45,45 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-GROWTH_QUEUE_SCHEMA_VERSION = "1.13"
-GROWTH_ALGORITHM_VERSION = "1.13"
+GROWTH_QUEUE_SCHEMA_VERSION = "1.14"
+GROWTH_ALGORITHM_VERSION = "1.14"
 SHORT_TITLE_MAX_CHARACTERS = 70
 SHORT_DESCRIPTION_MAX_CHARACTERS = 600
-SHORT_DESCRIPTION_SEARCH_WINDOW = 240
+SHORT_DESCRIPTION_MIN_CHARACTERS = 260
+LONG_DESCRIPTION_MIN_CHARACTERS = 350
+DESCRIPTION_SEARCH_WINDOW = 240
+SEO_TAG_MIN_COUNT = 8
+SEO_TAG_MAX_COUNT = 15
+SEO_TAG_MAX_CHARACTERS = 350
 OFFICIAL_YOUTUBE_GUIDELINES = (
     "https://support.google.com/youtube/answer/12340300",
     "https://support.google.com/youtube/answer/12948449",
     "https://support.google.com/youtube/answer/16090438",
+    "https://support.google.com/youtube/answer/146402",
+    "https://support.google.com/youtube/answer/11914225",
+    "https://support.google.com/youtube/answer/16089387",
+    "https://support.google.com/youtube/answer/6390658",
+    "https://support.google.com/youtube/answer/2801973",
     "https://support.google.com/youtube/answer/16391400",
     "https://support.google.com/youtube/answer/72431",
     "https://support.google.com/youtube/answer/9229980",
+)
+
+SEO_REQUIRED_GUIDELINES = frozenset(
+    {
+        "https://support.google.com/youtube/answer/12340300",
+        "https://support.google.com/youtube/answer/12948449",
+        "https://support.google.com/youtube/answer/16090438",
+        "https://support.google.com/youtube/answer/146402",
+    }
+)
+
+_GENERIC_DESCRIPTION_CTA_PATTERNS = (
+    r"\bcompartilhe esta mensagem\b",
+    r"\bcompartilhe este v[ií]deo\b",
+    r"\binscreva-se no canal\b",
+    r"\bdeixe seu like\b",
+    r"\bcurta o v[ií]deo\b",
 )
 
 _PHOTOGRAPHIC_THUMBNAIL_STYLE_MARKERS = (
@@ -392,6 +419,28 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
             "thumbnail_standard": config.thumbnail_standard,
             "thumbnail_typography_standard": config.thumbnail_typography_standard,
             "title_thumbnail_pairing_standard": config.title_thumbnail_pairing_standard,
+            "seo_contract": {
+                "description_min_characters": (
+                    SHORT_DESCRIPTION_MIN_CHARACTERS
+                    if is_short
+                    else LONG_DESCRIPTION_MIN_CHARACTERS
+                ),
+                "description_max_characters": (
+                    SHORT_DESCRIPTION_MAX_CHARACTERS if is_short else 5000
+                ),
+                "description_search_window": DESCRIPTION_SEARCH_WINDOW,
+                "tag_count": [SEO_TAG_MIN_COUNT, SEO_TAG_MAX_COUNT],
+                "tag_total_max_characters": SEO_TAG_MAX_CHARACTERS,
+                "maximum_description_hashtags": 3,
+                "generic_description_cta_forbidden": True,
+                "tags_are_secondary_metadata": True,
+                "shorts_primary_ranking_signals": [
+                    "chose_to_view",
+                    "average_view_duration",
+                    "average_percentage_viewed",
+                    "viewer_satisfaction",
+                ],
+            },
             "design_contract": (
                 {
                     "text_word_count": [0, 0],
@@ -470,6 +519,54 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
             "Não altere project.json, fila, aprovações, ativos ou arquivos fora de staging.",
         ],
     }
+    if config.description_standard == "search_first_unique_v2":
+        minimum = SHORT_DESCRIPTION_MIN_CHARACTERS if is_short else LONG_DESCRIPTION_MIN_CHARACTERS
+        maximum = SHORT_DESCRIPTION_MAX_CHARACTERS if is_short else 5000
+        payload["instructions"].extend(
+            [
+                (
+                    f"Escreva uma descrição exclusiva entre {minimum} e {maximum} caracteres. "
+                    f"Nos primeiros {DESCRIPTION_SEARCH_WINDOW} caracteres, explique com clareza "
+                    "o conteúdo, inclua a palavra-chave principal e a passagem, sem saudação, "
+                    "promessa genérica ou suspense vazio."
+                ),
+                (
+                    "Estruture a descrição em pelo menos dois parágrafos: primeiro o valor "
+                    "concreto entregue; depois contexto bíblico e termos de busca naturais. "
+                    "Em vídeos longos, preserve também a timeline das citações."
+                ),
+                (
+                    "Não use CTA genérico na descrição, como 'Compartilhe esta mensagem', "
+                    "'inscreva-se no canal', 'deixe seu like' ou equivalentes. A descrição "
+                    "serve primeiro para clareza, diferenciação e busca; concentre a conversa "
+                    "em um pinned_comment específico ao tema."
+                ),
+                (
+                    f"Preencha metadata.topics com {SEO_TAG_MIN_COUNT} a {SEO_TAG_MAX_COUNT} "
+                    f"tags distintas e diretamente relevantes, em no máximo "
+                    f"{SEO_TAG_MAX_CHARACTERS} caracteres no total. Inclua a palavra-chave "
+                    "principal, a passagem, o livro bíblico, variações reais de busca e, quando "
+                    "fizer sentido, uma variação sem acento ou de grafia comum."
+                ),
+                (
+                    "Tags são metadado secundário: não invente dezenas de termos, não use # "
+                    "em metadata.topics e não cole uma lista de tags na descrição. Se usar "
+                    "hashtags na descrição, limite a três, todas diretamente relacionadas, e "
+                    "nunca use #viral, #fyp ou promessas sem base."
+                ),
+                (
+                    "Escolha primary_keyword como uma consulta realmente coerente com o foco "
+                    "do vídeo e coloque-a nos primeiros 55 caracteres do título. Registre em "
+                    "description_rationale, tag_strategy e discovery_hypothesis por que o pacote "
+                    "é relevante, sem alegar que metadados garantem alcance."
+                ),
+                (
+                    "Para Shorts, trate escolha de assistir, duração média, percentual assistido "
+                    "e satisfação como sinais principais; metadados ajudam sobretudo na busca e "
+                    "na correta compreensão do tema."
+                ),
+            ]
+        )
     if is_theme_based_long:
         payload["instructions"].extend(
             [
@@ -1010,6 +1107,95 @@ def _title_repeats_thumbnail(
     return overlap >= 0.8
 
 
+def _validate_search_first_seo(
+    layout: ProjectLayout,
+    package: YouTubeGrowthPackage,
+) -> None:
+    metadata = package.metadata
+    strategy = package.strategy
+    briefing = read_model(layout.briefing, Briefing)
+    is_short = strategy.format == "short"
+    minimum_description = (
+        SHORT_DESCRIPTION_MIN_CHARACTERS if is_short else LONG_DESCRIPTION_MIN_CHARACTERS
+    )
+    maximum_description = SHORT_DESCRIPTION_MAX_CHARACTERS if is_short else 5000
+    description = metadata.description.strip()
+    if not minimum_description <= len(description) <= maximum_description:
+        raise ValueError(
+            "A descrição search_first_unique_v2 precisa ter entre "
+            f"{minimum_description} e {maximum_description} caracteres."
+        )
+    if "\n\n" not in description:
+        raise ValueError("A descrição precisa ter ao menos dois parágrafos distintos.")
+    opening = _normalized_search_text(description[:DESCRIPTION_SEARCH_WINDOW])
+    primary_keyword = _normalized_search_text(strategy.primary_keyword)
+    passage = _normalized_search_text(briefing.main_passage)
+    if not primary_keyword or primary_keyword not in opening:
+        raise ValueError("A abertura da descrição precisa conter primary_keyword.")
+    if passage and passage not in opening:
+        raise ValueError("A abertura da descrição precisa conter a passagem principal.")
+    title_opening = _normalized_search_text(metadata.title[:55])
+    if primary_keyword not in title_opening:
+        raise ValueError("primary_keyword precisa aparecer nos primeiros 55 caracteres do título.")
+    normalized_description = _normalized_search_text(description)
+    if any(
+        re.search(pattern, normalized_description, flags=re.IGNORECASE)
+        for pattern in _GENERIC_DESCRIPTION_CTA_PATTERNS
+    ):
+        raise ValueError("A descrição não pode usar CTA genérico de compartilhamento ou inscrição.")
+    hashtags = re.findall(r"(?<!\w)#[\wÀ-ÿ]+", description, flags=re.UNICODE)
+    if len(hashtags) > 3:
+        raise ValueError("A descrição pode usar no máximo três hashtags diretamente relevantes.")
+    if any(tag.casefold() in {"#viral", "#fyp", "#viralizar"} for tag in hashtags):
+        raise ValueError("A descrição não pode usar hashtags genéricas de viralização.")
+
+    tags = [tag.strip() for tag in metadata.topics if tag.strip()]
+    normalized_tags = [_normalized_search_text(tag) for tag in tags]
+    if not SEO_TAG_MIN_COUNT <= len(tags) <= SEO_TAG_MAX_COUNT:
+        raise ValueError(
+            f"metadata.topics precisa conter de {SEO_TAG_MIN_COUNT} a {SEO_TAG_MAX_COUNT} tags."
+        )
+    if len(set(normalized_tags)) != len(normalized_tags):
+        raise ValueError("metadata.topics precisa conter tags distintas.")
+    if any("#" in tag for tag in tags):
+        raise ValueError("metadata.topics usa tags sem #; hashtags pertencem à descrição.")
+    if len(",".join(tags)) > SEO_TAG_MAX_CHARACTERS:
+        raise ValueError(
+            f"metadata.topics excede o limite editorial de {SEO_TAG_MAX_CHARACTERS} caracteres."
+        )
+    if primary_keyword not in normalized_tags:
+        raise ValueError("metadata.topics precisa incluir primary_keyword como tag exata.")
+    if passage and passage not in normalized_tags:
+        raise ValueError("metadata.topics precisa incluir a passagem principal como tag exata.")
+    secondary_haystack = " ".join([normalized_description, *normalized_tags])
+    covered_secondary = {
+        keyword
+        for keyword in map(_normalized_search_text, strategy.secondary_keywords)
+        if keyword and keyword in secondary_haystack
+    }
+    required_secondary = min(2, len([item for item in strategy.secondary_keywords if item.strip()]))
+    if len(covered_secondary) < required_secondary:
+        raise ValueError(
+            "Descrição e tags precisam cobrir ao menos duas palavras-chave secundárias."
+        )
+    if not strategy.description_rationale.strip():
+        raise ValueError("strategy.description_rationale é obrigatório no padrão SEO v2.")
+    if not strategy.tag_strategy.strip():
+        raise ValueError("strategy.tag_strategy é obrigatório no padrão SEO v2.")
+    if not strategy.discovery_hypothesis.strip():
+        raise ValueError("strategy.discovery_hypothesis é obrigatório no padrão SEO v2.")
+    if "?" not in metadata.pinned_comment:
+        raise ValueError("O comentário fixado precisa formular uma pergunta específica.")
+    anchor_tokens = set(
+        _pairing_content_tokens(f"{strategy.primary_keyword} {briefing.main_passage}")
+    )
+    comment_tokens = set(_pairing_content_tokens(metadata.pinned_comment))
+    if anchor_tokens and not (anchor_tokens & comment_tokens):
+        raise ValueError(
+            "O comentário fixado precisa se relacionar diretamente ao tema ou passagem."
+        )
+
+
 def _validate_package(
     layout: ProjectLayout, package: YouTubeGrowthPackage, queue: dict[str, Any]
 ) -> None:
@@ -1038,6 +1224,8 @@ def _validate_package(
     expected_format = "short" if project.video_format == "short" else "long_form"
     if package.strategy.format != expected_format:
         raise ValueError("A estratégia não corresponde ao formato do projeto.")
+    if project.config.youtube_growth.description_standard == "search_first_unique_v2":
+        _validate_search_first_seo(layout, package)
     contract_guard = queue.get("contract_guard", {})
     if package.strategy.content_promise != contract_guard.get("content_promise"):
         raise ValueError(
@@ -1143,7 +1331,7 @@ def _validate_package(
         primary_keyword = _normalized_search_text(package.strategy.primary_keyword)
         if not primary_keyword or primary_keyword not in _normalized_search_text(metadata.title):
             raise ValueError("O título principal do Short precisa conter primary_keyword.")
-        description_opening = metadata.description[:SHORT_DESCRIPTION_SEARCH_WINDOW]
+        description_opening = metadata.description[:DESCRIPTION_SEARCH_WINDOW]
         if primary_keyword not in _normalized_search_text(description_opening):
             raise ValueError("A abertura da descrição do Short precisa conter primary_keyword.")
         briefing = read_model(layout.briefing, Briefing)
@@ -1205,6 +1393,15 @@ def _validate_package(
             "A estratégia deve citar somente as orientações oficiais fornecidas na fila."
         )
 
+    if (
+        project.config.youtube_growth.description_standard == "search_first_unique_v2"
+        and not SEO_REQUIRED_GUIDELINES.issubset(package.strategy.official_guidelines)
+    ):
+        raise ValueError(
+            "A estratégia SEO v2 precisa citar as orientações oficiais de título, descrição, "
+            "busca e tags."
+        )
+
     sources = read_model(layout.sources, SourceLibrary)
     script = read_model(layout.script, ScriptDocument)
     source_ids = {item.source_id for item in sources.entries}
@@ -1251,7 +1448,8 @@ def _chapters_for_project(
         audio,
         script,
         scripture_timeline=(
-            project.config.youtube_growth.description_standard == "scripture_timeline_v1"
+            project.config.youtube_growth.description_standard
+            in {"scripture_timeline_v1", "search_first_unique_v2"}
         ),
     )
 

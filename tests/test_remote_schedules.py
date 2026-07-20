@@ -44,6 +44,25 @@ def test_daily_schedule_requires_explicit_external_and_public_authorization(tmp_
         )
 
 
+def test_daily_schedule_accepts_fifteen_second_shorts(tmp_path) -> None:
+    _, schedule_store = _schedule_store(tmp_path)
+    schedule = schedule_store.create(
+        name="Micros",
+        duration_seconds=15,
+        slots=[
+            DailyShortSlot(
+                production_time=time(1, 0),
+                publication_time=time(12, 0),
+                publication_day_offset=1,
+            )
+        ],
+        external_services_authorized=True,
+        public_scheduling_authorized=True,
+    )
+
+    assert schedule.duration_seconds == 15
+
+
 def test_same_day_publication_must_be_after_production() -> None:
     with pytest.raises(ValueError, match="posterior"):
         DailyShortSlot(

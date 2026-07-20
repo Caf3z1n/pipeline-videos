@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, field_validator, model_validator
 
-from pipeline_videos.models import PipelineModel
+from pipeline_videos.models import MIN_SHORT_DURATION_SECONDS, PipelineModel
 from pipeline_videos.remote_jobs import RemoteJobStore, RemoteVideoJob, RemoteVideoRequest
 from pipeline_videos.storage import write_json
 from pipeline_videos.utils import sha256_value, slugify, utc_now
@@ -48,7 +48,7 @@ class DailyShortSchedule(PipelineModel):
     name: str = Field(min_length=1, max_length=80)
     enabled: bool = True
     timezone: str = "America/Sao_Paulo"
-    duration_seconds: int = Field(default=50, ge=30, le=180)
+    duration_seconds: int = Field(default=50, ge=MIN_SHORT_DURATION_SECONDS, le=180)
     slots: list[DailyShortSlot] = Field(min_length=1, max_length=2)
     external_services_authorized: bool
     public_scheduling_authorized: bool
