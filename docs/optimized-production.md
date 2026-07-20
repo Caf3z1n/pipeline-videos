@@ -71,13 +71,13 @@ encerrar. Depois desse preflight, `script shorts-review-prepare` cria um context
 valida pacote e revisão juntos; somente então o agente principal faz um único `shorts-import`.
 
 Projetos novos usam `creative_retention_v3`. O seletor resolve modo criativo, postura e família de
-hook antes de abrir a fila. `hook_contract=user_six_v1` aceita exclusivamente as seis estruturas
-documentadas; uma família declarada que não corresponda à primeira fala bloqueia o preflight antes
-de imagens, áudio, render ou upload. A citação literal entra entre 8 e 20 segundos no perfil padrão;
-o perfil compacto calcula a janela pela duração, filtra o catálogo por tamanho do versículo e reduz
-palavras, cenas e orçamento do coordenador sem reduzir a qualidade final. Em 15 segundos, a janela
-é de 3 a 9 segundos, o limite é 18 palavras e são produzidas cinco a seis cenas. Aplicação e
-callback passam a ser condicionais ao modo.
+hook antes de abrir a fila. No perfil padrão, `hook_contract=user_six_v1` aceita exclusivamente as
+seis estruturas documentadas; uma família declarada que não corresponda à primeira fala bloqueia o
+preflight antes de imagens, áudio, render ou upload. A citação literal entra entre 8 e 20 segundos.
+O perfil compacto usa `cinematic_interruption_v1`, restringe a seleção a fala direta de Jesus e
+reduz palavras, cenas e orçamento do coordenador sem reduzir a qualidade final. Em 15 segundos, o
+hook vai de 0 a 2, a citação de 2 a 12,3 e a referência de 12,3 a 15 segundos; o limite do trecho é
+28 palavras e são produzidas três a quatro cenas. Não há CTA, aplicação explicativa nem callback.
 
 O contrato editorial completo está em [Padrão de roteiro de Shorts](shorts-script-standard.md).
 

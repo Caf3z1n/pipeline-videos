@@ -14,7 +14,9 @@ from pipeline_videos.models import (
     VerseUsageIndex,
     VerseUsageRecord,
 )
+from pipeline_videos.shorts_script import spoken_biblical_reference
 from pipeline_videos.storage import read_json, read_model, write_json
+from pipeline_videos.utils import tokenize_words
 from pipeline_videos.verse_selection import (
     build_usage_index,
     catalog_capacity_summary,
@@ -144,9 +146,45 @@ def test_auto_micro_short_selects_a_verse_that_fits_fifteen_seconds(tmp_path) ->
     )
 
     config = layout.load_manifest().config.shorts_script
+    briefing = read_model(layout.briefing, Briefing)
+    source = read_model(layout.sources, SourceLibrary).entries[0]
     assert config.duration_profile == "adaptive_compact_v1"
     assert len(candidate.verse_text.split()) <= config.max_literal_verse_words
-    assert read_model(layout.sources, SourceLibrary).entries[0].excerpt == candidate.verse_text
+    assert candidate.spoken_by == "jesus"
+    assert source.excerpt == candidate.verse_text
+    assert source.spoken_by == "jesus"
+    assert briefing.creative_mode in {"devotional_application", "pastoral_encouragement"}
+    assert briefing.hook_family == "emotional_interruption"
+    assert briefing.hook_contract == "cinematic_interruption_v1"
+    assert briefing.call_to_action == ""
+
+
+def test_compact_catalog_contains_clean_direct_speech_that_fits_the_contract(tmp_path) -> None:
+    layout, _, _ = create_auto_short(
+        projects_dir=tmp_path,
+        target_duration_seconds=15,
+        project_date=date(2026, 7, 20),
+    )
+    config = layout.load_manifest().config.shorts_script
+    direct_speech = [
+        candidate
+        for candidate in load_verse_catalog().candidates
+        if candidate.spoken_by == "jesus"
+        and len(tokenize_words(candidate.verse_text)) <= config.max_literal_verse_words
+    ]
+
+    assert len(direct_speech) >= 12
+    for candidate in direct_speech:
+        assert not candidate.verse_text.startswith(("“", '"'))
+        assert not candidate.verse_text.endswith(("”", '"'))
+        assert not candidate.verse_text.casefold().startswith(
+            ("jesus lhe disse", "jesus lhes falou", "novamente, portanto, jesus")
+        )
+        narration = (
+            f"Olhe para mim. “{candidate.verse_text}” "
+            f"{spoken_biblical_reference(candidate.reference)}."
+        )
+        assert config.min_words <= len(tokenize_words(narration)) <= config.max_words
 
 
 def test_selector_prefers_short_familiar_clear_verse_when_other_factors_match() -> None:

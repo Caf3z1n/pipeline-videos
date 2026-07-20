@@ -14,6 +14,7 @@ from pipeline_videos.models import (
     DEFAULT_ELEVENLABS_MODEL_ID,
     DEFAULT_ELEVENLABS_VOICE_ID,
     ELEVENLABS_VOICE_VARIANTS,
+    Briefing,
 )
 from pipeline_videos.remote_jobs import (
     CodexPhaseSpec,
@@ -44,7 +45,7 @@ from pipeline_videos.remote_jobs import (
     prepare_job_project,
     work_once,
 )
-from pipeline_videos.storage import write_json
+from pipeline_videos.storage import read_model, write_json
 
 
 def _request(**updates):
@@ -80,6 +81,10 @@ def test_remote_request_applies_safe_defaults_and_requires_explicit_external_aut
         _request(hook_family="consequence_first")
 
     assert _request(duration_seconds=15).duration_seconds == 15
+    with pytest.raises(ValueError, match="modos devocional aplicado ou pastoral"):
+        _request(duration_seconds=15, creative_mode="character_portrait")
+    with pytest.raises(ValueError, match="hook emocional de interrupção"):
+        _request(duration_seconds=15, hook_family="nobody_talks_but")
     with pytest.raises(ValueError, match="Vídeos longos precisam"):
         _request(video_format="long", duration_seconds=15)
 
@@ -165,6 +170,12 @@ def test_prepare_remote_micro_short_preserves_one_image_worker_profile(tmp_path)
     assert manifest.target_duration_seconds == 15
     assert manifest.config.shorts_script.duration_profile == "adaptive_compact_v1"
     assert manifest.config.production.image_workers == 1
+    assert manifest.config.music.library_profile == "adaptive_compact_devotional_v1"
+    briefing = read_model(layout.briefing, Briefing)
+    assert briefing.creative_mode == "pastoral_encouragement"
+    assert briefing.hook_family == "emotional_interruption"
+    assert briefing.hook_contract == "cinematic_interruption_v1"
+    assert briefing.call_to_action == ""
 
 
 def test_remote_job_can_select_second_jesus_voice(tmp_path) -> None:

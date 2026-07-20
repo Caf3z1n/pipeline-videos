@@ -40,8 +40,8 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION = "4.0"
-SHORTS_SCRIPT_ALGORITHM_VERSION = "5.0"
+SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION = "5.0"
+SHORTS_SCRIPT_ALGORITHM_VERSION = "6.0"
 LEGACY_SCRIPTURE_BOUNDARY_PHRASE = "Até aqui, o texto bíblico."
 
 
@@ -123,7 +123,7 @@ _RAW_NUMERIC_REFERENCE_PATTERN = re.compile(r"\b\d+\s*:\s*\d+\b")
 def _short_timeline_seconds(
     duration_seconds: int,
     config: ShortsScriptConfig,
-) -> dict[str, list[float | int]]:
+) -> dict[str, list[float | int] | None]:
     if config.duration_profile == "standard_45_55_v1":
         return {
             "hook": [0, 2],
@@ -133,26 +133,94 @@ def _short_timeline_seconds(
             "resolution_or_synthesis": [32, 48],
             "single_action_cta": [45, 55],
         }
-    cta_start = round(duration_seconds - config.cta_max_seconds, 1)
-    resolution_start = round(max(config.scripture_citation_max_end_seconds, cta_start - 2.0), 1)
-    development_end = round(max(config.scripture_citation_max_end_seconds, cta_start - 1.0), 1)
     return {
         "hook": [0, config.hook_target_seconds],
-        "orientation_or_stakes": [
-            config.hook_target_seconds,
-            config.scripture_citation_min_start_seconds,
-        ],
-        "scripture": [
+        "direct_jesus_quote": [
             config.scripture_citation_min_start_seconds,
             config.scripture_citation_max_end_seconds,
         ],
-        "development_and_reengagement": [
+        "spoken_reference": [
             config.scripture_citation_max_end_seconds,
-            development_end,
+            duration_seconds,
         ],
-        "resolution_or_synthesis": [resolution_start, cta_start],
-        "single_action_cta": [cta_start, duration_seconds],
+        "cta": None,
     }
+
+
+def _compact_cinematic_instructions(
+    *,
+    project_id: str,
+    main_passage_spoken: str,
+    config: ShortsScriptConfig,
+    main_agent_mode: bool,
+) -> list[str]:
+    return [
+        (
+            "No modo light, o agente principal produz o pacote diretamente, sem criar outro "
+            "roteirista."
+            if main_agent_mode
+            else "O shorts_script_specialist produz o pacote isoladamente no staging."
+        ),
+        (
+            "Leia somente inputs.compact_context e use uma única scripture_candidate marcada "
+            "como fala direta de Jesus."
+        ),
+        (
+            "Use cinematic_jesus_devotional_v1. O modo deve ser devotional_application ou "
+            "pastoral_encouragement e a postura deve ser devotional."
+        ),
+        (
+            "O vídeo deve parecer um momento emocional retirado de um filme épico sobre Jesus, "
+            "não uma explicação bíblica, sermão, aula, lista de conselhos ou narração de história."
+        ),
+        (
+            "A primeira seção contém somente uma interrupção emocional curta, de duas a oito "
+            "palavras, como 'Não desista agora.', 'Olhe para mim.', "
+            "'Você ainda não perdeu essa batalha.' ou 'Eu sei que você está cansado.'."
+        ),
+        (
+            "Logo após o hook, cite o excerpt literal de Jesus. A seção bíblica deve conter "
+            "somente o versículo entre aspas curvas, sem 'Em', sem 'lemos', sem explicação e sem "
+            "referência antes da fala."
+        ),
+        (
+            "A última seção contém somente a referência falada depois das aspas: "
+            f"'{main_passage_spoken}.' Não use números no formato Livro X:Y."
+        ),
+        (
+            "Não crie CTA, pedido de comentário, inscrição, compartilhamento, despedida ou "
+            "resumo. Deixe strategy.cta e reason_to_subscribe vazios e comment_prompt nulo."
+        ),
+        (
+            "Preencha strategy.cinematic_devotional, deixe creative_direction, retention_story e "
+            "narrative_spine nulos e use exatamente três seções: opening, "
+            "biblical_narrative e closing."
+        ),
+        (
+            "Use exatamente três retention_beats: hook, evidence e reference, cobrindo toda a "
+            "timeline. Cada beat declara informação e mudança visual sem inventar nova fala."
+        ),
+        (
+            f"O roteiro completo deve ter de {config.min_words} a {config.max_words} palavras. "
+            f"O excerpt literal pode ter no máximo {config.max_literal_verse_words} palavras e "
+            "não pode ser cortado, parafraseado ou completado."
+        ),
+        (
+            "As direções visuais mostram Jesus como centro emocional, com olhar, presença, "
+            "silêncio, "
+            "luz e escala épica; preservam cinematic-family-3d-v1 e um único momento por imagem."
+        ),
+        (
+            "A revisão bíblica independente deve confirmar que a fala é atribuída diretamente "
+            "a Jesus e que o excerpt coincide com a fonte."
+        ),
+        (
+            "Repita job_id e input_hash exatamente, grave somente o package no staging e "
+            "execute preflight.command até valid=true."
+        ),
+        "Não altere project.json, aprovações, manifestos ou arquivos fora do staging.",
+        f"Projeto em validação: {project_id}.",
+    ]
 
 
 def _target_scene_instruction(config: ShortsScriptConfig) -> str:
@@ -311,6 +379,7 @@ def prepare_shorts_script_queue(
     config = project.config.shorts_script
     is_retention_v2 = config.narrative_standard == "retention_story_v2"
     is_creative_v3 = config.narrative_standard == "creative_retention_v3"
+    is_compact_cinematic = config.duration_profile == "adaptive_compact_v1"
     main_agent_mode = not config.use_specialist_subagent
     if not config.enabled:
         raise RuntimeError("A etapa especializada de roteiro está desativada neste projeto.")
@@ -319,15 +388,16 @@ def prepare_shorts_script_queue(
         if config.require_verified_scripture or config.require_literal_verse_opening
         else _literal_opening_candidates(layout)
     )
-    if config.duration_profile == "adaptive_compact_v1":
+    if is_compact_cinematic:
         literal_candidates = [
             source
             for source in literal_candidates
             if len(tokenize_words(source.excerpt or "")) <= config.max_literal_verse_words
+            and source.spoken_by == "jesus"
         ]
         if not literal_candidates:
             raise ValueError(
-                "O Short compacto exige uma fonte bíblica verificada com no máximo "
+                "O Short compacto exige uma fala direta de Jesus verificada com no máximo "
                 f"{config.max_literal_verse_words} palavras no excerpt literal."
             )
     input_hash = shorts_script_input_hash(layout)
@@ -348,7 +418,25 @@ def prepare_shorts_script_queue(
     job_id = f"shorts-script-{input_hash[:16]}"
     context = _shorts_context_payload(layout, literal_candidates)
     briefing = Briefing.model_validate(context["briefing"])
-    if is_creative_v3:
+    if is_compact_cinematic:
+        unresolved = []
+        if briefing.creative_mode not in {
+            "devotional_application",
+            "pastoral_encouragement",
+        }:
+            unresolved.append("creative_mode devocional aplicado ou encorajamento pastoral")
+        if briefing.hook_policy != "required":
+            unresolved.append("hook_policy=required")
+        if briefing.hook_contract != "cinematic_interruption_v1":
+            unresolved.append("hook_contract=cinematic_interruption_v1")
+        if briefing.hook_family != "emotional_interruption":
+            unresolved.append("hook_family=emotional_interruption")
+        if unresolved:
+            raise ValueError(
+                "Resolva o perfil cinematográfico compacto antes do roteiro: "
+                + ", ".join(unresolved)
+            )
+    elif is_creative_v3:
         unresolved = []
         if briefing.creative_mode == "auto":
             unresolved.append("creative_mode")
@@ -867,6 +955,53 @@ def prepare_shorts_script_queue(
             "Não prometa viralização, retenção ou CTR e não invente métricas.",
         ],
     }
+    if is_compact_cinematic:
+        timeline = _short_timeline_seconds(project.target_duration_seconds, config)
+        payload["spoken_reference_standard"] = {
+            "compact_reference": main_passage,
+            "spoken_reference": main_passage_spoken,
+            "placement": "after_closing_quote",
+            "lead_in_example": None,
+        }
+        payload["scripture_quote_standard"] = {
+            "scope": "verse_text_only",
+            "opening_quote": "“",
+            "closing_quote": "”",
+            "reference_position": "after_closing_quote",
+            "opening_example": f"“texto do versículo.” {main_passage_spoken}.",
+        }
+        payload["retention_contract"] = {
+            "standard": "cinematic_jesus_devotional_v1",
+            "duration_profile": config.duration_profile,
+            "allowed_creative_modes": [
+                "devotional_application",
+                "pastoral_encouragement",
+            ],
+            "hook": {
+                "required": True,
+                "contract": "cinematic_interruption_v1",
+                "selected_family": "emotional_interruption",
+                "target_end_seconds": config.hook_target_seconds,
+                "examples": [
+                    "Não desista agora.",
+                    "Olhe para mim.",
+                    "Você ainda não perdeu essa batalha.",
+                    "Eu sei que você está cansado.",
+                ],
+            },
+            "timeline_seconds": timeline,
+            "direct_jesus_speech_required": True,
+            "reference_after_quote_required": True,
+            "cta_allowed": False,
+            "target_scene_count": [config.target_scene_min, config.target_scene_max],
+            "music_library_profile": "adaptive_compact_devotional_v1",
+        }
+        payload["instructions"] = _compact_cinematic_instructions(
+            project_id=project.project_id,
+            main_passage_spoken=main_passage_spoken,
+            config=config,
+            main_agent_mode=main_agent_mode,
+        )
     if not config.require_independent_biblical_review:
         for key in (
             "independent_biblical_review_required",
@@ -913,9 +1048,17 @@ def _contains_normalized(container: str, fragment: str) -> bool:
     return bool(normalized_fragment) and normalized_fragment in _normalized(container)
 
 
-def _validate_scripture_source(citation: Any, source_by_id: dict[str, SourceEntry]) -> None:
+def _validate_scripture_source(
+    citation: Any,
+    source_by_id: dict[str, SourceEntry],
+    *,
+    compact_cinematic: bool = False,
+) -> None:
     spoken_reference = spoken_biblical_reference(citation.reference)
-    if not _contains_normalized(citation.lead_in, spoken_reference):
+    if compact_cinematic:
+        if citation.lead_in.strip():
+            raise ValueError("A citação compacta não pode usar lead-in antes da fala de Jesus.")
+    elif not _contains_normalized(citation.lead_in, spoken_reference):
         raise ValueError(
             "A introdução da citação precisa narrar a referência no formato "
             "'Livro, capítulo X, versículo Y'."
@@ -923,6 +1066,8 @@ def _validate_scripture_source(citation: Any, source_by_id: dict[str, SourceEntr
     source = source_by_id.get(citation.source_id)
     if source is None or source.kind != "biblical_text" or not source.verified:
         raise ValueError("Toda citação precisa apontar para uma fonte bíblica verificada.")
+    if compact_cinematic and source.spoken_by != "jesus":
+        raise ValueError("O perfil compacto aceita somente uma fala atribuída diretamente a Jesus.")
     required_source_fields = {
         "passage": source.passage,
         "translation": source.translation,
@@ -946,6 +1091,13 @@ def _citation_forms(citation: Any) -> set[str]:
     return {
         _collapsed(f'{citation.lead_in.strip()} "{citation.verse_text.strip()}"'),
         _collapsed(f"{citation.lead_in.strip()} “{citation.verse_text.strip()}”"),
+    }
+
+
+def _quote_only_forms(citation: Any) -> set[str]:
+    return {
+        _collapsed(f'"{citation.verse_text.strip()}"'),
+        _collapsed(f"“{citation.verse_text.strip()}”"),
     }
 
 
@@ -997,11 +1149,18 @@ def _validate_scripture_contract(
     if primary is None:
         raise ValueError("O roteiro precisa citar ao menos um versículo bíblico verificado.")
     citations = [primary, *strategy.additional_scriptures]
+    compact_cinematic = project.config.shorts_script.duration_profile == "adaptive_compact_v1"
+    if compact_cinematic and len(citations) != 1:
+        raise ValueError("O momento cinematográfico compacto exige exatamente uma fala de Jesus.")
     if len(citations) > 2:
         raise ValueError("Um Short pode usar no máximo duas citações literais para manter clareza.")
     source_by_id = {source.source_id: source for source in sources.entries}
     for citation in citations:
-        _validate_scripture_source(citation, source_by_id)
+        _validate_scripture_source(
+            citation,
+            source_by_id,
+            compact_cinematic=compact_cinematic,
+        )
         if (
             citation.target_end_seconds
             > project.config.shorts_script.scripture_citation_max_end_seconds
@@ -1010,8 +1169,11 @@ def _validate_scripture_contract(
     spine = strategy.narrative_spine
     story = strategy.retention_story
     creative = strategy.creative_direction
+    cinematic = strategy.cinematic_devotional
     verse_section_id = (
-        creative.scripture_section_ids[0]
+        cinematic.scripture_section_id
+        if cinematic is not None
+        else creative.scripture_section_ids[0]
         if creative is not None
         else story.scripture_section_id
         if story is not None
@@ -1022,11 +1184,23 @@ def _validate_scripture_contract(
     if verse_section_id is None or verse_section_id not in section_by_id:
         raise ValueError("A estratégia não mapeia uma seção bíblica válida.")
     primary_section = section_by_id[verse_section_id]
-    if _collapsed(primary_section.narration) not in _citation_forms(primary):
+    expected_forms = _quote_only_forms(primary) if compact_cinematic else _citation_forms(primary)
+    if _collapsed(primary_section.narration) not in expected_forms:
         raise ValueError(
-            "A seção bíblica deve deixar a referência fora das aspas e colocar somente o "
+            "A seção bíblica compacta deve conter somente a fala literal de Jesus entre aspas."
+            if compact_cinematic
+            else "A seção bíblica deve deixar a referência fora das aspas e colocar somente o "
             "versículo literal entre aspas."
         )
+    if compact_cinematic:
+        if cinematic is None or cinematic.reference_section_id not in section_by_id:
+            raise ValueError("O perfil compacto não mapeia a seção final de referência.")
+        expected_reference = spoken_biblical_reference(primary.reference)
+        reference_narration = section_by_id[cinematic.reference_section_id].narration
+        if _normalized(reference_narration.rstrip(" .!?")) != _normalized(expected_reference):
+            raise ValueError(
+                "A última seção deve conter somente a referência falada depois das aspas."
+            )
     for citation in strategy.additional_scriptures:
         forms = _citation_forms(citation)
         if not any(
@@ -1277,6 +1451,15 @@ def _validate_creative_engagement_contract(
 
 def _validate_engagement_contract(layout: ProjectLayout, package: ShortsScriptPackage) -> None:
     config = layout.load_manifest().config.shorts_script
+    if config.duration_profile == "adaptive_compact_v1":
+        strategy = package.strategy
+        if strategy.cta.strip() or strategy.reason_to_subscribe.strip():
+            raise ValueError("O perfil compacto não permite CTA nem reason_to_subscribe.")
+        if strategy.comment_prompt is not None:
+            raise ValueError("O perfil compacto não permite convite para comentários.")
+        if any(beat.purpose == "cta" for beat in strategy.retention_beats):
+            raise ValueError("O perfil compacto não permite beat de CTA.")
+        return
     if config.narrative_standard == "creative_retention_v3":
         _validate_creative_engagement_contract(layout, package)
         return
@@ -1389,6 +1572,146 @@ def _validate_language_and_visuals(package: ShortsScriptPackage) -> None:
 def _add_validation_error(errors: list[str], message: str) -> None:
     if message not in errors:
         errors.append(message)
+
+
+def _collect_cinematic_devotional_errors(
+    layout: ProjectLayout,
+    package: ShortsScriptPackage,
+    errors: list[str],
+) -> tuple[dict[str, Any], bool]:
+    project = layout.load_manifest()
+    config = project.config.shorts_script
+    strategy = package.strategy
+    direction = strategy.cinematic_devotional
+    sections = package.script.sections
+    section_by_id = {section.section_id: section for section in sections}
+    if direction is None:
+        _add_validation_error(
+            errors,
+            "adaptive_compact_v1 exige strategy.cinematic_devotional.",
+        )
+        return section_by_id, False
+    if any(
+        value is not None
+        for value in (
+            strategy.creative_direction,
+            strategy.retention_story,
+            strategy.narrative_spine,
+        )
+    ):
+        _add_validation_error(
+            errors,
+            "O perfil cinematográfico não deve preencher contratos narrativos dos outros perfis.",
+        )
+
+    briefing = read_model(layout.briefing, Briefing)
+    if direction.creative_mode not in {"devotional_application", "pastoral_encouragement"}:
+        _add_validation_error(errors, "O perfil compacto aceita somente os dois modos devocionais.")
+    if direction.creative_mode != briefing.creative_mode:
+        _add_validation_error(
+            errors, "creative_mode diverge do modo compacto resolvido no briefing."
+        )
+    if (
+        direction.interpretive_stance != "devotional"
+        or briefing.interpretive_stance != "devotional"
+    ):
+        _add_validation_error(errors, "O perfil compacto exige postura devotional.")
+    if direction.hook_family != "emotional_interruption":
+        _add_validation_error(errors, "O perfil compacto exige emotional_interruption.")
+    if strategy.hook_family != "emotional_interruption":
+        _add_validation_error(errors, "strategy.hook_family precisa ser emotional_interruption.")
+    if strategy.hook_type != "emotional_interruption":
+        _add_validation_error(errors, "strategy.hook_type precisa ser emotional_interruption.")
+    if not hook_matches_family(strategy.hook, "emotional_interruption"):
+        _add_validation_error(
+            errors,
+            "A primeira frase não parece uma interrupção emocional curta dirigida ao espectador.",
+        )
+    if _normalized(direction.emotional_hook) != _normalized(strategy.hook):
+        _add_validation_error(errors, "cinematic_devotional.emotional_hook precisa copiar o hook.")
+
+    mapped_ids = [
+        direction.opening_section_id,
+        direction.scripture_section_id,
+        direction.reference_section_id,
+    ]
+    structurally_valid = len(set(mapped_ids)) == 3 and set(mapped_ids).issubset(section_by_id)
+    if len(sections) != 3:
+        _add_validation_error(
+            errors,
+            "O momento cinematográfico compacto exige exatamente três seções.",
+        )
+        structurally_valid = False
+    if not structurally_valid:
+        _add_validation_error(
+            errors, "cinematic_devotional referencia seções inválidas ou repetidas."
+        )
+    elif sections:
+        ordered_ids = [section.section_id for section in sections]
+        if mapped_ids != ordered_ids:
+            _add_validation_error(
+                errors,
+                "A ordem deve ser hook, fala direta de Jesus e referência final.",
+            )
+        opening, scripture, reference = (section_by_id[item] for item in mapped_ids)
+        if opening.role != "opening" or _collapsed(opening.narration) != _collapsed(strategy.hook):
+            _add_validation_error(errors, "A abertura deve conter somente o hook emocional.")
+        if scripture.role != "biblical_narrative":
+            _add_validation_error(errors, "A fala de Jesus precisa usar role=biblical_narrative.")
+        if reference.role != "closing":
+            _add_validation_error(errors, "A referência final precisa usar role=closing.")
+        if "lemos" in _normalized(scripture.narration) or "lemos" in _normalized(
+            reference.narration
+        ):
+            _add_validation_error(errors, "O perfil compacto não usa a palavra 'lemos'.")
+
+    if strategy.verse_opening is None:
+        _add_validation_error(errors, "O perfil compacto exige uma fala direta de Jesus.")
+    else:
+        verse = strategy.verse_opening
+        expected_reference = spoken_biblical_reference(verse.reference)
+        if verse.lead_in.strip():
+            _add_validation_error(errors, "A fala direta de Jesus não pode ter lead-in.")
+        if verse.target_start_seconds != config.scripture_citation_min_start_seconds:
+            _add_validation_error(errors, "A fala de Jesus deve começar imediatamente após o hook.")
+        if verse.target_end_seconds > config.scripture_citation_max_end_seconds:
+            _add_validation_error(errors, "A fala de Jesus invade o tempo reservado à referência.")
+        if _normalized(direction.spoken_reference) != _normalized(expected_reference):
+            _add_validation_error(errors, "spoken_reference diverge da passagem principal.")
+        if direction.source_id != verse.source_id:
+            _add_validation_error(errors, "cinematic_devotional.source_id diverge da citação.")
+        if _normalized(strategy.payoff) != _normalized(verse.verse_text):
+            _add_validation_error(errors, "strategy.payoff precisa ser a própria fala de Jesus.")
+    if strategy.additional_scriptures:
+        _add_validation_error(errors, "O perfil compacto aceita exatamente uma citação.")
+    if _normalized(strategy.content_promise) != _normalized(direction.content_promise):
+        _add_validation_error(errors, "content_promise precisa copiar cinematic_devotional.")
+    if _normalized(strategy.practical_value) != _normalized(direction.viewer_takeaway):
+        _add_validation_error(errors, "practical_value precisa copiar viewer_takeaway.")
+
+    beats = strategy.retention_beats
+    expected_purposes = ["hook", "evidence", "reference"]
+    if [beat.purpose for beat in beats] != expected_purposes:
+        _add_validation_error(errors, "Os beats compactos devem ser hook, evidence e reference.")
+    if [beat.section_id for beat in beats] != mapped_ids:
+        _add_validation_error(errors, "Os beats compactos precisam mapear as três seções em ordem.")
+    final_end = max((beat.target_end_seconds for beat in beats), default=0.0)
+    if not config.retention_target_min_seconds <= final_end <= config.retention_target_max_seconds:
+        _add_validation_error(errors, "A referência final precisa encerrar na duração compacta.")
+    if beats:
+        if (
+            beats[0].target_start_seconds != 0
+            or beats[0].target_end_seconds != config.hook_target_seconds
+        ):
+            _add_validation_error(
+                errors, "O beat de hook precisa ocupar os dois primeiros segundos."
+            )
+        if (
+            len(beats) >= 3
+            and beats[-1].target_start_seconds != config.scripture_citation_max_end_seconds
+        ):
+            _add_validation_error(errors, "O beat final deve começar no fechamento das aspas.")
+    return section_by_id, structurally_valid
 
 
 def _collect_narrative_spine_errors(
@@ -1998,7 +2321,22 @@ def _collect_package_validation_errors(
     spine = strategy.narrative_spine
     story = strategy.retention_story
     creative = strategy.creative_direction
-    if config.narrative_standard == "creative_retention_v3":
+    cinematic = strategy.cinematic_devotional
+    is_compact_cinematic = config.duration_profile == "adaptive_compact_v1"
+    if is_compact_cinematic:
+        section_by_id, structure_ready = _collect_cinematic_devotional_errors(
+            layout,
+            package,
+            errors,
+        )
+        if strategy.verse_opening is None:
+            _add_validation_error(errors, "O momento compacto exige uma fala direta de Jesus.")
+        if not 1 <= len(strategy.hook_techniques) <= 3:
+            _add_validation_error(
+                errors,
+                "O hook emocional precisa registrar de uma a três técnicas de atenção.",
+            )
+    elif config.narrative_standard == "creative_retention_v3":
         section_by_id, structure_ready = _collect_creative_direction_errors(
             layout,
             package,
@@ -2122,7 +2460,9 @@ def _collect_package_validation_errors(
                 )
 
     strategy_structure = (
-        creative is not None
+        cinematic is not None
+        if is_compact_cinematic
+        else creative is not None
         if config.narrative_standard == "creative_retention_v3"
         else story is not None
         if config.narrative_standard == "retention_story_v2"
@@ -2140,7 +2480,19 @@ def _collect_package_validation_errors(
         except ValueError as exc:
             _add_validation_error(errors, str(exc))
         else:
-            if config.narrative_standard == "creative_retention_v3" and creative is not None:
+            if is_compact_cinematic and cinematic is not None:
+                required_source_ids.add(cinematic.source_id)
+                if not required_source_ids.issubset(package.script.source_ids):
+                    _add_validation_error(
+                        errors,
+                        "O roteiro não registra a fonte da fala direta de Jesus.",
+                    )
+                if not required_source_ids.issubset(strategy.source_ids):
+                    _add_validation_error(
+                        errors,
+                        "A estratégia não registra a fonte da fala direta de Jesus.",
+                    )
+            elif config.narrative_standard == "creative_retention_v3" and creative is not None:
                 required_source_ids |= set(creative.source_ids)
                 if not required_source_ids.issubset(package.script.source_ids):
                     _add_validation_error(

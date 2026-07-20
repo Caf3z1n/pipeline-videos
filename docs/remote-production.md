@@ -12,8 +12,8 @@ Cada pedido declara:
 - `topic`: tema opcional; vazio usa o catálogo local e evita repetir passagens;
 - `creative_mode`: modo editorial explícito ou `auto` para variar conforme passagem e histórico;
 - `hook_policy`: `auto`, `required`, `optional` ou `none`; Shorts não aceitam `none`;
-- `hook_family`: família concreta ou `auto`; Shorts novos aceitam somente as seis famílias de
-  `hook_contract=user_six_v1` e resolvem uma delas antes de reservar a passagem;
+- `hook_family`: família concreta ou `auto`; Shorts padrão aceitam somente as seis famílias de
+  `hook_contract=user_six_v1`; Shorts compactos aceitam somente `emotional_interruption`;
 - `duration_seconds`: opcional, mínimo de 15 s e padrão de 50 s para Short; mínimo de 30 s e padrão
   de 540 s para longo;
 - `voice_variant`: `jesus_1` (padrão) ou `jesus_2`;
@@ -35,9 +35,11 @@ independente após o preflight do pacote, até dois workers de imagem em baixo e
 crescimento em médio, todos com `fork_turns=none`.
 
 O remoto usa o mesmo perfil adaptativo local. Um Short de 15 segundos preserva um único worker de
-imagem, seleciona apenas passagens cujo trecho literal caiba no limite de 18 palavras e envia ao
-roteirista os limites persistidos de 30 a 38 palavras, cinco a seis cenas e citação de 3 a 9
-segundos.
+imagem, aceita somente `devotional_application` ou `pastoral_encouragement`, seleciona apenas fala
+direta de Jesus cujo trecho literal caiba no limite de 28 palavras e envia ao roteirista os limites
+persistidos de 17 a 44 palavras e três a quatro cenas. O hook ocupa de 0 a 2 segundos, a citação de
+2 a 12,3 e a referência de 12,3 a 15 segundos; não existe CTA. A música é selecionada exclusivamente
+entre `Aloboi .mp3` e `Leaning.mp3` na biblioteca compacta.
 
 O modelo não varia: coordenador e especialistas usam Sol. O esforço varia somente pelo contrato da
 função. Áudio, música, legendas, imports, render, validação e YouTube não são entregues aos agentes.

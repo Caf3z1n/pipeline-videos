@@ -56,15 +56,37 @@ def scripture_citations(
 ) -> list[ScriptureCitation]:
     citations: list[ScriptureCitation] = []
     word_cursor = 0
-    for section in document.sections:
+    for section_index, section in enumerate(document.sections):
         if "biblical_text" in section.claim_classification:
             for match in _QUOTED_TEXT_RE.finditer(section.narration):
                 prefix = section.narration[max(0, match.start() - 180) : match.start()]
-                if (
+                reference_before_quote = (
                     re.search(r"\bcapítulo\s+\d+\b", prefix, flags=re.IGNORECASE)
                     and re.search(r"\bversículos?\s+\d+\b", prefix, flags=re.IGNORECASE)
                     and re.search(r"\b(?:lemos|diz|declara)\s*:\s*$", prefix, flags=re.IGNORECASE)
-                ):
+                )
+                next_section = (
+                    document.sections[section_index + 1]
+                    if section_index + 1 < len(document.sections)
+                    else None
+                )
+                reference_after_quote = bool(
+                    next_section is not None
+                    and next_section.role == "closing"
+                    and "biblical_text" in next_section.claim_classification
+                    and set(section.biblical_basis).intersection(next_section.biblical_basis)
+                    and re.search(
+                        r"\bcapítulo\s+\d+\b",
+                        next_section.narration,
+                        flags=re.IGNORECASE,
+                    )
+                    and re.search(
+                        r"\bversículos?\s+\d+\b",
+                        next_section.narration,
+                        flags=re.IGNORECASE,
+                    )
+                )
+                if reference_before_quote or reference_after_quote:
                     offset = word_cursor + len(tokenize_words(section.narration[: match.start()]))
                     citations.append(
                         ScriptureCitation(

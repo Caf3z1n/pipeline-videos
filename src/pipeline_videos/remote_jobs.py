@@ -28,6 +28,7 @@ from pipeline_videos.creative_direction import (
 from pipeline_videos.imagegen_retry import imagegen_retry_instructions
 from pipeline_videos.models import (
     APPLICATION_REQUIRED_CREATIVE_MODES,
+    COMPACT_SHORT_THRESHOLD_SECONDS,
     MIN_LONG_DURATION_SECONDS,
     MIN_SHORT_DURATION_SECONDS,
     USER_SIX_HOOK_FAMILIES,
@@ -167,14 +168,32 @@ class RemoteVideoRequest(PipelineModel):
             raise ValueError(
                 f"Vídeos longos precisam ter ao menos {MIN_LONG_DURATION_SECONDS} segundos."
             )
+        compact = (
+            self.video_format == "short" and self.duration_seconds < COMPACT_SHORT_THRESHOLD_SECONDS
+        )
+        if compact and self.creative_mode not in {
+            "auto",
+            "devotional_application",
+            "pastoral_encouragement",
+        }:
+            raise ValueError(
+                "Shorts compactos aceitam somente os modos devocional aplicado ou pastoral."
+            )
         if self.video_format == "short" and (
             self.hook_policy == "none" or self.hook_family == "none"
         ):
             raise ValueError("Shorts exigem hook inicial; use auto ou uma família concreta.")
-        if self.video_format == "short" and self.hook_family not in {
-            "auto",
-            *USER_SIX_HOOK_FAMILIES,
-        }:
+        if compact and self.hook_family not in {"auto", "emotional_interruption"}:
+            raise ValueError("Shorts compactos exigem hook emocional de interrupção.")
+        if (
+            self.video_format == "short"
+            and not compact
+            and self.hook_family
+            not in {
+                "auto",
+                *USER_SIX_HOOK_FAMILIES,
+            }
+        ):
             raise ValueError("Shorts novos aceitam somente uma das seis famílias oficiais de hook.")
         if self.hook_policy == "required" and self.hook_family == "none":
             raise ValueError("hook_policy=required não aceita hook_family=none.")
@@ -399,16 +418,39 @@ def prepare_job_project(
             target_duration_seconds=request.duration_seconds,
             video_format=video_format,
             production_mode="final_candidate_one_shot",
+            creative_mode_override=(
+                request.creative_mode if request.creative_mode != "auto" else None
+            ),
+            hook_family_override=(request.hook_family if request.hook_family != "auto" else None),
         )
     briefing = Briefing.model_validate(read_json(layout.briefing))
     briefing_updates: dict[str, Any] = {}
+    compact = (
+        request.video_format == "short"
+        and request.duration_seconds < COMPACT_SHORT_THRESHOLD_SECONDS
+    )
     if request.creative_mode != "auto":
         briefing_updates["creative_mode"] = request.creative_mode
         briefing_updates["interpretive_stance"] = default_interpretive_stance(request.creative_mode)
+    elif compact and briefing.creative_mode == "auto":
+        briefing_updates["creative_mode"] = "pastoral_encouragement"
+        briefing_updates["interpretive_stance"] = "devotional"
     if request.hook_policy != "auto":
         briefing_updates["hook_policy"] = request.hook_policy
     if request.hook_family != "auto":
         briefing_updates["hook_family"] = request.hook_family
+    if compact:
+        briefing_updates.update(
+            {
+                "hook_policy": "required",
+                "hook_family": "emotional_interruption",
+                "hook_contract": "cinematic_interruption_v1",
+                "call_to_action": "",
+                "narration_tone": (
+                    "íntimo, emocional e cinematográfico, como uma fala de Jesus em um filme épico"
+                ),
+            }
+        )
     if briefing_updates:
         write_json(layout.briefing, briefing.model_copy(update=briefing_updates))
     manifest = layout.load_manifest()
@@ -553,6 +595,12 @@ def _available_verse_candidates(
             and project.config.shorts_script.duration_profile == "adaptive_compact_v1"
             else None
         ),
+        required_spoken_by=(
+            "jesus"
+            if project.video_format == "short"
+            and project.config.shorts_script.require_direct_jesus_speech
+            else None
+        ),
     )
     if current_main:
         main_eligible.add(current_main)
@@ -662,6 +710,7 @@ def _editorial_sources_phase_spec(
                     "themes": candidate.themes,
                     "characters": candidate.characters,
                     "interpretation_limits": candidate.interpretation_limits,
+                    "spoken_by": candidate.spoken_by,
                 }
                 for candidate in candidates
             ],
@@ -712,6 +761,7 @@ def _source_entry(candidate: VerseCandidate, *, long_form: bool) -> SourceEntry:
         claim_scope="Texto bíblico; contexto e aplicações devem ser distinguidos.",
         rights_note=candidate.rights_note,
         verified=True,
+        spoken_by=candidate.spoken_by,
     )
 
 
@@ -727,6 +777,7 @@ def _import_editorial_source_selection(
     from pipeline_videos.verse_selection import (
         load_verse_catalog,
         reserve_project_candidates,
+        select_compact_devotional_mode,
         select_creative_mode,
         select_hook_family,
         select_retention_archetype,
@@ -764,11 +815,17 @@ def _import_editorial_source_selection(
         select_retention_archetype(main, usage) if project.video_format == "short" else None
     )
     current = Briefing.model_validate(read_json(layout.briefing))
+    compact = (
+        project.video_format == "short"
+        and project.config.shorts_script.duration_profile == "adaptive_compact_v1"
+    )
     creative_mode = (
         job.request.creative_mode
         if job.request.creative_mode != "auto"
         else current.creative_mode
         if current.creative_mode != "auto"
+        else select_compact_devotional_mode(usage)
+        if compact
         else select_creative_mode(main, usage, video_format=project.video_format)
     )
     interpretive_stance = default_interpretive_stance(creative_mode)
@@ -789,7 +846,9 @@ def _import_editorial_source_selection(
         else None
     )
     hook_family = (
-        "none"
+        "emotional_interruption"
+        if compact
+        else "none"
         if hook_policy == "none"
         else requested_hook_family
         or select_hook_family(
@@ -815,8 +874,8 @@ def _import_editorial_source_selection(
     suggested_title = main.title_seed.strip() or main.title
     title = job.request.title or job.request.topic or current.title or suggested_title
     central_theme = current.central_theme.strip() or job.request.topic or main.central_theme
-    call_to_action = current.call_to_action.strip()
-    if not call_to_action:
+    call_to_action = "" if compact else current.call_to_action.strip()
+    if not compact and not call_to_action:
         call_to_action = (
             "Escolher exatamente uma ação natural — comentar, inscrever-se ou compartilhar — "
             "conectada ao valor entregue, em até doze palavras e quatro segundos."
@@ -840,7 +899,11 @@ def _import_editorial_source_selection(
         practical_application=practical_application,
         audience=current.audience.strip() or main.audience,
         emotional_intent=current.emotional_intent.strip() or main.emotional_intent,
-        narration_tone=narration_tone_for_mode(creative_mode),
+        narration_tone=(
+            "íntimo, emocional e cinematográfico, como uma fala de Jesus em um filme épico"
+            if compact
+            else narration_tone_for_mode(creative_mode)
+        ),
         target_duration_seconds=project.target_duration_seconds,
         bible_translation=main.translation,
         literal_quote_policy=(
@@ -850,7 +913,27 @@ def _import_editorial_source_selection(
             dict.fromkeys(current.interpretation_limits or main.interpretation_limits)
         ),
         claims_to_avoid=list(dict.fromkeys(current.claims_to_avoid or main.claims_to_avoid)),
-        visual_notes=list(dict.fromkeys(current.visual_notes or main.visual_notes)),
+        visual_notes=list(
+            dict.fromkeys(
+                [
+                    *(current.visual_notes or main.visual_notes),
+                    *(
+                        [
+                            (
+                                "Jesus é o centro emocional e visual da cena, em linguagem "
+                                "de filme épico."
+                            ),
+                            (
+                                "A câmera aproxima Jesus do espectador; não usar pregador "
+                                "ou explicação visual."
+                            ),
+                        ]
+                        if compact
+                        else []
+                    ),
+                ]
+            )
+        ),
         call_to_action=call_to_action,
         retention_archetype=retention_archetype,
         human_conflict=current.human_conflict.strip() or main.human_conflict,

@@ -85,7 +85,11 @@ type InterpretiveStance = Literal[
 
 type HookPolicy = Literal["auto", "required", "optional", "none"]
 
-type HookContract = Literal["mode_compatible_v1", "user_six_v1"]
+type HookContract = Literal[
+    "mode_compatible_v1",
+    "user_six_v1",
+    "cinematic_interruption_v1",
+]
 
 type HookFamily = Literal[
     "auto",
@@ -102,6 +106,7 @@ type HookFamily = Literal[
     "contradiction",
     "consequence_first",
     "quote_first",
+    "emotional_interruption",
 ]
 
 USER_SIX_HOOK_FAMILIES: tuple[HookFamily, ...] = (
@@ -301,6 +306,10 @@ class ImageConfig(PipelineModel):
 class MusicConfig(PipelineModel):
     enabled: bool = True
     selection_mode: Literal["random"] = "random"
+    library_profile: Literal[
+        "default",
+        "adaptive_compact_devotional_v1",
+    ] = "default"
 
 
 class YouTubeGrowthConfig(PipelineModel):
@@ -413,7 +422,12 @@ class ShortsScriptConfig(PipelineModel):
     specialist_role: Literal["shorts_script_specialist"] = "shorts_script_specialist"
     require_independent_biblical_review: bool = False
     duration_profile: Literal["standard_45_55_v1", "adaptive_compact_v1"] = "standard_45_55_v1"
-    min_words: int = Field(default=105, ge=24, le=180)
+    compact_narrative_standard: Literal["cinematic_jesus_devotional_v1"] | None = None
+    require_direct_jesus_speech: bool = False
+    require_emotional_interruption_hook: bool = False
+    require_reference_after_quote: bool = False
+    require_no_cta: bool = False
+    min_words: int = Field(default=105, ge=15, le=180)
     max_words: int = Field(default=130, ge=28, le=200)
     hook_max_words: int = Field(default=12, ge=4, le=24)
     hook_target_seconds: float = Field(default=2.0, ge=1.0, le=4.0)
@@ -432,9 +446,9 @@ class ShortsScriptConfig(PipelineModel):
     max_literal_verse_words: int = Field(default=40, ge=8, le=80)
     minimum_retention_beats: int = Field(default=5, ge=3, le=10)
     minimum_progression_beats: int = Field(default=2, ge=1, le=5)
-    minimum_sections: int = Field(default=6, ge=4, le=10)
-    target_scene_min: int = Field(default=8, ge=4, le=12)
-    target_scene_max: int = Field(default=10, ge=4, le=14)
+    minimum_sections: int = Field(default=6, ge=3, le=10)
+    target_scene_min: int = Field(default=8, ge=3, le=12)
+    target_scene_max: int = Field(default=10, ge=3, le=14)
     retention_target_min_seconds: float = Field(default=45.0, ge=10.0, le=60.0)
     retention_target_max_seconds: float = Field(default=55.0, ge=12.0, le=60.0)
     require_comment_prompt: bool = False
@@ -570,6 +584,13 @@ class Briefing(PipelineModel):
             raise ValueError(
                 "hook_contract=user_six_v1 aceita somente uma das seis famílias oficiais."
             )
+        if self.hook_contract == "cinematic_interruption_v1" and self.hook_family not in {
+            "auto",
+            "emotional_interruption",
+        }:
+            raise ValueError(
+                "hook_contract=cinematic_interruption_v1 exige emotional_interruption."
+            )
         return self
 
 
@@ -590,6 +611,7 @@ class SourceEntry(PipelineModel):
     claim_scope: str
     rights_note: str | None = None
     verified: bool = False
+    spoken_by: Literal["jesus", "other", "unspecified"] = "unspecified"
 
     @model_validator(mode="after")
     def seal_excerpt_snapshot(self) -> SourceEntry:
@@ -662,6 +684,7 @@ class VerseCandidate(PipelineModel):
     selection_weight: float = 1.0
     familiarity_score: float = Field(default=0.5, ge=0.0, le=1.0)
     clarity_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    spoken_by: Literal["jesus", "other", "unspecified"] = "unspecified"
 
 
 class VerseCatalog(PipelineModel):
@@ -1237,6 +1260,7 @@ class MusicManifest(PipelineModel):
     source_hash: str | None = None
     path: str | None = None
     library_track_count: int = 0
+    library_profile: Literal["default", "adaptive_compact_devotional_v1"] = "default"
     mix_standard: Literal["legacy_gain_v1", "voice_music_loudness_v1"] = "legacy_gain_v1"
     narration_target_lufs: float | None = None
     background_music_target_lufs: float | None = None
@@ -1445,6 +1469,7 @@ class ShortsRetentionBeat(PipelineModel):
         "application",
         "callback",
         "cta",
+        "reference",
     ]
     viewer_question: str
     viewer_value: str
@@ -1599,6 +1624,42 @@ class ShortsCreativeDirection(PipelineModel):
         return self
 
 
+class ShortsCinematicDevotionalDirection(PipelineModel):
+    pattern: Literal["cinematic_jesus_devotional_v1"] = "cinematic_jesus_devotional_v1"
+    creative_mode: Literal["devotional_application", "pastoral_encouragement"]
+    interpretive_stance: Literal["devotional"] = "devotional"
+    hook_family: Literal["emotional_interruption"] = "emotional_interruption"
+    opening_section_id: str
+    scripture_section_id: str
+    reference_section_id: str
+    emotional_hook: str
+    content_promise: str
+    viewer_takeaway: str
+    spoken_reference: str
+    source_id: str
+    visual_emotional_arc: list[str] = Field(min_length=3, max_length=6)
+
+    @model_validator(mode="after")
+    def validate_compact_direction(self) -> ShortsCinematicDevotionalDirection:
+        section_ids = (
+            self.opening_section_id,
+            self.scripture_section_id,
+            self.reference_section_id,
+        )
+        if len(set(section_ids)) != 3:
+            raise ValueError("O momento cinematográfico exige três seções distintas")
+        required = (
+            self.emotional_hook,
+            self.content_promise,
+            self.viewer_takeaway,
+            self.spoken_reference,
+            self.source_id,
+        )
+        if not all(value.strip() for value in required):
+            raise ValueError("O contrato cinematográfico não pode ter campos essenciais vazios")
+        return self
+
+
 class ShortsScriptStrategy(PipelineModel):
     target_viewer: str
     viewer_need: str
@@ -1611,6 +1672,7 @@ class ShortsScriptStrategy(PipelineModel):
         "contrast",
         "direct_tension",
         "surprising_detail",
+        "emotional_interruption",
     ]
     hook_family: HookFamily = "auto"
     hook_techniques: list[
@@ -1630,6 +1692,7 @@ class ShortsScriptStrategy(PipelineModel):
     narrative_spine: ShortsNarrativeSpine | None = None
     retention_story: ShortsRetentionStory | None = None
     creative_direction: ShortsCreativeDirection | None = None
+    cinematic_devotional: ShortsCinematicDevotionalDirection | None = None
     open_loop: str
     payoff: str
     practical_value: str

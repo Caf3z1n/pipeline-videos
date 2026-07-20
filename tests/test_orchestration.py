@@ -368,7 +368,7 @@ def test_manual_short_cli_accepts_fifteen_second_duration(tmp_path) -> None:
             "--format",
             "short",
             "--creative-mode",
-            "character_portrait",
+            "pastoral_encouragement",
             "--projects-dir",
             str(tmp_path),
         ],
@@ -379,6 +379,10 @@ def test_manual_short_cli_accepts_fifteen_second_duration(tmp_path) -> None:
     manifest = json.loads((project / "project.json").read_text(encoding="utf-8"))
     assert manifest["target_duration_seconds"] == 15
     assert manifest["config"]["shorts_script"]["duration_profile"] == "adaptive_compact_v1"
+    briefing = read_model(project / "editorial/briefing.json", Briefing)
+    assert briefing.creative_mode == "pastoral_encouragement"
+    assert briefing.hook_family == "emotional_interruption"
+    assert briefing.hook_contract == "cinematic_interruption_v1"
 
 
 def test_image_pool_uses_third_slot_when_growth_specialist_is_disabled(tmp_path) -> None:

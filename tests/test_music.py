@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import pipeline_videos.music as music_module
 from pipeline_videos.models import MusicManifest, StageStatus
 from pipeline_videos.music import import_music, list_music_tracks, select_music
 from pipeline_videos.project import create_project
@@ -121,3 +122,74 @@ def test_music_library_only_lists_supported_audio_files(tmp_path) -> None:
     (tmp_path / "notes.txt").write_text("ignore", encoding="utf-8")
 
     assert [path.name for path in list_music_tracks(tmp_path)] == ["track.flac", "track.MP3"]
+
+
+def test_compact_profile_uses_only_its_two_devotional_tracks(tmp_path, monkeypatch) -> None:
+    layout = create_project(
+        "compacto-com-musica",
+        "Momento com Jesus",
+        projects_dir=tmp_path / "projects",
+        target_duration_seconds=15,
+        video_format="short",
+    )
+    library = tmp_path / "compact-library"
+    library.mkdir()
+    (library / "Aloboi .mp3").write_bytes(b"aloboi")
+    (library / "Leaning.mp3").write_bytes(b"leaning")
+    (library / "outra.mp3").write_bytes(b"nao-usar")
+    monkeypatch.setattr(music_module, "COMPACT_DEVOTIONAL_MUSIC_LIBRARY", library)
+
+    selected = select_music(
+        layout,
+        chooser=lambda tracks: next(track for track in tracks if track.name == "Leaning.mp3"),
+    )
+
+    assert selected.source_name == "Leaning.mp3"
+    assert selected.library_track_count == 2
+    assert selected.library_profile == "adaptive_compact_devotional_v1"
+    assert (layout.root / selected.path).read_bytes() == b"leaning"
+
+
+def test_compact_profile_rejects_music_outside_exclusive_library(tmp_path, monkeypatch) -> None:
+    layout = create_project(
+        "compacto-musica-invalida",
+        "Momento com Jesus",
+        projects_dir=tmp_path / "projects",
+        target_duration_seconds=15,
+        video_format="short",
+    )
+    library = tmp_path / "compact-library"
+    library.mkdir()
+    (library / "Aloboi .mp3").write_bytes(b"aloboi")
+    (library / "Leaning.mp3").write_bytes(b"leaning")
+    external = tmp_path / "outra.mp3"
+    external.write_bytes(b"outra")
+    monkeypatch.setattr(music_module, "COMPACT_DEVOTIONAL_MUSIC_LIBRARY", library)
+
+    with pytest.raises(ValueError, match="biblioteca devocional exclusiva"):
+        import_music(layout, external)
+
+
+def test_compact_profile_rejects_an_existing_project_track_outside_library(
+    tmp_path, monkeypatch
+) -> None:
+    layout = create_project(
+        "compacto-musica-existente-invalida",
+        "Momento com Jesus",
+        projects_dir=tmp_path / "projects",
+        target_duration_seconds=15,
+        video_format="short",
+    )
+    library = tmp_path / "compact-library"
+    library.mkdir()
+    (library / "Aloboi .mp3").write_bytes(b"aloboi")
+    (library / "Leaning.mp3").write_bytes(b"leaning")
+    monkeypatch.setattr(music_module, "COMPACT_DEVOTIONAL_MUSIC_LIBRARY", library)
+    existing = layout.music_assets / "Leaning.mp3"
+    existing.write_bytes(b"arquivo-diferente-com-mesmo-nome")
+    project = layout.load_manifest()
+    project.config.render.background_music_path = "audio/music/Leaning.mp3"
+    layout.save_manifest(project)
+
+    with pytest.raises(ValueError, match="biblioteca devocional exclusiva"):
+        select_music(layout)

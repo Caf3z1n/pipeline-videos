@@ -38,7 +38,9 @@
 - Não invente versículo, referência, citação ou detalhe histórico.
 - Na locução, verbalize: “Livro, capítulo X, versículo Y”; formato compacto fica nos metadados.
 - Short cita literalmente ao menos um versículo verificado, curto e claro.
-- Apresente a referência fora das aspas: `Em Livro, capítulo X, versículo Y, lemos: “texto.”`
+- Apresente a referência fora das aspas. Fora do perfil compacto, use
+  `Em Livro, capítulo X, versículo Y, lemos: “texto.”`. Em `adaptive_compact_v1`, cite primeiro a
+  fala direta de Jesus entre aspas e encerre com `Livro, capítulo X, versículo Y.`.
 - Registre tradução, fonte, acesso e direitos de citação literal.
 - Classifique afirmações como `biblical_text`, `verified_context`, `interpretation` ou
   `creative_elaboration`.
@@ -49,8 +51,8 @@
   explicitamente, use o candidato automatizado validado em vez de preencher aprovações.
 - A locução permanece integralmente em português: não narre `open loop`, `payoff`, `storytelling`,
   `call to action` ou outro jargão editorial em inglês.
-- Não diga “o texto fala/diz/registra”. Prefira “a Bíblia diz” ou “Em Livro, capítulo X,
-  versículo Y, lemos:”.
+- Não diga “o texto fala/diz/registra”. Fora do perfil compacto, prefira “a Bíblia diz” ou “Em
+  Livro, capítulo X, versículo Y, lemos:”. No compacto, não use introdução antes da citação.
 - Em vídeo longo, use citações literais verificadas distribuídas pela narrativa: alvo de 0,8 a 1,2
   por minuto; dez minutos exigem de oito a doze citações. No padrão novo, a primeira entra até 75
   segundos, o intervalo máximo é de 105 segundos e a parte final não fica mais de 120 segundos sem
@@ -76,13 +78,20 @@
 - Pedido simples de Short usa `new-short`, seguido de `status`, `run --dry-run` e one-shot; não peça
   novamente versículo, CTA, estilo ou fluxo já padronizados.
 - Shorts aceitam duração mínima de 15 segundos. De 15 a 44 segundos, respeite o perfil persistido
-  `adaptive_compact_v1`; em 15 segundos ele usa 30 a 38 palavras, cinco a seis cenas, citação de 3 a
-  9 segundos, trecho literal de até 18 palavras, CTA de até três segundos e um worker de imagens.
-- Shorts novos usam `hook_contract=user_six_v1` e começam exatamente com uma destas seis estruturas:
+  `adaptive_compact_v1`, restrito a `devotional_application` e `pastoral_encouragement`. Ele encena
+  um momento emocional de um filme épico sobre Jesus: a primeira frase interrompe o pensamento do
+  espectador, a fala direta de Jesus começa imediatamente depois e a referência bíblica encerra o
+  vídeo. Em 15 segundos, usa 17 a 44 palavras, três a quatro cenas, citação de 2 a 12,3 segundos,
+  trecho literal de até 28 palavras, referência de 12,3 a 15 segundos, nenhum CTA e um worker de
+  imagens. Não use “lemos”, introdução expositiva nem versículo narrativo; a fonte precisa estar
+  marcada como fala direta de Jesus.
+- Shorts padrão novos usam `hook_contract=user_six_v1` e começam exatamente com uma destas seis estruturas:
   `Se você quer [X], faça isso.`, `O que acontece se você parar de [X]?`,
   `Se você ainda faz [X], está perdendo [Y].`, `Ninguém fala sobre [X], mas...`,
-  `Quer aprender [X]? Comece...` ou `Nunca faça [X].`. Outras famílias ficam restritas a projetos
-  legados e vídeos longos; o preflight deve bloquear qualquer divergência antes da produção.
+  `Quer aprender [X]? Comece...` ou `Nunca faça [X].`. O perfil compacto usa
+  `hook_contract=cinematic_interruption_v1` e `hook_family=emotional_interruption`; outras famílias
+  ficam restritas a projetos legados e vídeos longos. O preflight deve bloquear qualquer
+  divergência antes da produção.
 - O seletor automático usa o catálogo local verificado, combina as pastas com o registro Git
   compartilhado, reserva por compare-and-swap antes de criar o projeto e favorece variedade de
   livro, tema, personagem, testamento, modo criativo e família de hook. Falha do registro bloqueia a
@@ -105,11 +114,12 @@
 
 ## Contratos dos especialistas
 
-- O roteirista de Shorts novos usa `creative_retention_v3`: modo e postura explícitos, hook inicial
-  obrigatório, citação literal entre 8 e 20 segundos no perfil padrão ou na janela persistida pelo
-  perfil compacto, desenvolvimento com informação nova,
-  reengajamento, resolução coerente com o modo e exatamente uma ação de CTA em até quatro segundos.
-  Aplicação e callback são opcionais, salvo nos modos devocionais.
+- O roteirista de Shorts novos usa `creative_retention_v3`: modo e postura explícitos e hook inicial
+  obrigatório. No perfil padrão, usa citação literal entre 8 e 20 segundos, desenvolvimento com
+  informação nova, reengajamento, resolução coerente com o modo e exatamente uma ação de CTA em até
+  quatro segundos. No perfil compacto, usa exatamente três seções — interrupção emocional, fala
+  direta de Jesus entre aspas e referência falada — sem CTA, comentário, despedida ou resumo.
+  Aplicação e callback são opcionais fora do contrato cinematográfico compacto.
 - O roteirista de vídeos longos novos usa `creative_retention_long_v2`: modo e postura explícitos,
   hook adaptativo, progressão por movimentos, reengajamentos proporcionais à duração, citações
   literais periódicas, resolução coerente com o modo e exatamente uma ação de CTA em até dez
@@ -249,6 +259,9 @@
   música fica 16 LU abaixo dela (-34 LUFS por padrão), com limites de true peak antes do `amix`.
   `narration_gain_db` e `background_music_gain_db` são apenas trims explícitos; não substituem a
   normalização. Projetos legados preservam o padrão salvo.
+- O perfil `adaptive_compact_v1` usa exclusivamente `music-library/adaptive-compact-v1/Aloboi .mp3`
+  e `music-library/adaptive-compact-v1/Leaning.mp3`; não misture essa biblioteca com a biblioteca
+  geral de outros formatos.
 - A validação e o manifesto da música registram `audio_mix_standard`, alvo da voz, alvo da música e
   diferença em LU; divergência bloqueia o candidato final.
 

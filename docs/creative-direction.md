@@ -61,8 +61,11 @@ continua impedindo aprovação.
 
 ## Política de hook
 
-Shorts novos usam `hook_contract=user_six_v1`: a primeira fala é específica, honesta, tem no máximo
-12 palavras, termina até dois segundos e corresponde exatamente a uma das seis estruturas aceitas.
+Shorts padrão novos usam `hook_contract=user_six_v1`: a primeira fala é específica, honesta, tem no
+máximo 12 palavras, termina até dois segundos e corresponde exatamente a uma das seis estruturas
+aceitas. Shorts em `adaptive_compact_v1` usam `cinematic_interruption_v1`: a primeira fala tem de
+duas a oito palavras e parece Jesus interrompendo um pensamento do espectador, como “Olhe para mim.”
+ou “Eu sei que você está cansado.”.
 Vídeos longos resolvem `hook_policy` como `required`, `optional` ou `none` conforme o modo e o tema.
 Quando não há hook, `opening_line` ainda precisa orientar a cena e entregar valor nos primeiros 40
 segundos; saudação genérica continua proibida.
@@ -89,11 +92,13 @@ Independentemente do modo:
   ou mudança real de entendimento;
 - reengajamentos mudam a pergunta, escala, evidência ou direção visual;
 - a resolução entrega o valor prometido sem precisar virar conselho;
-- o CTA pede exatamente uma ação e vem depois da conclusão;
+- fora do perfil compacto, o CTA pede exatamente uma ação e vem depois da conclusão;
 - a direção visual representa um momento, ambiente e ação por imagem.
 
-Shorts mantêm ao menos uma citação literal verificada. O perfil padrão usa 8 a 20 segundos; perfis
-compactos persistem uma janela proporcional — de 3 a 9 segundos em 15 segundos. Vídeos longos
+Shorts mantêm ao menos uma citação literal verificada. O perfil padrão usa 8 a 20 segundos. O perfil
+compacto aceita somente fala direta de Jesus, iniciada imediatamente após o hook, e termina com a
+referência fora das aspas; em 15 segundos, a citação vai de 2 a 12,3 segundos e a referência de 12,3
+a 15 segundos. Vídeos longos
 mantêm o alvo de 0,8 a 1,2 citação por minuto, primeira âncora até 75 segundos, intervalo máximo
 de 105 segundos e no máximo 120 segundos entre a última citação e o fim.
 

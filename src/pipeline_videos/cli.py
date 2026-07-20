@@ -17,6 +17,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from pipeline_videos.models import (
+    COMPACT_SHORT_THRESHOLD_SECONDS,
     DEFAULT_ELEVENLABS_MODEL_ID,
     DEFAULT_ELEVENLABS_VOICE_ID,
     MIN_SHORT_DURATION_SECONDS,
@@ -506,6 +507,7 @@ def _validate_short_bootstrap_options(
     hook_family: str,
     voice_variant: str,
     music_file: Path | None,
+    duration: int,
 ) -> tuple[str | None, str | None, str]:
     from pipeline_videos.creative_direction import CREATIVE_MODE_SPECS
     from pipeline_videos.music import SUPPORTED_MUSIC_EXTENSIONS
@@ -514,7 +516,16 @@ def _validate_short_bootstrap_options(
     if mode is not None and mode not in CREATIVE_MODE_SPECS:
         raise typer.BadParameter(f"Modo criativo desconhecido: {creative_mode}")
     family = None if hook_family == "auto" else hook_family
-    if family is not None and family not in USER_SIX_HOOK_FAMILIES:
+    compact = duration < COMPACT_SHORT_THRESHOLD_SECONDS
+    if compact and mode not in {None, "devotional_application", "pastoral_encouragement"}:
+        raise typer.BadParameter(
+            "Shorts compactos aceitam somente devotional_application ou pastoral_encouragement."
+        )
+    if compact and family not in {None, "emotional_interruption"}:
+        raise typer.BadParameter(
+            "Shorts compactos usam somente --hook-family emotional_interruption."
+        )
+    if not compact and family is not None and family not in USER_SIX_HOOK_FAMILIES:
         choices = ", ".join(USER_SIX_HOOK_FAMILIES)
         raise typer.BadParameter(f"Use uma das seis famílias oficiais: {choices}")
     if family is not None and mode is None:
@@ -548,23 +559,37 @@ def _apply_short_bootstrap_settings(
     )
     from pipeline_videos.music import import_music
 
-    if creative_mode is not None:
+    manifest = layout.load_manifest()
+    compact = manifest.config.shorts_script.duration_profile == "adaptive_compact_v1"
+    if creative_mode is not None or compact:
         briefing = read_model(layout.briefing, Briefing)
+        selected_mode = creative_mode or (
+            briefing.creative_mode
+            if briefing.creative_mode in {"devotional_application", "pastoral_encouragement"}
+            else "pastoral_encouragement"
+        )
         selected_family = (
-            hook_family
+            "emotional_interruption"
+            if compact
+            else hook_family
             or hook_families_for_mode(
-                creative_mode,
+                selected_mode,
                 short=True,
                 hook_contract="user_six_v1",
             )[0]
         )
-        spec = CREATIVE_MODE_SPECS[creative_mode]
-        briefing.creative_mode = creative_mode
-        briefing.interpretive_stance = default_interpretive_stance(creative_mode)
-        briefing.narration_tone = narration_tone_for_mode(creative_mode)
+        spec = CREATIVE_MODE_SPECS[selected_mode]
+        briefing.creative_mode = selected_mode
+        briefing.interpretive_stance = default_interpretive_stance(selected_mode)
+        briefing.narration_tone = (
+            "íntimo, emocional e cinematográfico, como uma fala de Jesus em um filme épico"
+            if compact
+            else narration_tone_for_mode(selected_mode)
+        )
         briefing.hook_policy = "required"
         briefing.hook_family = selected_family
-        briefing.hook_contract = "user_six_v1"
+        briefing.hook_contract = "cinematic_interruption_v1" if compact else "user_six_v1"
+        briefing.call_to_action = "" if compact else briefing.call_to_action
         briefing.creative_rationale = f"{spec.label}: {spec.purpose}"
         write_json(layout.briefing, briefing)
     manifest = layout.load_manifest()
@@ -601,6 +626,7 @@ def new_project(
             hook_family=hook_family,
             voice_variant=voice_variant,
             music_file=music_file,
+            duration=duration,
         )
     elif (
         creative_mode != "auto"
@@ -659,6 +685,7 @@ def new_short(
         hook_family=hook_family,
         voice_variant=voice_variant,
         music_file=music_file,
+        duration=duration,
     )
     layout, candidate, score = create_auto_short(
         projects_dir=projects_dir,
@@ -682,7 +709,7 @@ def new_short(
                     "passage": candidate.reference,
                     "creative_mode": read_model(layout.briefing, Briefing).creative_mode,
                     "hook_family": read_model(layout.briefing, Briefing).hook_family,
-                    "hook_contract": "user_six_v1",
+                    "hook_contract": read_model(layout.briefing, Briefing).hook_contract,
                     "voice_variant": variant,
                     "music": str(music_file.resolve()) if music_file else None,
                     "next_command": f'uv run pipeline-videos run "{layout.root}" --dry-run',

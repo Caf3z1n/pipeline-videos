@@ -32,8 +32,10 @@ formam uma única combinação complementar em todos os modos novos.
 O padrão editorial mantém toda a locução em português e exige citações bíblicas literais
 verificadas por uma revisão independente antes do import. Projetos novos escolhem entre 16 modos criativos e usam
 `Enfoque concreto | Passagem`, sem converter automaticamente a conclusão em aplicação
-motivacional. Shorts novos começam exatamente com uma de seis estruturas de hook; longos usam hook adaptativo. Ambos encerram
-com CTA de uma única ação. Longos recebem também uma timeline bíblica iniciada por
+motivacional. Shorts padrão começam exatamente com uma de seis estruturas de hook; o perfil
+compacto começa com uma interrupção emocional e longos usam hook adaptativo. Shorts padrão e
+longos encerram com CTA de uma única ação; o perfil compacto termina somente com a referência
+bíblica. Longos recebem também uma timeline bíblica iniciada por
 `00:00 - Abertura`. Nas capas de
 Shorts, a palavra de impacto e o elemento narrativo usam vermelho, com seta, X, sublinhado ou pincel
 apontando para algo real da cena. As capas longas preservam uma área limpa no lado oposto ao
@@ -111,10 +113,13 @@ Para pedir um Short de 15 segundos, informe a duração na criação:
 uv run pipeline-videos new-short --duration 15
 ```
 
-Entre 15 e 44 segundos, o pipeline ativa `adaptive_compact_v1`. Em 15 segundos, ele trabalha com
-30 a 38 palavras, cinco a seis cenas, citação entre 3 e 9 segundos, versículo de até 18 palavras,
-CTA de até três segundos e um único trabalhador de imagens. Hook, revisão bíblica independente,
-qualidade visual, render final e validações de upload permanecem iguais ao perfil padrão.
+Entre 15 e 44 segundos, o pipeline ativa `adaptive_compact_v1`, restrito aos modos
+`devotional_application` e `pastoral_encouragement`. O Short começa com uma interrupção emocional
+de até dois segundos, entra imediatamente em uma fala direta de Jesus entre aspas e termina com a
+referência bíblica falada, sem “lemos” e sem CTA. Em 15 segundos, usa de 17 a 44 palavras, três a
+quatro cenas, trecho literal de até 28 palavras e um único trabalhador de imagens. Revisão bíblica
+independente, qualidade visual, render final e validações de upload permanecem iguais ao perfil
+padrão.
 
 Quando tema, modo, hook, voz e música já forem conhecidos, configure tudo atomicamente na criação.
 Por exemplo, para um retrato de Judas com a segunda voz de Jesus:
@@ -206,8 +211,9 @@ uv run pipeline-videos catalog status --format short
 uv run pipeline-videos catalog status --format long
 ```
 
-O projeto já nasce com `creative_retention_v3`: hook de até dois segundos, citação literal entre 8
-e 20 segundos, desenvolvimento, reengajamento, resolução e CTA de uma única ação. O seletor
+O projeto já nasce com `creative_retention_v3`: no perfil padrão, hook de até dois segundos,
+citação literal entre 8 e 20 segundos, desenvolvimento, reengajamento, resolução e CTA de uma única
+ação. O seletor
 considera potencial narrativo, passagem e histórico recente para variar modo criativo e família de
 hook. O briefing recebe postura interpretativa, resultado para o espectador, progressão visual,
 possível revelação e semente de título. O tom segue o modo — factual, expositivo, analítico,
@@ -281,14 +287,17 @@ Toda importação também deriva `script/creative-contract.json` sem chamada ext
 primeira fala, resolução, função de cada seção, componentes críticos e perfil de ritmo passam a ser reutilizados por
 cenas, crescimento e validação, em vez de serem decididos novamente.
 
-Novos Shorts seguem `creative_retention_v3`: selecionam uma direção editorial e salvam
+Novos Shorts padrão seguem `creative_retention_v3`, selecionam uma direção editorial e salvam
 `hook_contract=user_six_v1`. A primeira fala precisa corresponder exatamente a uma das seis
-estruturas documentadas e terminar em até dois segundos. No perfil padrão, a citação verificada
-entra entre 8 e 20 segundos; no perfil compacto, a janela é calculada pela duração e persistida no
-projeto — de 3 a 9 segundos em um Short de 15 segundos. O valor cresce até um reengajamento entre
-40% e 60% da duração. A resolução pode ser factual,
+estruturas documentadas e terminar em até dois segundos. A citação verificada entra entre 8 e 20
+segundos. No perfil compacto, `hook_contract=cinematic_interruption_v1`: a primeira fala parece
+Jesus interrompendo um pensamento do espectador e é seguida imediatamente por uma citação direta
+de Jesus. Em 15 segundos, a citação ocupa de 2 a 12,3 segundos e a referência falada encerra de
+12,3 a 15 segundos, sem CTA. No perfil padrão, o valor cresce até um reengajamento entre 40% e 60%
+da duração. A resolução pode ser factual,
 explicativa, analítica, filosófica ou devocional. Aplicação e callback só entram quando servem ao
-modo. O encerramento pede somente comentar, inscrever-se ou compartilhar, em até quatro segundos.
+modo. Fora do perfil compacto, o encerramento pede somente comentar, inscrever-se ou compartilhar,
+em até quatro segundos.
 Contratos anteriores continuam válidos nos projetos que já os armazenam.
 O contrato completo está em
 [docs/shorts-script-standard.md](docs/shorts-script-standard.md).
@@ -310,7 +319,9 @@ as seções estruturadas e a classificação das afirmações separam a citaçã
 não exibem rótulos de contexto: somente as palavras copiadas literalmente da fonte bíblica verificada
 aparecem em itálico; referência, paráfrase e reflexão permanecem sem itálico. A apresentação do
 narrador fica fora das aspas; somente o versículo literal é delimitado: `Em Josué, capítulo 1,
-versículo 9, lemos: “texto do versículo.”`
+versículo 9, lemos: “texto do versículo.”` No perfil compacto, as aspas continuam delimitando toda
+a fala direta de Jesus, mas a referência vem depois: `“texto do versículo.” João, capítulo 8,
+versículo 12.`
 
 Projetos longos novos exigem o JSON estruturado com `long_form_strategy`. Texto com parágrafos
 continua disponível para projetos legados:
@@ -420,6 +431,10 @@ o áudio omitir ou reformular palavras, a importação falha e pede uma nova nar
 
 Adicione suas faixas diretamente em `music-library/` na raiz deste repositório. São aceitos MP3,
 WAV, M4A, AAC, FLAC e OGG. Para conferir a pasta e listar as faixas disponíveis:
+
+O perfil `adaptive_compact_v1` usa exclusivamente a biblioteca
+`music-library/adaptive-compact-v1/`, formada por `Aloboi .mp3` e `Leaning.mp3`. Essas faixas não
+entram no sorteio dos demais perfis, e músicas da biblioteca geral não entram no perfil compacto.
 
 ```powershell
 uv run pipeline-videos music library

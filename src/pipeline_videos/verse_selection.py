@@ -28,6 +28,7 @@ from pipeline_videos.git_registry import (
     update_shared_registry,
 )
 from pipeline_videos.models import (
+    COMPACT_SHORT_THRESHOLD_SECONDS,
     USER_SIX_HOOK_FAMILIES,
     Briefing,
     CreativeMode,
@@ -65,6 +66,10 @@ RETENTION_ARCHETYPES = (
     "conflict_first",
     "counterintuitive_reveal",
     "stair_step_progression",
+)
+COMPACT_DEVOTIONAL_MODES: tuple[CreativeMode, ...] = (
+    "devotional_application",
+    "pastoral_encouragement",
 )
 
 BOOK_ALIASES = {
@@ -673,6 +678,26 @@ def select_creative_mode(
     )
 
 
+def select_compact_devotional_mode(usage: VerseUsageIndex) -> CreativeMode:
+    """Alternate only between the two emotional modes allowed by the compact profile."""
+
+    recent = sorted(
+        (record for record in usage.records if record.video_format == "short"),
+        key=lambda item: item.created_at,
+        reverse=True,
+    )
+    frequencies = Counter(record.creative_mode for record in recent)
+    last_mode = recent[0].creative_mode if recent else None
+    return min(
+        COMPACT_DEVOTIONAL_MODES,
+        key=lambda mode: (
+            mode == last_mode,
+            frequencies[mode],
+            COMPACT_DEVOTIONAL_MODES.index(mode),
+        ),
+    )
+
+
 def select_hook_family(
     creative_mode: str,
     usage: VerseUsageIndex,
@@ -764,12 +789,14 @@ def eligible_main_candidate_ids(
     *,
     video_format: Literal["landscape", "short"],
     max_verse_words: int | None = None,
+    required_spoken_by: Literal["jesus"] | None = None,
 ) -> set[str]:
     counts, reserved = _main_candidate_usage(catalog, usage, video_format=video_format)
     candidate_ids = {
         candidate.candidate_id
         for candidate in catalog.candidates
         if max_verse_words is None or len(tokenize_words(candidate.verse_text)) <= max_verse_words
+        if required_spoken_by is None or candidate.spoken_by == required_spoken_by
     }
     minimum_usage = min((counts[candidate_id] for candidate_id in candidate_ids), default=0)
     return {
@@ -785,16 +812,20 @@ def select_unused_verse(
     *,
     video_format: Literal["landscape", "short"] = "short",
     max_verse_words: int | None = None,
+    required_spoken_by: Literal["jesus"] | None = None,
 ) -> tuple[VerseCandidate, float]:
     counts, reserved = _main_candidate_usage(catalog, usage, video_format=video_format)
     candidate_pool = [
         candidate
         for candidate in catalog.candidates
         if max_verse_words is None or len(tokenize_words(candidate.verse_text)) <= max_verse_words
+        if required_spoken_by is None or candidate.spoken_by == required_spoken_by
     ]
     if not candidate_pool:
         raise RuntimeError(
-            "O catálogo não possui versículo curto o bastante para a duração solicitada."
+            "O catálogo não possui fala direta de Jesus curta o bastante para a duração solicitada."
+            if required_spoken_by == "jesus"
+            else "O catálogo não possui versículo curto o bastante para a duração solicitada."
         )
     minimum_usage = min(counts[candidate.candidate_id] for candidate in candidate_pool)
     available = [
@@ -892,10 +923,24 @@ def create_auto_video(
         creative_mode_override = None
     if hook_family_override == "auto":
         hook_family_override = None
-    if video_format == "short" and hook_family_override not in {
-        None,
-        *USER_SIX_HOOK_FAMILIES,
-    }:
+    compact_profile = (
+        video_format == "short" and target_duration_seconds < COMPACT_SHORT_THRESHOLD_SECONDS
+    )
+    if compact_profile and creative_mode_override not in {None, *COMPACT_DEVOTIONAL_MODES}:
+        raise ValueError(
+            "Shorts compactos aceitam somente devotional_application ou pastoral_encouragement."
+        )
+    if compact_profile and hook_family_override not in {None, "emotional_interruption"}:
+        raise ValueError("Shorts compactos exigem hook_family=emotional_interruption.")
+    if (
+        video_format == "short"
+        and not compact_profile
+        and hook_family_override
+        not in {
+            None,
+            *USER_SIX_HOOK_FAMILIES,
+        }
+    ):
         raise ValueError("Novos Shorts aceitam somente uma das seis famílias oficiais de hook.")
     root = (projects_dir or DEFAULT_PROJECTS_DIR).expanduser().resolve()
     catalog = load_verse_catalog(catalog_path)
@@ -925,24 +970,32 @@ def create_auto_video(
                     if video_format == "short"
                     else None
                 ),
+                required_spoken_by="jesus" if compact_profile else None,
             )
             retention_archetype = (
                 select_retention_archetype(candidate, usage) if video_format == "short" else None
             )
-            creative_mode = creative_mode_override or select_creative_mode(
-                candidate,
-                usage,
-                video_format=video_format,
+            creative_mode = creative_mode_override or (
+                select_compact_devotional_mode(usage)
+                if compact_profile
+                else select_creative_mode(candidate, usage, video_format=video_format)
             )
             hook_policy = (
                 "required" if video_format == "short" else default_long_hook_policy(creative_mode)
             )
-            hook_family = hook_family_override or select_hook_family(
-                creative_mode,
-                usage,
-                video_format=video_format,
-                hook_policy=hook_policy,
-                hook_contract=("user_six_v1" if video_format == "short" else "mode_compatible_v1"),
+            hook_family = (
+                "emotional_interruption"
+                if compact_profile
+                else hook_family_override
+                or select_hook_family(
+                    creative_mode,
+                    usage,
+                    video_format=video_format,
+                    hook_policy=hook_policy,
+                    hook_contract=(
+                        "user_six_v1" if video_format == "short" else "mode_compatible_v1"
+                    ),
+                )
             )
             predicted_id = project_directory_name(candidate.slug, project_date=project_date)
             reservation = _reservation_record(
@@ -1041,7 +1094,12 @@ def create_auto_video(
             practical_application=practical_application,
             audience=candidate.audience,
             emotional_intent=candidate.emotional_intent,
-            narration_tone=narration_tone_for_mode(creative_mode),
+            narration_tone=(
+                "íntimo, emocional, cinematográfico e sereno, como uma fala de Jesus "
+                "em um filme épico"
+                if compact_profile
+                else narration_tone_for_mode(creative_mode)
+            ),
             target_duration_seconds=target_duration_seconds,
             bible_translation=candidate.translation,
             literal_quote_policy=(
@@ -1050,9 +1108,33 @@ def create_auto_video(
             ),
             interpretation_limits=candidate.interpretation_limits,
             claims_to_avoid=candidate.claims_to_avoid,
-            visual_notes=candidate.visual_notes,
+            visual_notes=(
+                list(
+                    dict.fromkeys(
+                        [
+                            *candidate.visual_notes,
+                            (
+                                "Jesus é o centro emocional e visual da cena, em linguagem "
+                                "de filme épico."
+                            ),
+                            (
+                                "A câmera aproxima Jesus do espectador; não usar pregador, "
+                                "púlpito ou Bíblia aberta explicativa."
+                            ),
+                            (
+                                "Cada imagem preserva silêncio, presença, olhar e "
+                                "continuidade cinematográfica."
+                            ),
+                        ]
+                    )
+                )
+                if compact_profile
+                else candidate.visual_notes
+            ),
             call_to_action=(
-                (
+                ""
+                if compact_profile
+                else (
                     "Escolher exatamente uma ação natural — comentar, inscrever-se ou "
                     "compartilhar — conectada ao valor entregue, em até doze palavras e quatro "
                     "segundos."
@@ -1073,7 +1155,13 @@ def create_auto_video(
             interpretive_stance=default_interpretive_stance(creative_mode),
             hook_policy=hook_policy,
             hook_family=hook_family,
-            hook_contract=("user_six_v1" if video_format == "short" else "mode_compatible_v1"),
+            hook_contract=(
+                "cinematic_interruption_v1"
+                if compact_profile
+                else "user_six_v1"
+                if video_format == "short"
+                else "mode_compatible_v1"
+            ),
             viewer_outcome=viewer_outcome,
             creative_rationale=(f"{creative_spec.label}: {creative_spec.purpose}"),
         )
@@ -1097,6 +1185,7 @@ def create_auto_video(
                     claim_scope="Texto bíblico; contexto e aplicações devem ser distinguidos.",
                     rights_note=candidate.rights_note,
                     verified=True,
+                    spoken_by=candidate.spoken_by,
                 )
             ]
         )

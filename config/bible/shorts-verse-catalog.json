@@ -306,6 +306,7 @@
     },
     {
       "candidate_id": "bpm-mateus-5-9",
+      "spoken_by": "jesus",
       "retention_archetypes": ["counterintuitive_reveal", "conflict_first"],
       "human_conflict": "Evitar uma conversa difícil parece paz, mas o conflito continua crescendo em silêncio.",
       "central_question": "Fazer a paz é ficar calado ou entrar no conflito de outro jeito?",
@@ -339,6 +340,7 @@
     },
     {
       "candidate_id": "bpm-mateus-11-28",
+      "spoken_by": "jesus",
       "retention_archetypes": ["conflict_first", "counterintuitive_reveal"],
       "human_conflict": "A pessoa continua acrescentando tarefas ao próprio fardo para provar que consegue carregar tudo.",
       "central_question": "Por que Jesus chama quem está cansado em vez de ensinar a carregar mais?",
@@ -372,6 +374,7 @@
     },
     {
       "candidate_id": "bpm-joao-14-27",
+      "spoken_by": "jesus",
       "retention_archetypes": ["counterintuitive_reveal", "conflict_first"],
       "human_conflict": "A pessoa espera que a paz só apareça depois que todos os problemas forem resolvidos.",
       "central_question": "Que tipo de paz continua existindo quando o cenário ainda não melhorou?",

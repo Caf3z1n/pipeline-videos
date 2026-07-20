@@ -267,6 +267,10 @@ HOOK_TEMPLATE_EXAMPLES: dict[str, str] = {
     "contradiction": "Coloque duas ideias aparentemente incompatíveis em tensão.",
     "consequence_first": "Mostre primeiro a consequência e depois reconstrua sua causa.",
     "quote_first": "Abra com uma citação curta e verificada que funcione como ponto de partida.",
+    "emotional_interruption": (
+        "Interrompa um pensamento do espectador com uma fala curta, direta e acolhedora, como "
+        "'Não desista agora.' ou 'Olhe para mim.'"
+    ),
 }
 
 USER_TEMPLATE_HOOK_FAMILIES = MODEL_USER_SIX_HOOK_FAMILIES
@@ -383,6 +387,12 @@ def hook_families_for_mode(
     short: bool,
     hook_contract: HookContract = "mode_compatible_v1",
 ) -> tuple[str, ...]:
+    if short and hook_contract == "cinematic_interruption_v1":
+        if mode not in {"devotional_application", "pastoral_encouragement"}:
+            raise ValueError(
+                "O hook cinematográfico compacto aceita somente modos devocional e pastoral."
+            )
+        return ("emotional_interruption",)
     families: dict[str, tuple[str, ...]] = {
         "biblical_storytelling": ("start_in_scene", "consequence_first"),
         "character_portrait": ("start_in_scene", "contradiction", "consequence_first"),
@@ -431,6 +441,25 @@ def _plain(value: str) -> str:
 
 def hook_matches_family(hook: str, family: str) -> bool:
     normalized = _plain(hook)
+    if family == "emotional_interruption":
+        words = normalized.split()
+        if not 2 <= len(words) <= 8 or "?" in hook:
+            return False
+        interruption_starts = (
+            "nao ",
+            "olhe ",
+            "escute ",
+            "respire ",
+            "venha ",
+            "fique ",
+            "confie ",
+            "eu sei ",
+            "eu estou ",
+            "voce ainda ",
+            "voce nao ",
+            "tenha bom animo",
+        )
+        return normalized.startswith(interruption_starts)
     if family == "if_you_want_do_this":
         return normalized.startswith("se voce quer ")
     if family == "what_happens_if_you_stop":

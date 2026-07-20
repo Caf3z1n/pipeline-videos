@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Literal
 
-from pipeline_videos.models import MusicManifest
+from pipeline_videos.models import MusicManifest, ProjectManifest
 from pipeline_videos.state import (
     complete_stage,
     fail_stage,
@@ -19,6 +19,8 @@ from pipeline_videos.storage import REPO_ROOT, ProjectLayout, read_model, write_
 from pipeline_videos.utils import relative_posix, sha256_file, sha256_value, utc_now
 
 DEFAULT_MUSIC_LIBRARY = REPO_ROOT / "music-library"
+COMPACT_DEVOTIONAL_MUSIC_LIBRARY = DEFAULT_MUSIC_LIBRARY / "adaptive-compact-v1"
+COMPACT_DEVOTIONAL_TRACK_NAMES = frozenset({"Aloboi .mp3", "Leaning.mp3"})
 SUPPORTED_MUSIC_EXTENSIONS = frozenset({".aac", ".flac", ".m4a", ".mp3", ".ogg", ".wav"})
 
 
@@ -34,6 +36,35 @@ def list_music_tracks(library_dir: Path | None = None) -> list[Path]:
         ),
         key=lambda path: path.name.casefold(),
     )
+
+
+def _compact_devotional_tracks() -> list[Path]:
+    tracks = [
+        track
+        for track in list_music_tracks(COMPACT_DEVOTIONAL_MUSIC_LIBRARY)
+        if track.name in COMPACT_DEVOTIONAL_TRACK_NAMES
+    ]
+    found_names = {track.name for track in tracks}
+    if found_names != COMPACT_DEVOTIONAL_TRACK_NAMES:
+        missing = ", ".join(sorted(COMPACT_DEVOTIONAL_TRACK_NAMES - found_names))
+        raise FileNotFoundError(
+            "A biblioteca devocional compacta está incompleta. Faixas ausentes: " + missing
+        )
+    return tracks
+
+
+def _validate_profile_track(project: ProjectManifest, source: Path) -> None:
+    if project.config.music.library_profile != "adaptive_compact_devotional_v1":
+        return
+    allowed_hash_by_name = {
+        track.name: sha256_file(track) for track in _compact_devotional_tracks()
+    }
+    expected_hash = allowed_hash_by_name.get(source.name)
+    if expected_hash is None or sha256_file(source) != expected_hash:
+        raise ValueError(
+            "Shorts compactos aceitam somente Aloboi .mp3 ou Leaning.mp3 da biblioteca "
+            "devocional exclusiva."
+        )
 
 
 def _project_music_file(layout: ProjectLayout, relative_path: str) -> Path:
@@ -54,6 +85,7 @@ def _selection_hash(layout: ProjectLayout, path: Path | None) -> str:
         {
             "enabled": project.config.music.enabled,
             "selection_mode": project.config.music.selection_mode,
+            "library_profile": project.config.music.library_profile,
             "music_hash": sha256_file(path) if path else None,
             "mix_standard": render.audio_mix_standard,
             "narration_target_lufs": render.narration_target_lufs,
@@ -77,7 +109,8 @@ def _write_selection(
     source_name: str | None,
     library_track_count: int,
 ) -> MusicManifest:
-    render = layout.load_manifest().config.render
+    project = layout.load_manifest()
+    render = project.config.render
     uses_loudness_standard = render.audio_mix_standard == "voice_music_loudness_v1"
     selected = MusicManifest(
         selected_at=utc_now(),
@@ -86,6 +119,7 @@ def _write_selection(
         source_hash=sha256_file(path) if path else None,
         path=relative_posix(path, layout.root) if path else None,
         library_track_count=library_track_count,
+        library_profile=project.config.music.library_profile,
         mix_standard=render.audio_mix_standard,
         narration_target_lufs=(render.narration_target_lufs if uses_loudness_standard else None),
         background_music_target_lufs=(
@@ -124,6 +158,8 @@ def import_music(layout: ProjectLayout, source: Path) -> MusicManifest:
     if source.suffix.casefold() not in SUPPORTED_MUSIC_EXTENSIONS:
         allowed = ", ".join(sorted(SUPPORTED_MUSIC_EXTENSIONS))
         raise ValueError(f"Formato de música não suportado: {source.suffix}. Use: {allowed}.")
+    project = layout.load_manifest()
+    _validate_profile_track(project, source)
     destination_name = source.name
     existing = layout.music_assets / destination_name
     source_hash = sha256_file(source)
@@ -187,6 +223,17 @@ def select_music(
             fail_stage(layout, "music", exc)
             raise
 
+    compact_tracks: list[Path] | None = None
+    if project.config.music.library_profile == "adaptive_compact_devotional_v1":
+        compact_tracks = _compact_devotional_tracks()
+        if configured_path:
+            try:
+                configured_track = _project_music_file(layout, configured_path)
+            except FileNotFoundError:
+                pass
+            else:
+                _validate_profile_track(project, configured_track)
+
     may_register_configured = True
     if not force and layout.music_manifest.is_file():
         existing = read_model(layout.music_manifest, MusicManifest)
@@ -236,8 +283,14 @@ def select_music(
             fail_stage(layout, "music", exc)
             raise
 
-    tracks = list_music_tracks(library_dir)
-    library = (library_dir or DEFAULT_MUSIC_LIBRARY).expanduser().resolve()
+    profile = project.config.music.library_profile
+    if profile == "adaptive_compact_devotional_v1":
+        library = COMPACT_DEVOTIONAL_MUSIC_LIBRARY.resolve()
+        assert compact_tracks is not None
+        tracks = compact_tracks
+    else:
+        tracks = list_music_tracks(library_dir)
+        library = (library_dir or DEFAULT_MUSIC_LIBRARY).expanduser().resolve()
     library_hash = sha256_value([{"name": path.name, "hash": sha256_file(path)} for path in tracks])
     if not tracks:
         input_hash = sha256_value({"library": str(library), "tracks": library_hash})

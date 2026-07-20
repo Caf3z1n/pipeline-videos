@@ -28,3 +28,6 @@ projects/shorts/*
 # Biblioteca local do usuário; somente as instruções ficam versionadas.
 music-library/*
 !music-library/README.md
+!music-library/adaptive-compact-v1/
+music-library/adaptive-compact-v1/*
+!music-library/adaptive-compact-v1/README.md

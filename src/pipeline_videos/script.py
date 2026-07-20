@@ -55,6 +55,7 @@ SHORT_BEAT_FUNCTIONS = {
     "application": "application",
     "callback": "payoff",
     "cta": "cta",
+    "reference": "resolution",
 }
 
 
@@ -111,13 +112,14 @@ def build_creative_contract(
     if is_short and strategy is None and layout.shorts_script_strategy.is_file():
         strategy = read_model(layout.shorts_script_strategy, ShortsScriptStrategy)
     short_creative = strategy.creative_direction if strategy is not None else None
+    short_cinematic = strategy.cinematic_devotional if strategy is not None else None
     is_creative_long = (
         long_strategy is not None and long_strategy.standard == "creative_retention_long_v2"
     )
     is_creative_short = (
         is_short
         and project.config.shorts_script.narrative_standard == "creative_retention_v3"
-        and short_creative is not None
+        and (short_creative is not None or short_cinematic is not None)
     )
     contract_algorithm = (
         CREATIVE_CONTRACT_ALGORITHM_V2
@@ -208,6 +210,8 @@ def build_creative_contract(
         if long_strategy is not None
         else short_creative.content_promise
         if short_creative is not None
+        else short_cinematic.content_promise
+        if short_cinematic is not None
         else strategy.content_promise
         if strategy is not None
         else briefing.central_theme.strip() or document.title.strip()
@@ -247,6 +251,8 @@ def build_creative_contract(
         if long_strategy is not None
         else short_creative.viewer_takeaway
         if short_creative is not None
+        else short_cinematic.viewer_takeaway
+        if short_cinematic is not None
         else strategy.practical_value
         if strategy is not None
         else briefing.practical_application.strip() or payoff
@@ -344,6 +350,8 @@ def build_creative_contract(
             if long_strategy is not None
             else short_creative.organizing_question
             if short_creative is not None
+            else ""
+            if short_cinematic is not None
             else strategy.open_loop
             if strategy is not None
             else ""
@@ -360,6 +368,8 @@ def build_creative_contract(
             if is_creative_long and long_strategy is not None
             else short_creative.creative_mode
             if short_creative is not None
+            else short_cinematic.creative_mode
+            if short_cinematic is not None
             else briefing.creative_mode
         ),
         interpretive_stance=(
@@ -367,6 +377,8 @@ def build_creative_contract(
             if is_creative_long and long_strategy is not None
             else short_creative.interpretive_stance
             if short_creative is not None
+            else short_cinematic.interpretive_stance
+            if short_cinematic is not None
             else briefing.interpretive_stance
         ),
         hook_family=(
@@ -374,6 +386,8 @@ def build_creative_contract(
             if is_creative_long and long_strategy is not None
             else short_creative.hook_family
             if short_creative is not None
+            else short_cinematic.hook_family
+            if short_cinematic is not None
             else briefing.hook_family
         ),
         hook_used=(

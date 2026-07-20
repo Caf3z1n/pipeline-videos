@@ -46,10 +46,10 @@ def short_literal_verse_word_limit(duration_seconds: int) -> int | None:
     if duration_seconds >= COMPACT_SHORT_THRESHOLD_SECONDS:
         return None
     if duration_seconds <= 20:
-        return 18
+        return 28
     if duration_seconds <= 30:
-        return 24
-    return 32
+        return 48
+    return 80
 
 
 def configure_short_duration_profile(config: ProjectConfig, duration_seconds: int) -> None:
@@ -58,14 +58,11 @@ def configure_short_duration_profile(config: ProjectConfig, duration_seconds: in
     if duration_seconds >= COMPACT_SHORT_THRESHOLD_SECONDS:
         return
     shorts = config.shorts_script
-    target_words = round(duration_seconds * shorts.estimated_narration_wpm / 60)
-    scripture_start = max(3.0, min(8.0, round(duration_seconds * 0.2, 1)))
-    scripture_end = max(
-        scripture_start + 3.0,
-        min(20.0, duration_seconds - 5.0, round(duration_seconds * 0.6, 1)),
-    )
+    scripture_start = 2.0
+    reference_seconds = min(3.0, max(2.0, round(duration_seconds * 0.18, 1)))
+    scripture_end = duration_seconds - reference_seconds
     if duration_seconds <= 20:
-        target_scene_min, target_scene_max = 5, 6
+        target_scene_min, target_scene_max = 3, 4
         config.production.image_workers = 1
         config.production.coordinator_effective_token_budget = 90_000
         config.production.total_effective_token_budget = 380_000
@@ -80,24 +77,30 @@ def configure_short_duration_profile(config: ProjectConfig, duration_seconds: in
     max_literal_verse_words = short_literal_verse_word_limit(duration_seconds)
     assert max_literal_verse_words is not None
     shorts.duration_profile = "adaptive_compact_v1"
-    shorts.min_words = max(24, round(target_words * 0.82))
-    shorts.max_words = max(shorts.min_words + 4, target_words + 2)
-    shorts.hook_max_words = 10
+    shorts.compact_narrative_standard = "cinematic_jesus_devotional_v1"
+    shorts.require_direct_jesus_speech = True
+    shorts.require_emotional_interruption_hook = True
+    shorts.require_reference_after_quote = True
+    shorts.require_no_cta = True
+    shorts.min_words = 17
+    shorts.max_words = min(200, max_literal_verse_words + 16)
+    shorts.hook_max_words = 8
     shorts.scripture_citation_min_start_seconds = scripture_start
     shorts.scripture_citation_max_end_seconds = scripture_end
     shorts.verse_opening_max_seconds = min(15.0, scripture_end)
     shorts.verse_visual_change_seconds = 3.0 if duration_seconds <= 20 else 4.0
     shorts.max_literal_verse_words = max_literal_verse_words
-    shorts.minimum_retention_beats = 5
+    shorts.minimum_retention_beats = 3
     shorts.minimum_progression_beats = 1
-    shorts.minimum_sections = 5
+    shorts.minimum_sections = 3
     shorts.target_scene_min = target_scene_min
     shorts.target_scene_max = target_scene_max
     shorts.retention_target_min_seconds = max(10.0, duration_seconds - 2.0)
     shorts.retention_target_max_seconds = float(duration_seconds)
-    shorts.cta_max_words = 5 if duration_seconds <= 20 else 8
-    shorts.cta_max_seconds = min(3.0, duration_seconds * 0.2)
+    shorts.cta_max_words = 4
+    shorts.cta_max_seconds = 2.0
     shorts.duration_tolerance_seconds = 2.0
+    config.music.library_profile = "adaptive_compact_devotional_v1"
 
 
 def project_topic_slug(topic: str) -> str:
@@ -160,8 +163,9 @@ próprio processo monitorar os stagings e `status --json` somente quando outra i
 consultar o estado. O pipeline produz diretamente o candidato final na qualidade V4 e registra a
 auditoria local de tokens ao concluir.
 
-A etapa `music` sorteia uma faixa da biblioteca local do pipeline e preserva uma cópia em
-`audio/music/`. Uma escolha já registrada é reutilizada, salvo quando `--force` for deliberado.
+A etapa `music` sorteia uma faixa da biblioteca definida no `project.json` e preserva uma cópia em
+`audio/music/`. Shorts compactos usam somente a biblioteca devocional exclusiva. Uma escolha já
+registrada é reutilizada, salvo quando `--force` for deliberado.
 
 Quando `youtube/growth-queue.json` estiver pendente, o subagente `youtube_growth_specialist` escreve
 somente em staging. Apenas o agente principal importa títulos, descrição, estratégia e thumbnails.
@@ -173,9 +177,10 @@ somente no staging; o agente principal executa o preflight agregado e prepara
 `reviews/shorts-review-queue.json` para exatamente um `biblical_reviewer`. O roteiro só é importado
 depois que pacote e revisão independente passam juntos no preflight final.
 
-Vídeos novos usam direção criativa explícita. Shorts seguem `creative_retention_v3`, sempre com um
-hook inicial honesto. Novos Shorts salvam `hook_contract=user_six_v1`: a primeira fala precisa
-corresponder exatamente a uma das seis estruturas aceitas. Longos seguem
+Vídeos novos usam direção criativa explícita. Shorts padrão seguem `creative_retention_v3`, sempre
+com um hook inicial honesto, e salvam `hook_contract=user_six_v1`. Shorts compactos usam
+`cinematic_jesus_devotional_v1`: interrupção emocional, fala direta de Jesus, referência depois da
+citação e nenhum CTA. Longos seguem
 `creative_retention_long_v2`; o hook é adaptativo e pode ser dispensado quando uma abertura
 narrativa, factual ou contemplativa servir melhor ao tema. Retenção, informação nova e citações
 verificadas continuam obrigatórias. Consulte
@@ -315,12 +320,29 @@ def create_project(
         stages=stages,
         approvals=initial_approvals(),
     )
+    compact_short = (
+        video_format == "short"
+        and not demo
+        and config.shorts_script.duration_profile == "adaptive_compact_v1"
+    )
     briefing = Briefing(
         title=title,
         target_duration_seconds=target_duration_seconds,
-        hook_contract=(
-            "user_six_v1" if video_format == "short" and not demo else "mode_compatible_v1"
+        creative_mode="pastoral_encouragement" if compact_short else "auto",
+        interpretive_stance="devotional" if compact_short else "expository",
+        narration_tone=(
+            "íntimo, emocional, cinematográfico e sereno, como uma fala de Jesus em um filme épico"
+            if compact_short
+            else "reflexivo, acolhedor e cinematográfico"
         ),
+        hook_contract=(
+            "cinematic_interruption_v1"
+            if compact_short
+            else "user_six_v1"
+            if video_format == "short" and not demo
+            else "mode_compatible_v1"
+        ),
+        hook_family=("emotional_interruption" if compact_short else "auto"),
     )
     continuity = ContinuityBible(
         global_rules=[

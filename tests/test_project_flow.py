@@ -285,17 +285,28 @@ def test_fifteen_second_short_uses_compact_duration_profile(tmp_path) -> None:
 
     assert manifest.target_duration_seconds == 15
     assert config.duration_profile == "adaptive_compact_v1"
-    assert (config.min_words, config.max_words) == (30, 38)
+    assert config.compact_narrative_standard == "cinematic_jesus_devotional_v1"
+    assert config.require_direct_jesus_speech is True
+    assert config.require_emotional_interruption_hook is True
+    assert config.require_reference_after_quote is True
+    assert config.require_no_cta is True
+    assert (config.min_words, config.max_words) == (17, 44)
     assert (config.retention_target_min_seconds, config.retention_target_max_seconds) == (13, 15)
     assert (
         config.scripture_citation_min_start_seconds,
         config.scripture_citation_max_end_seconds,
-    ) == (3, 9)
-    assert config.max_literal_verse_words == 18
-    assert (config.minimum_sections, config.minimum_progression_beats) == (5, 1)
-    assert (config.target_scene_min, config.target_scene_max) == (5, 6)
-    assert config.cta_max_words == 5
+    ) == (2, 12.3)
+    assert config.max_literal_verse_words == 28
+    assert (config.minimum_sections, config.minimum_retention_beats) == (3, 3)
+    assert (config.target_scene_min, config.target_scene_max) == (3, 4)
+    assert manifest.config.music.library_profile == "adaptive_compact_devotional_v1"
     assert manifest.config.production.image_workers == 1
+    briefing = read_model(layout.briefing, Briefing)
+    assert briefing.creative_mode == "pastoral_encouragement"
+    assert briefing.interpretive_stance == "devotional"
+    assert briefing.hook_contract == "cinematic_interruption_v1"
+    assert briefing.hook_family == "emotional_interruption"
+    assert briefing.call_to_action == ""
 
     with pytest.raises(ValueError, match="pelo menos 30 segundos"):
         create_project(

@@ -29,28 +29,32 @@ progressão.
 
 Pedidos entre 15 e 44 segundos usam `adaptive_compact_v1`. O pipeline deriva e persiste os limites
 antes de preparar a fila; o roteirista e os validadores leem esses valores em vez de comprimir o
-contrato de 50 segundos depois da escrita. Para 15 segundos, o contrato é:
+contrato de 50 segundos depois da escrita. Esse perfil aceita somente `devotional_application` e
+`pastoral_encouragement` e deve parecer um momento emocional retirado de um filme épico sobre Jesus,
+não uma explicação bíblica. Para 15 segundos, o contrato é:
 
-- **0–2s — hook obrigatório;**
-- **2–3s — orientação;**
-- **3–9s — citação bíblica literal, com até 18 palavras;**
-- **9–12s — desenvolvimento, reengajamento e resolução;**
-- **12–15s — CTA de uma única ação;**
-- **30 a 38 palavras e cinco a seis cenas.**
+- **0–2s — interrupção emocional:** duas a oito palavras, como “Não desista agora.” ou “Olhe para
+  mim.”;
+- **2–12,3s — fala direta de Jesus:** citação literal entre aspas, sem introdução, “lemos” ou
+  comentário intermediário, com até 28 palavras;
+- **12,3–15s — referência falada:** livro, capítulo e versículo fora das aspas;
+- **17 a 44 palavras, três a quatro cenas e nenhum CTA.**
 
-O perfil compacto mantém informação nova e resolução, mas exige somente uma seção de progressão.
-Ele não remove hook, fonte verificada, revisão bíblica, thumbnail, legenda ou validação final.
+O perfil compacto usa exatamente três seções e três beats: hook, evidência bíblica e referência. A
+fonte precisa declarar `spoken_by=jesus`; versículos narrativos ou falas de outros personagens são
+bloqueados. Hook, fonte verificada, revisão bíblica, thumbnail, legenda e validação final permanecem.
 
 ## Contrato `creative_direction`
 
 `strategy.creative_direction` registra:
 
 - `creative_mode`, `interpretive_stance` e `hook_family`, copiados do briefing;
-- seções de abertura, citação, desenvolvimento, reengajamento, resolução e CTA;
+- no perfil padrão, seções de abertura, citação, desenvolvimento, reengajamento, resolução e CTA;
+- no perfil compacto, exatamente interrupção emocional, citação direta de Jesus e referência;
 - `content_promise` e, quando útil, `organizing_question`;
 - `resolution` e `viewer_takeaway`;
 - `practical_application` e `callback` somente quando usados;
-- uma única ação de `engagement`;
+- uma única ação de `engagement` no perfil padrão e nenhuma no perfil compacto;
 - todas as fontes utilizadas.
 
 `content_promise`, `open_loop`, `payoff`, `practical_value` e `cta` permanecem como aliases de
@@ -63,9 +67,9 @@ Callback também é opcional.
 
 ## Hook obrigatório
 
-O `hook` é o prefixo literal da primeira seção, tem no máximo 12 palavras e termina até a meta
-de dois segundos. Shorts novos salvam `hook_contract=user_six_v1`: a fila seleciona exatamente
-uma das seis famílias abaixo e a primeira fala precisa corresponder literalmente à estrutura dela:
+O `hook` é o prefixo literal da primeira seção e termina até a meta de dois segundos. Shorts padrão
+salvam `hook_contract=user_six_v1`: a fila seleciona exatamente uma das seis famílias abaixo e a
+primeira fala, com no máximo 12 palavras, precisa corresponder literalmente à estrutura dela:
 
 1. `Se você quer [X], faça isso.`
 2. `O que acontece se você parar de [X]?`
@@ -80,10 +84,15 @@ novo, uma frase apenas parecida ou classificada com outro nome não passa no pre
 seis formas para inventar perda, risco, proibição ou promessa. Registre de uma a três técnicas
 éticas em `hook_techniques`.
 
+O perfil compacto salva `hook_contract=cinematic_interruption_v1` e
+`hook_family=emotional_interruption`. A primeira fala tem de duas a oito palavras, não é pergunta e
+soa como Jesus interrompendo diretamente um pensamento ou desânimo do espectador.
+
 ## Citação e precisão bíblica
 
 Todo Short cita literalmente pelo menos um versículo verificado. A janela é de 8 a 20 segundos no
-perfil padrão e vem de `shorts_script.scripture_citation_*` no perfil compacto. Use:
+perfil padrão e vem de `shorts_script.scripture_citation_*` no perfil compacto. No perfil padrão,
+use:
 
 > Em Salmos, capítulo 56, versículo 3, lemos: “Quando eu tiver medo, colocarei a minha confiança em
 > ti.”
@@ -92,12 +101,21 @@ A referência fica fora das aspas; somente o excerpt literal fica dentro. O text
 com a fonte registrada. Não narre rótulos como “até aqui, o texto bíblico” ou “agora vem a
 reflexão”.
 
+No perfil compacto, não use essa introdução. Depois do hook, a citação direta de Jesus começa
+imediatamente e a referência vem sozinha no final:
+
+> Olhe para mim. “Eu sou a luz do mundo; quem me segue não andará em trevas, mas terá a luz da
+> vida.” João, capítulo 8, versículo 12.
+
+As aspas de abertura e fechamento fazem parte da locução e das legendas centrais; a referência fica
+fora delas.
+
 Classifique afirmações como `biblical_text`, `verified_context`, `interpretation` ou
 `creative_elaboration`. Em postura factual, a locução não usa interpretação nem elaboração
 criativa. Em postura exploratória, ao menos uma afirmação autoral fica explicitamente classificada
 como interpretação.
 
-## CTA de uma única ação
+## CTA de uma única ação no perfil padrão
 
 `creative_direction.engagement.mode` aceita `comment`, `subscribe` ou `share`. O texto falado tem
 no máximo 12 palavras e quatro segundos; combinação de ações é rejeitada.
@@ -105,6 +123,9 @@ no máximo 12 palavras e quatro segundos; combinação de ações é rejeitada.
 `comment_prompt` só existe quando o modo é `comment`. Palavra-chave é opcional e nunca pode ser
 condição para bênção, cura, proteção, milagre ou prova de fé. O CTA ocupa sozinho a última seção
 `closing` e não é seguido por resumo ou despedida.
+
+Em `adaptive_compact_v1`, `engagement` e CTA ficam ausentes. A última seção contém apenas a
+referência falada da citação anterior.
 
 ## Direção visual e embalagem
 
@@ -122,10 +143,12 @@ sem obrigar o enfoque a ser motivacional.
 O roteiro está pronto quando:
 
 - usa o modo e a postura resolvidos no briefing;
-- começa exatamente com uma das seis estruturas aceitas e cumpre a promessa;
-- possui desenvolvimento real e ao menos um reengajamento;
+- no perfil padrão, começa exatamente com uma das seis estruturas aceitas; no compacto, começa com
+  uma interrupção emocional válida;
+- no perfil padrão, possui desenvolvimento real e ao menos um reengajamento; no compacto, preserva
+  o arco emocional nas três seções;
 - cita um versículo verificado dentro da janela persistida pelo perfil de duração;
 - entrega uma resolução coerente com o modo, com ou sem aplicação;
-- pede uma única ação de CTA;
+- no perfil padrão, pede uma única ação de CTA; no compacto, não contém CTA e termina na referência;
 - produz a quantidade de cenas e termina dentro da duração persistidas pelo perfil;
 - não possui finding bíblico `blocking` aberto na revisão independente.
