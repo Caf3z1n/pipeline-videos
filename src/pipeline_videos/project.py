@@ -106,12 +106,14 @@ Em produção remota, o coordenador permanece na sessão do job e cria o mesmo e
 crescimento do fluxo local, que entrega exatamente um par título+thumbnail no staging.
 
 Em projetos Short, `script/shorts-queue.json` contrata o `shorts_script_specialist`. Ele escreve
-somente no staging; o agente principal valida gancho, retenção, valor, CTA e revisão bíblica antes
-de promover uma nova versão do roteiro.
+somente no staging; o agente principal valida gancho obrigatório, modo criativo, retenção, valor,
+CTA e revisão bíblica antes de promover uma nova versão do roteiro.
 
-Em vídeos longos novos, o roteiro usa `retention_story_long_v1`: começa no conflito, sustenta uma
-pergunta central, progride por movimentos com nova informação, reengaja periodicamente e distribui
-citações bíblicas verificadas ao longo da narrativa. Consulte `docs/long-form-script-standard.md`.
+Vídeos novos usam direção criativa explícita. Shorts seguem `creative_retention_v3`, sempre com um
+hook inicial honesto. Longos seguem `creative_retention_long_v2`; o hook é adaptativo e pode ser
+dispensado quando uma abertura narrativa, factual ou contemplativa servir melhor ao tema. Retenção,
+informação nova e citações verificadas continuam obrigatórias. Consulte
+`docs/creative-direction.md` e o padrão de roteiro do formato.
 """
 
 
@@ -188,8 +190,9 @@ def create_project(
         long_form_retention = video_format != "short"
         config.long_form_script.enabled = long_form_retention
         config.long_form_script.narrative_standard = (
-            "retention_story_long_v1" if long_form_retention else "legacy"
+            "creative_retention_long_v2" if long_form_retention else "legacy"
         )
+        config.long_form_script.require_callback = False
         config.editorial_policy.require_quoted_comment_response = False
         config.captions.vertical_position = "center"
         config.captions.isolate_quoted_comment_response = False
@@ -198,10 +201,11 @@ def create_project(
         config.render.background_blur_profile = "functional_caption_focus_v1"
         config.youtube_growth.title_variants = 1
         config.youtube_growth.thumbnail_variants = 1
-        config.youtube_growth.title_standard = "tension_pipe_passage_v2"
+        config.youtube_growth.title_standard = "creative_pipe_passage_v3"
         config.youtube_growth.description_standard = "scripture_timeline_v1"
         config.youtube_growth.title_thumbnail_pairing_standard = "complementary_v1"
         if video_format == "short":
+            config.shorts_script.narrative_standard = "creative_retention_v3"
             config.youtube_growth.thumbnail_generation_mode = "integrated_imagegen_v1"
             config.youtube_growth.thumbnail_reference_mode = "opening_scene_edit_v1"
             config.youtube_growth.thumbnail_standard = "direct_conflict_red_v1"

@@ -17,12 +17,15 @@ from rich.panel import Panel
 from rich.table import Table
 
 from pipeline_videos.models import (
+    DEFAULT_ELEVENLABS_MODEL_ID,
     DEFAULT_ELEVENLABS_VOICE_ID,
     ApprovalStatus,
     ImageManifest,
     Palette,
     StageStatus,
     StyleProfile,
+    elevenlabs_voice_id_for_variant,
+    normalize_elevenlabs_voice_variant,
 )
 from pipeline_videos.project import (
     DEFAULT_PALETTE,
@@ -440,6 +443,11 @@ def doctor() -> None:
         "CONFIGURADA" if configured_voice else "PADRÃO",
         configured_voice or DEFAULT_ELEVENLABS_VOICE_ID,
     )
+    table.add_row(
+        "ElevenLabs model",
+        "CONFIGURADO" if os.getenv("ELEVENLABS_MODEL_ID") else "PADRÃO",
+        os.getenv("ELEVENLABS_MODEL_ID") or DEFAULT_ELEVENLABS_MODEL_ID,
+    )
     image_status, image_detail = _codex_image_generation_status()
     table.add_row("Imagem Codex", image_status, image_detail)
     from pipeline_videos.publication import token_file
@@ -582,13 +590,15 @@ def resume_prompt(
         else "`docs/long-form-script-standard.md`"
     )
     long_script_instruction = (
-        "Para vídeo longo novo, produza um ScriptDocument com long_form_strategy completo, valide "
-        "a cadência das citações e importe o roteiro antes de construir cenas. "
+        "Para vídeo longo novo, resolva modo criativo, postura e política de hook no briefing; "
+        "produza um ScriptDocument com long_form_strategy completo, valide a cadência das "
+        "citações e importe o roteiro antes de construir cenas. "
         if manifest.video_format != "short"
         else ""
     )
     prompt = f"""Retome o projeto em `{layout.root}`. Leia `AGENTS.md`,
-`docs/optimized-production.md`, {script_standard} e depois `project.json`. Execute
+`docs/optimized-production.md`, `docs/creative-direction.md`, {script_standard} e depois
+`project.json`. Execute
 `uv run pipeline-videos status "{project}"` e retome com
 `uv run pipeline-videos autopilot "{project}"`
 {"sem --allow-external" if manual_audio else "com --allow-external"}. {audio_instruction}
@@ -825,15 +835,30 @@ def audio_configure(
     project: str,
     provider: Annotated[str, typer.Option("--provider")] = "elevenlabs",
     voice_id: Annotated[str | None, typer.Option("--voice-id")] = None,
+    voice_variant: Annotated[
+        str | None,
+        typer.Option("--voice-variant", help="Preset jesus_1 ou jesus_2."),
+    ] = None,
     model: Annotated[str | None, typer.Option("--model")] = None,
     output_format: Annotated[str | None, typer.Option("--output-format")] = None,
 ) -> None:
+    if voice_id and voice_variant:
+        raise typer.BadParameter("Use apenas --voice-id ou --voice-variant, não ambos.")
+    resolved_variant_voice_id: str | None = None
+    if voice_variant:
+        try:
+            variant = normalize_elevenlabs_voice_variant(voice_variant)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        resolved_variant_voice_id = elevenlabs_voice_id_for_variant(variant)
     layout = _project(project)
     _save_provider(layout, audio=provider)
     manifest = layout.load_manifest()
     before = manifest.config.audio.model_dump(mode="json")
     if voice_id:
         manifest.config.audio.voice_id = voice_id
+    elif resolved_variant_voice_id:
+        manifest.config.audio.voice_id = resolved_variant_voice_id
     if model:
         manifest.config.audio.model_id = model
     if output_format:

@@ -16,17 +16,32 @@ from zoneinfo import ZoneInfo
 
 from pydantic import Field, model_validator
 
+from pipeline_videos.creative_direction import (
+    CREATIVE_MODE_SPECS,
+    HOOK_TEMPLATE_EXAMPLES,
+    creative_mode_payload,
+    default_interpretive_stance,
+    default_long_hook_policy,
+    narration_tone_for_mode,
+    viewer_outcome_for_mode,
+)
 from pipeline_videos.imagegen_retry import imagegen_retry_instructions
 from pipeline_videos.models import (
-    DEFAULT_ELEVENLABS_VOICE_ID,
+    APPLICATION_REQUIRED_CREATIVE_MODES,
     BiblicalReview,
     Briefing,
+    CreativeMode,
+    ElevenLabsVoiceVariant,
+    HookFamily,
+    HookPolicy,
     PipelineModel,
     ScriptDocument,
     SourceEntry,
     SourceLibrary,
     StageStatus,
     VerseCandidate,
+    default_elevenlabs_model_id,
+    elevenlabs_voice_id_for_variant,
 )
 from pipeline_videos.project import create_project
 from pipeline_videos.publication import (
@@ -119,12 +134,16 @@ class RemoteVideoRequest(PipelineModel):
     video_format: Literal["short", "long"]
     topic: str | None = Field(default=None, max_length=240)
     title: str | None = Field(default=None, max_length=240)
+    creative_mode: CreativeMode = "auto"
+    hook_policy: HookPolicy = "auto"
+    hook_family: HookFamily = "auto"
     duration_seconds: int | None = Field(default=None, ge=30, le=3600)
     start_policy: Literal["immediate", "overnight"] = "immediate"
     not_before: datetime | None = None
     publication_mode: Literal["private_review", "scheduled"] = "private_review"
     publish_at: datetime | None = None
     audio_provider: Literal["elevenlabs"] = "elevenlabs"
+    voice_variant: ElevenLabsVoiceVariant = "jesus_1"
     external_services_authorized: bool = False
 
     @model_validator(mode="after")
@@ -139,6 +158,14 @@ class RemoteVideoRequest(PipelineModel):
             )
         if self.video_format == "short" and self.duration_seconds > 180:
             raise ValueError("Shorts precisam ter duração entre 30 e 180 segundos.")
+        if self.video_format == "short" and (
+            self.hook_policy == "none" or self.hook_family == "none"
+        ):
+            raise ValueError("Shorts exigem hook inicial; use auto ou uma família concreta.")
+        if self.hook_policy == "required" and self.hook_family == "none":
+            raise ValueError("hook_policy=required não aceita hook_family=none.")
+        if self.hook_policy == "none" and self.hook_family not in {"auto", "none"}:
+            raise ValueError("hook_policy=none não aceita uma família de hook.")
         for field_name in ("not_before", "publish_at"):
             value = getattr(self, field_name)
             if value is not None and value.tzinfo is None:
@@ -359,13 +386,25 @@ def prepare_job_project(
             video_format=video_format,
             production_mode="final_candidate_one_shot",
         )
+    briefing = Briefing.model_validate(read_json(layout.briefing))
+    briefing_updates: dict[str, Any] = {}
+    if request.creative_mode != "auto":
+        briefing_updates["creative_mode"] = request.creative_mode
+        briefing_updates["interpretive_stance"] = default_interpretive_stance(request.creative_mode)
+    if request.hook_policy != "auto":
+        briefing_updates["hook_policy"] = request.hook_policy
+    if request.hook_family != "auto":
+        briefing_updates["hook_family"] = request.hook_family
+    if briefing_updates:
+        write_json(layout.briefing, briefing.model_copy(update=briefing_updates))
     manifest = layout.load_manifest()
     manifest.config.production.use_subagents = True
     manifest.config.production.image_workers = 3
     manifest.config.shorts_script.use_specialist_subagent = True
     manifest.config.youtube_growth.use_specialist_subagent = True
     manifest.config.audio.provider = request.audio_provider
-    manifest.config.audio.voice_id = DEFAULT_ELEVENLABS_VOICE_ID
+    manifest.config.audio.voice_id = elevenlabs_voice_id_for_variant(request.voice_variant)
+    manifest.config.audio.model_id = default_elevenlabs_model_id()
     manifest.config.youtube_growth.title_variants = 1
     manifest.config.youtube_growth.thumbnail_variants = 1
     manifest.config.youtube_publication.allow_automated_private_review_upload = True
@@ -381,7 +420,12 @@ def prepare_job_project(
             "publication_mode": request.publication_mode,
             "publish_at": request.publish_at.isoformat() if request.publish_at else None,
             "title_thumbnail_variants": 1,
-            "voice_id": DEFAULT_ELEVENLABS_VOICE_ID,
+            "creative_mode": request.creative_mode,
+            "hook_policy": request.hook_policy,
+            "hook_family": request.hook_family,
+            "voice_variant": request.voice_variant,
+            "voice_id": manifest.config.audio.voice_id,
+            "voice_model_id": manifest.config.audio.model_id,
             "model": DEFAULT_REMOTE_CODEX_MODEL,
             "coordinator_reasoning_effort": DEFAULT_REMOTE_REASONING_EFFORT,
             "specialist_reasoning_effort": {
@@ -502,19 +546,29 @@ def _editorial_context_ready(layout: ProjectLayout) -> bool:
         return False
     briefing = Briefing.model_validate(read_json(layout.briefing))
     sources = SourceLibrary.model_validate(read_json(layout.sources))
-    required = (
-        briefing.main_passage,
-        briefing.central_theme,
-        briefing.practical_application,
-        briefing.audience,
-        briefing.emotional_intent,
-    )
     verified_count = sum(
         1
         for source in sources.entries
         if source.kind == "biblical_text" and source.verified and source.excerpt
     )
     project = layout.load_manifest()
+    creative_standard = (
+        project.config.shorts_script.narrative_standard == "creative_retention_v3"
+        if project.video_format == "short"
+        else project.config.long_form_script.narrative_standard == "creative_retention_long_v2"
+    )
+    required = [
+        briefing.main_passage,
+        briefing.central_theme,
+        briefing.audience,
+        briefing.emotional_intent,
+    ]
+    if creative_standard:
+        required.append(briefing.viewer_outcome)
+        if briefing.creative_mode in APPLICATION_REQUIRED_CREATIVE_MODES:
+            required.append(briefing.practical_application)
+    else:
+        required.append(briefing.practical_application)
     if project.video_format == "short":
         target = 1
     else:
@@ -524,7 +578,13 @@ def _editorial_context_ready(layout: ProjectLayout) -> bool:
             project.target_duration_seconds,
             project.config.editorial_policy,
         )
-    return all(value.strip() for value in required) and verified_count >= target
+    creative_ready = not creative_standard or (
+        briefing.creative_mode != "auto"
+        and briefing.hook_policy != "auto"
+        and briefing.hook_family != "auto"
+        and (project.video_format != "short" or briefing.hook_family != "none")
+    )
+    return creative_ready and all(value.strip() for value in required) and verified_count >= target
 
 
 def _editorial_sources_phase_spec(
@@ -556,6 +616,7 @@ def _editorial_sources_phase_spec(
             "kind": "select_verified_biblical_sources",
             "topic": topic,
             "video_format": job.request.video_format,
+            "requested_creative_mode": job.request.creative_mode,
             "desired_candidate_count": desired_count,
             "required_main_candidate_id": current_main,
             "main_eligible_candidate_ids": sorted(main_eligible),
@@ -573,6 +634,7 @@ def _editorial_sources_phase_spec(
                     "visual_progression": candidate.visual_progression,
                     "possible_reveal": candidate.possible_reveal,
                     "retention_archetypes": candidate.retention_archetypes,
+                    "preferred_development_modes": candidate.preferred_development_modes,
                     "retention_potential_score": candidate.retention_potential_score,
                     "themes": candidate.themes,
                     "characters": candidate.characters,
@@ -622,7 +684,7 @@ def _source_entry(candidate: VerseCandidate, *, long_form: bool) -> SourceEntry:
         use_in_video=(
             "Citação literal verificada distribuída na narrativa do vídeo longo."
             if long_form
-            else "Citação literal obrigatória e base da reflexão do Short."
+            else "Citação literal obrigatória e base do desenvolvimento do Short."
         ),
         claim_scope="Texto bíblico; contexto e aplicações devem ser distinguidos.",
         rights_note=candidate.rights_note,
@@ -642,6 +704,8 @@ def _import_editorial_source_selection(
     from pipeline_videos.verse_selection import (
         load_verse_catalog,
         reserve_project_candidates,
+        select_creative_mode,
+        select_hook_family,
         select_retention_archetype,
         sync_shared_usage,
     )
@@ -676,6 +740,42 @@ def _import_editorial_source_selection(
     retention_archetype = (
         select_retention_archetype(main, usage) if project.video_format == "short" else None
     )
+    current = Briefing.model_validate(read_json(layout.briefing))
+    creative_mode = (
+        job.request.creative_mode
+        if job.request.creative_mode != "auto"
+        else current.creative_mode
+        if current.creative_mode != "auto"
+        else select_creative_mode(main, usage, video_format=project.video_format)
+    )
+    interpretive_stance = default_interpretive_stance(creative_mode)
+    hook_policy = (
+        "required"
+        if project.video_format == "short"
+        else job.request.hook_policy
+        if job.request.hook_policy != "auto"
+        else current.hook_policy
+        if current.hook_policy != "auto"
+        else default_long_hook_policy(creative_mode)
+    )
+    requested_hook_family = (
+        job.request.hook_family
+        if job.request.hook_family != "auto"
+        else current.hook_family
+        if current.hook_family != "auto"
+        else None
+    )
+    hook_family = (
+        "none"
+        if hook_policy == "none"
+        else requested_hook_family
+        or select_hook_family(
+            creative_mode,
+            usage,
+            video_format=project.video_format,
+            hook_policy=hook_policy,
+        )
+    )
     reserve_project_candidates(
         projects_root,
         project_id=project.project_id,
@@ -683,8 +783,9 @@ def _import_editorial_source_selection(
         candidates=selected,
         catalog=load_verse_catalog(),
         retention_archetype=retention_archetype,
+        creative_mode=creative_mode,
+        hook_family=hook_family,
     )
-    current = Briefing.model_validate(read_json(layout.briefing))
     suggested_title = main.title_seed.strip() or main.title
     title = job.request.title or job.request.topic or current.title or suggested_title
     central_theme = current.central_theme.strip() or job.request.topic or main.central_theme
@@ -692,19 +793,28 @@ def _import_editorial_source_selection(
     if not call_to_action:
         call_to_action = (
             "Escolher exatamente uma ação natural — comentar, inscrever-se ou compartilhar — "
-            "integrada ao payoff, em até doze palavras e quatro segundos."
+            "conectada ao valor entregue, em até doze palavras e quatro segundos."
             if project.video_format == "short"
-            else "Concluir com aplicação fiel e convite comunitário natural, sem pressão."
+            else "Encerrar após a conclusão com exatamente um convite comunitário natural."
         )
+    practical_application = current.practical_application.strip()
+    if not practical_application and creative_mode in APPLICATION_REQUIRED_CREATIVE_MODES:
+        practical_application = main.practical_application
+    viewer_outcome = current.viewer_outcome.strip() or viewer_outcome_for_mode(
+        creative_mode,
+        theme=central_theme,
+        reveal=main.possible_reveal,
+    )
+    creative_spec = CREATIVE_MODE_SPECS[creative_mode]
     briefing = Briefing(
         title=title,
         main_passage=main.reference,
         complementary_references=[candidate.reference for candidate in selected[1:]],
         central_theme=central_theme,
-        practical_application=current.practical_application.strip() or main.practical_application,
+        practical_application=practical_application,
         audience=current.audience.strip() or main.audience,
         emotional_intent=current.emotional_intent.strip() or main.emotional_intent,
-        narration_tone=current.narration_tone or main.narration_tone,
+        narration_tone=narration_tone_for_mode(creative_mode),
         target_duration_seconds=project.target_duration_seconds,
         bible_translation=main.translation,
         literal_quote_policy=(
@@ -722,6 +832,12 @@ def _import_editorial_source_selection(
         visual_progression=current.visual_progression or main.visual_progression,
         possible_reveal=current.possible_reveal.strip() or main.possible_reveal,
         title_seed=current.title_seed.strip() or main.title_seed,
+        creative_mode=creative_mode,
+        interpretive_stance=interpretive_stance,
+        hook_policy=hook_policy,
+        hook_family=hook_family,
+        viewer_outcome=viewer_outcome,
+        creative_rationale=f"{creative_spec.label}: {creative_spec.purpose}",
     )
     current_sources = SourceLibrary.model_validate(read_json(layout.sources))
     non_biblical = [source for source in current_sources.entries if source.kind != "biblical_text"]
@@ -756,6 +872,10 @@ def _import_editorial_source_selection(
             "references": [candidate.reference for candidate in selected],
             "rationale": str(selection.get("rationale", ""))[:500],
             "retention_archetype": retention_archetype,
+            "creative_mode": creative_mode,
+            "interpretive_stance": interpretive_stance,
+            "hook_policy": hook_policy,
+            "hook_family": hook_family,
             "human_approval_recorded": False,
         }
     )
@@ -834,6 +954,48 @@ def _normalize_shorts_script_payload(payload: dict[str, Any]) -> tuple[dict[str,
 
     script = payload.get("script")
     sections = script.get("sections") if isinstance(script, dict) else None
+    creative = strategy.get("creative_direction")
+    if isinstance(creative, dict) and isinstance(sections, list):
+        organizing_question = creative.get("organizing_question")
+        content_promise = creative.get("content_promise")
+        expected_loop = (
+            organizing_question
+            if isinstance(organizing_question, str) and organizing_question.strip()
+            else content_promise
+        )
+        synchronization = (
+            ("content_promise", "content_promise"),
+            ("payoff", "resolution"),
+            ("practical_value", "viewer_takeaway"),
+            ("hook_family", "hook_family"),
+        )
+        for strategy_field, creative_field in synchronization:
+            value = creative.get(creative_field)
+            if isinstance(value, str) and value.strip() and strategy.get(strategy_field) != value:
+                strategy[strategy_field] = value
+                changes.append(f"strategy.{strategy_field}: creative_direction.{creative_field}")
+        if isinstance(expected_loop, str) and strategy.get("open_loop") != expected_loop:
+            strategy["open_loop"] = expected_loop
+            changes.append("strategy.open_loop: creative_direction")
+        engagement = creative.get("engagement")
+        spoken_text = engagement.get("spoken_text") if isinstance(engagement, dict) else None
+        if (
+            isinstance(spoken_text, str)
+            and spoken_text.strip()
+            and strategy.get("cta") != spoken_text
+        ):
+            strategy["cta"] = spoken_text
+            changes.append("strategy.cta: creative_direction.engagement.spoken_text")
+
+        section_ids = [
+            section.get("section_id")
+            for section in sections
+            if isinstance(section, dict) and isinstance(section.get("section_id"), str)
+        ]
+        if strategy.get("section_ids") != section_ids:
+            strategy["section_ids"] = section_ids
+            changes.append("strategy.section_ids: seções do roteiro")
+
     story = strategy.get("retention_story")
     if isinstance(story, dict) and isinstance(sections, list):
         synchronization = (
@@ -1446,6 +1608,143 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     review_output = (
         layout.root / "reviews" / "staging" / "remote-long-script" / "biblical-review.json"
     )
+    briefing = Briefing.model_validate(read_json(layout.briefing))
+    is_creative = long_config.narrative_standard == "creative_retention_long_v2"
+    creative_contract = {
+        "narrative_standard": long_config.narrative_standard,
+        "content_promise_source": "briefing.central_theme",
+        "resolution_source": ("writer_synthesis_supported_by_sources" if is_creative else None),
+        "viewer_takeaway_source": "briefing.viewer_outcome" if is_creative else None,
+        "payoff_source": "briefing.practical_application" if not is_creative else None,
+        "pacing_profile": "long_creative_v2" if is_creative else "long_retention_v1",
+        "creative_mode": briefing.creative_mode if is_creative else None,
+        "interpretive_stance": briefing.interpretive_stance if is_creative else None,
+        "mode_guidance": (creative_mode_payload(briefing.creative_mode) if is_creative else None),
+        "hook_policy": briefing.hook_policy if is_creative else "required",
+        "hook_family": briefing.hook_family if is_creative else None,
+        "hook_templates": HOOK_TEMPLATE_EXAMPLES if is_creative else None,
+        "opening_target_max_seconds": long_config.opening_target_max_seconds,
+        "opening_value_max_seconds": long_config.opening_value_max_seconds,
+        "required_reengagements": required_reengagements,
+        "maximum_reengagement_gap_seconds": long_config.maximum_reengagement_gap_seconds,
+        "resolution_timing_options": (
+            ["distributed", "late", "final_quarter"] if is_creative else None
+        ),
+        "payoff_start_minimum_ratio": (
+            long_config.payoff_start_minimum_ratio if not is_creative else None
+        ),
+        "application_required": (
+            briefing.creative_mode in APPLICATION_REQUIRED_CREATIVE_MODES if is_creative else True
+        ),
+        "callback_required": long_config.require_callback if not is_creative else False,
+        "cta_max_words": long_config.cta_max_words,
+        "cta_max_seconds": long_config.cta_max_seconds,
+        "cta_actions": ["comment", "subscribe", "share"],
+    }
+    if is_creative:
+        instructions = [
+            (
+                "Escreva locução integralmente em pt-BR e siga briefing.narration_tone. O tom "
+                "pode ser factual, didático, investigativo, filosófico ou pastoral conforme "
+                "creative_mode; não converta automaticamente o conteúdo em aconselhamento."
+            ),
+            (
+                "Use somente excerpts verificados de sources em citações literais e distribua "
+                "entre "
+                f"{minimum} e {maximum} citações ao longo do vídeo."
+            ),
+            "Verbalize Livro, capítulo e versículo; deixe somente o excerpt entre aspas.",
+            (
+                "Classifique cada afirmação como biblical_text, verified_context, interpretation "
+                "ou creative_elaboration. Em postura factual, não use interpretação nem "
+                "elaboração criativa; em postura exploratória, deixe opinião e inferência "
+                "explicitamente distinguíveis da Bíblia."
+            ),
+            (
+                "Preencha long_form_strategy.standard=creative_retention_long_v2 e copie do "
+                "briefing creative_mode, interpretive_stance, hook_policy e hook_family. Não "
+                "preencha archetype: a estrutura vem do modo criativo, não dos três arquétipos "
+                "legados."
+            ),
+            (
+                "Faça opening_line ser o prefixo literal da locução. Se hook_family=none, deixe "
+                "opening_hook vazio, use orientation no primeiro beat e entregue valor até "
+                f"{long_config.opening_value_max_seconds:.0f}s. Caso contrário, copie opening_line "
+                "em opening_hook, marque hook no primeiro beat, siga a família escolhida e conclua "
+                f"o hook até {long_config.opening_target_max_seconds:.0f}s."
+            ),
+            (
+                "Não use saudação, apresentação do canal ou 'no vídeo de hoje'. Um longo sem hook "
+                "continua precisando de uma abertura específica e útil; não simule urgência."
+            ),
+            (
+                "Copie briefing.audience em target_viewer, briefing.central_theme em "
+                "content_promise e briefing.viewer_outcome em viewer_takeaway. central_question, "
+                "practical_application e callback são opcionais, salvo quando mode_guidance "
+                "exigir aplicação."
+            ),
+            (
+                "Construa a estrutura sugerida por mode_guidance. Cada seção acrescenta fato, "
+                "evidência, contexto, comparação, argumento, consequência, revelação ou síntese; "
+                "não reformule a mesma mensagem motivacional."
+            ),
+            (
+                "Cada beat mapeia exatamente uma seção em ordem; copie viewer_value em "
+                "retention_goal e visual_progression em visual_direction. Use ao menos "
+                f"{required_reengagements} reengajamentos e nunca passe de "
+                f"{long_config.maximum_reengagement_gap_seconds:.0f}s sem valor novo."
+            ),
+            (
+                "Mapeie cada citação em scripture_anchors na mesma ordem da locução. Insira a "
+                "primeira até "
+                f"{long_config.first_scripture_citation_max_seconds:.0f}s, respeite os intervalos "
+                "e faça cada citação cumprir função narrativa ou argumentativa real."
+            ),
+            (
+                "Declare resolution_timing conforme o modo. A resolução pode ser conclusão "
+                "factual, síntese analítica, posição filosófica, incerteza preservada ou "
+                "aplicação. "
+                "Copie resolution e viewer_takeaway no beat de resolution; não force uma lição "
+                "para a vida."
+            ),
+            (
+                "A closing termina imediatamente após exatamente uma ação de CTA: comentar, "
+                "inscrever-se ou compartilhar. Conecte-a ao valor entregue, não a promessa de "
+                "bênção ou resultado."
+            ),
+            "A revisão deve manter approved=false e registrar blockers reais sem ocultá-los.",
+            f"Grave ScriptDocument em {script_output}.",
+            f"Grave BiblicalReview com script_version=1 em {review_output}.",
+        ]
+    else:
+        instructions = [
+            "Escreva locução integralmente em pt-BR, natural, pastoral e sem jargão editorial.",
+            "Use somente excerpts verificados de sources em citações literais e distribua-os.",
+            "Verbalize Livro, capítulo e versículo; deixe somente o excerpt entre aspas.",
+            "Classifique afirmações e preserve limites de interpretação do briefing.",
+            (
+                "Comece dentro de um conflito concreto, sem saudação, apresentação do canal ou "
+                "'no vídeo de hoje'. Faça opening_hook ser o prefixo literal da locução, "
+                "verbalize content_promise e central_question na abertura e conclua o cold open "
+                f"até {long_config.opening_target_max_seconds:.0f}s."
+            ),
+            (
+                "Copie briefing.audience em target_viewer, briefing.central_theme em "
+                "content_promise e briefing.practical_application em practical_application."
+            ),
+            (
+                "Construa progressão com valor novo, use ao menos "
+                f"{required_reengagements} reengajamentos e nunca passe de "
+                f"{long_config.maximum_reengagement_gap_seconds:.0f}s sem nova informação."
+            ),
+            "Preencha long_form_strategy por completo e mapeie cada seção em ordem.",
+            "Mapeie cada citação em scripture_anchors na mesma ordem da locução.",
+            "Reserve payoff e aplicação para o quarto final e retome a abertura no callback.",
+            "A closing termina imediatamente após exatamente uma ação de CTA.",
+            "A revisão deve manter approved=false e registrar blockers reais sem ocultá-los.",
+            f"Grave ScriptDocument em {script_output}.",
+            f"Grave BiblicalReview com script_version=1 em {review_output}.",
+        ]
     payload = {
         "allowed_inputs": [],
         "task": {
@@ -1455,22 +1754,10 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 "target_duration_seconds": project.target_duration_seconds,
                 "video_format": project.video_format,
             },
-            "briefing": read_json(layout.briefing),
+            "briefing": briefing.model_dump(mode="json"),
             "sources": read_json(layout.sources),
             "literal_citation_target": {"minimum": minimum, "maximum": maximum},
-            "creative_contract": {
-                "narrative_standard": long_config.narrative_standard,
-                "content_promise_source": "briefing.central_theme",
-                "payoff_source": "briefing.practical_application",
-                "pacing_profile": "long_retention_v1",
-                "opening_target_max_seconds": long_config.opening_target_max_seconds,
-                "required_reengagements": required_reengagements,
-                "maximum_reengagement_gap_seconds": (long_config.maximum_reengagement_gap_seconds),
-                "payoff_start_minimum_ratio": long_config.payoff_start_minimum_ratio,
-                "cta_max_words": long_config.cta_max_words,
-                "cta_max_seconds": long_config.cta_max_seconds,
-                "cta_actions": ["comment", "subscribe", "share"],
-            },
+            "creative_contract": creative_contract,
             "scripture_cadence": {
                 "first_citation_max_seconds": (long_config.first_scripture_citation_max_seconds),
                 "minimum_gap_seconds": long_config.minimum_scripture_citation_gap_seconds,
@@ -1483,64 +1770,7 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 "script": compact_json_schema(ScriptDocument.model_json_schema()),
                 "biblical_review": compact_json_schema(BiblicalReview.model_json_schema()),
             },
-            "instructions": [
-                (
-                    "Escreva locução integralmente em pt-BR, natural, pastoral e sem jargão "
-                    "editorial."
-                ),
-                (
-                    "Use somente excerpts verificados de sources em citações literais e "
-                    "distribua-os."
-                ),
-                "Verbalize Livro, capítulo e versículo; deixe somente o excerpt entre aspas.",
-                "Classifique afirmações e preserve limites de interpretação do briefing.",
-                (
-                    "Comece dentro de um conflito concreto, sem saudação, apresentação do canal ou "
-                    "'no vídeo de hoje'. Faça opening_hook ser o prefixo literal da locução, "
-                    "verbalize content_promise e central_question na abertura e conclua o cold "
-                    f"open até {long_config.opening_target_max_seconds:.0f}s."
-                ),
-                (
-                    "Copie briefing.audience literalmente em target_viewer, "
-                    "briefing.central_theme em content_promise e "
-                    "briefing.practical_application em practical_application; inclua as duas "
-                    "últimas frases literalmente nos movimentos correspondentes da locução."
-                ),
-                (
-                    "Construa uma progressão por movimentos: cada seção acrescenta fato, ação, "
-                    "consequência, reversão ou mudança de entendimento. Use ao menos "
-                    f"{required_reengagements} reengajamentos e nunca passe de "
-                    f"{long_config.maximum_reengagement_gap_seconds:.0f}s sem nova informação "
-                    "relevante."
-                ),
-                (
-                    "Preencha long_form_strategy por completo. Cada beat mapeia exatamente uma "
-                    "seção em ordem; copie beat.viewer_value em retention_goal e "
-                    "beat.visual_progression em visual_direction. Contemplação só pode permanecer "
-                    "quando acrescentar significado."
-                ),
-                (
-                    "Mapeie cada citação em scripture_anchors na mesma ordem da locução. Insira a "
-                    "primeira até "
-                    f"{long_config.first_scripture_citation_max_seconds:.0f}s, mantenha "
-                    "as citações separadas e não deixe um intervalo superior a "
-                    f"{long_config.maximum_scripture_citation_gap_seconds:.0f}s. Cada citação deve "
-                    "funcionar como evidência, mudança de ato ou aprofundamento da história."
-                ),
-                (
-                    "Reserve o payoff para o quarto final, resolva central_question, entregue uma "
-                    "aplicação específica e faça o callback retomar a abertura com novo "
-                    "significado."
-                ),
-                (
-                    "A closing termina imediatamente após exatamente uma ação de CTA: comentar, "
-                    "inscrever-se ou compartilhar. Integre-a ao payoff, respeite os limites do "
-                    "creative_contract e, se escolher comentário, coloque a resposta entre aspas."
-                ),
-                "A revisão deve manter approved=false e registrar blockers reais sem ocultá-los.",
-                f"Grave ScriptDocument em {script_output}.",
-                f"Grave BiblicalReview com script_version=1 em {review_output}.",
-            ],
+            "instructions": instructions,
         },
     }
     return CodexPhaseSpec(

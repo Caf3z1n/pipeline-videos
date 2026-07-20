@@ -21,6 +21,7 @@ import httpx
 
 from pipeline_videos.editorial import quoted_comment_response
 from pipeline_videos.models import (
+    DEFAULT_ELEVENLABS_MODEL_ID,
     DEFAULT_ELEVENLABS_VOICE_ID,
     AudioManifest,
     AudioSegment,
@@ -679,7 +680,7 @@ def _apply_comment_response_pause(
 
 def _effective_elevenlabs_values(config: Any) -> tuple[str | None, str]:
     voice_id = config.voice_id or os.getenv("ELEVENLABS_VOICE_ID") or DEFAULT_ELEVENLABS_VOICE_ID
-    model_id = config.model_id or os.getenv("ELEVENLABS_MODEL_ID") or "eleven_flash_v2_5"
+    model_id = config.model_id or os.getenv("ELEVENLABS_MODEL_ID") or DEFAULT_ELEVENLABS_MODEL_ID
     return voice_id, model_id
 
 

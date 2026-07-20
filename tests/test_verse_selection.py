@@ -22,6 +22,8 @@ from pipeline_videos.verse_selection import (
     load_verse_catalog,
     reference_tokens,
     references_overlap,
+    select_creative_mode,
+    select_hook_family,
     select_retention_archetype,
     select_unused_verse,
 )
@@ -115,14 +117,18 @@ def test_auto_short_reserves_different_verses_and_populates_verified_source(tmp_
     assert briefing.visual_progression == first_candidate.visual_progression
     assert briefing.possible_reveal == first_candidate.possible_reveal
     assert briefing.title_seed == first_candidate.title_seed
+    assert briefing.creative_mode != "auto"
+    assert briefing.hook_policy == "required"
+    assert briefing.hook_family not in {"auto", "none"}
+    assert briefing.viewer_outcome
     assert sources.entries[0].verified is True
     assert sources.entries[0].excerpt == first_candidate.verse_text
     assert "Domínio público" in (sources.entries[0].rights_note or "")
     assert manifest.video_format == "short"
     assert manifest.stages["briefing"].status == StageStatus.COMPLETED
     assert manifest.approvals["briefing"].status == ApprovalStatus.PENDING
-    assert manifest.config.shorts_script.narrative_standard == "retention_story_v2"
-    assert manifest.config.youtube_growth.title_standard == "tension_pipe_passage_v2"
+    assert manifest.config.shorts_script.narrative_standard == "creative_retention_v3"
+    assert manifest.config.youtube_growth.title_standard == "creative_pipe_passage_v3"
     assert manifest.config.images.visual_standard_id == "cinematic-family-3d-v1"
     assert (tmp_path / "verse-usage.json").is_file()
     assert first.root != second.root
@@ -323,6 +329,61 @@ def test_retention_archetype_does_not_repeat_either_of_last_two_shorts() -> None
     selected = select_retention_archetype(candidate, usage)
 
     assert selected == "stair_step_progression"
+
+
+def test_creative_selector_avoids_recent_modes_and_alternates_optional_long_hook() -> None:
+    candidate = VerseCandidate(
+        candidate_id="creative-candidate",
+        source_id="creative-source",
+        reference="1 Samuel 17:45",
+        context_reference="1 Samuel 17:40-47",
+        book="1 Samuel",
+        testament="old",
+        translation="BPM",
+        verse_text="Eu vou contra ti em nome do Senhor dos Exércitos.",
+        source_url="https://example.invalid",
+        accessed_at="2026-07-19",
+        rights_note="Domínio público",
+        title="Davi diante de Golias",
+        slug="davi-golias-criativo",
+        central_theme="A sequência das decisões de Davi",
+        practical_application="Agir com coragem.",
+        characters=["Davi", "Golias"],
+        preferred_development_modes=["biblical_story"],
+        possible_reveal="A decisão precede o confronto.",
+    )
+    recent_modes = [
+        "biblical_storytelling",
+        "character_portrait",
+        "chronological_reconstruction",
+        "cause_and_consequence",
+    ]
+    usage = VerseUsageIndex(
+        generated_at="2026-07-19T12:00:00Z",
+        records=[
+            VerseUsageRecord(
+                project_id=f"long-{index}",
+                project_path=f"videos-longos/long-{index}",
+                video_format="landscape",
+                status="used",
+                creative_mode=mode,
+                hook_family="none" if index == 4 else "start_in_scene",
+                created_at=f"2026-07-19T0{index}:00:00Z",
+            )
+            for index, mode in enumerate(recent_modes, start=1)
+        ],
+    )
+
+    selected_mode = select_creative_mode(candidate, usage, video_format="landscape")
+    selected_hook = select_hook_family(
+        "biblical_storytelling",
+        usage,
+        video_format="landscape",
+        hook_policy="optional",
+    )
+
+    assert selected_mode not in set(recent_modes)
+    assert selected_hook == "consequence_first"
 
 
 def test_usage_scan_includes_complementary_sources_and_script_basis(tmp_path) -> None:

@@ -9,6 +9,12 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from pipeline_videos.creative_direction import (
+    HOOK_TEMPLATE_EXAMPLES,
+    creative_evidence_errors,
+    creative_mode_payload,
+    hook_matches_family,
+)
 from pipeline_videos.editorial import quoted_comment_response
 from pipeline_videos.models import (
     Briefing,
@@ -30,8 +36,8 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION = "3.0"
-SHORTS_SCRIPT_ALGORITHM_VERSION = "4.0"
+SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION = "4.0"
+SHORTS_SCRIPT_ALGORITHM_VERSION = "5.0"
 LEGACY_SCRIPTURE_BOUNDARY_PHRASE = "Até aqui, o texto bíblico."
 
 
@@ -235,6 +241,7 @@ def prepare_shorts_script_queue(
     project = layout.load_manifest()
     config = project.config.shorts_script
     is_retention_v2 = config.narrative_standard == "retention_story_v2"
+    is_creative_v3 = config.narrative_standard == "creative_retention_v3"
     main_agent_mode = not config.use_specialist_subagent
     if not config.enabled:
         raise RuntimeError("A etapa especializada de roteiro está desativada neste projeto.")
@@ -260,6 +267,20 @@ def prepare_shorts_script_queue(
     baseline_hash = _baseline_hash(layout)
     job_id = f"shorts-script-{input_hash[:16]}"
     context = _shorts_context_payload(layout, literal_candidates)
+    briefing = Briefing.model_validate(context["briefing"])
+    if is_creative_v3:
+        unresolved = []
+        if briefing.creative_mode == "auto":
+            unresolved.append("creative_mode")
+        if briefing.hook_policy == "auto":
+            unresolved.append("hook_policy")
+        if briefing.hook_family in {"auto", "none"}:
+            unresolved.append("hook_family")
+        if unresolved:
+            raise ValueError(
+                "Resolva a direção criativa do briefing antes de preparar o Short: "
+                + ", ".join(unresolved)
+            )
     write_json(layout.shorts_script_context, context)
     main_passage = str(context["briefing"].get("main_passage", "")).strip()
     main_passage_spoken = spoken_biblical_reference(main_passage)
@@ -329,6 +350,33 @@ def prepare_shorts_script_queue(
         },
         "retention_contract": (
             {
+                "standard": "creative_retention_v3",
+                "creative_mode": briefing.creative_mode,
+                "interpretive_stance": briefing.interpretive_stance,
+                "mode_guidance": creative_mode_payload(briefing.creative_mode),
+                "hook": {
+                    "required": True,
+                    "selected_family": briefing.hook_family,
+                    "target_end_seconds": config.hook_target_seconds,
+                    "templates": HOOK_TEMPLATE_EXAMPLES,
+                },
+                "timeline_seconds": {
+                    "hook": [0, 2],
+                    "orientation_or_stakes": [2, 8],
+                    "scripture": [8, 20],
+                    "development_and_reengagement": [20, 36],
+                    "resolution_or_synthesis": [32, 48],
+                    "single_action_cta": [45, 55],
+                },
+                "application_required": creative_mode_payload(briefing.creative_mode)[
+                    "application_required"
+                ],
+                "cta_max_words": config.cta_max_words,
+                "cta_max_seconds": config.cta_max_seconds,
+                "target_scene_count": [8, 10],
+            }
+            if is_creative_v3
+            else {
                 "standard": "retention_story_v2",
                 "selected_archetype": context["briefing"].get("retention_archetype"),
                 "allowed_archetypes": [
@@ -369,16 +417,25 @@ def prepare_shorts_script_queue(
             ),
             (
                 (
-                    "Use obrigatoriamente retention_story_v2. Abra dentro de uma ação, conflito "
-                    "ou revelação concreta; sustente uma pergunta central, faça o valor crescer "
-                    "e entregue o payoff somente depois de uma mudança real de entendimento."
-                    if is_retention_v2
+                    (
+                        "Use obrigatoriamente creative_retention_v3 e o creative_mode do briefing. "
+                        "Retenção organiza o ritmo, mas não transforma todo vídeo em devocional: "
+                        "a entrega pode ser fato, explicação, comparação, argumento, reflexão, "
+                        "conclusão ou aplicação conforme mode_guidance."
+                        if is_creative_v3
+                        else "Use obrigatoriamente retention_story_v2. Abra dentro de uma ação, "
+                        "conflito ou revelação concreta; sustente uma pergunta central, faça o "
+                        "valor crescer e entregue o payoff somente depois de uma mudança real de "
+                        "entendimento."
+                    )
+                    if is_creative_v3 or is_retention_v2
                     else "Use obrigatoriamente o padrão human_hook_to_bible. Comece com uma frase "
                     "humana curta que faça o espectador se reconhecer numa dor, pergunta ou "
                     "contraste; leve essa tensão imediatamente ao contexto bíblico e cite o "
                     "versículo verificado logo depois."
                 )
-                if config.narrative_standard in {"retention_story_v2", "human_hook_to_bible"}
+                if config.narrative_standard
+                in {"creative_retention_v3", "retention_story_v2", "human_hook_to_bible"}
                 else (
                     "Use o padrão legado verse_first: comece com a referência e o versículo, "
                     "mas faça a transição seguinte soar natural e não use rótulos falados."
@@ -424,12 +481,21 @@ def prepare_shorts_script_queue(
             ),
             (
                 (
-                    "O texto exato de strategy.hook deve abrir uma cena já em movimento, copiar "
-                    "o início da primeira seção, ter no máximo "
-                    f"{config.hook_max_words} palavras e terminar até "
-                    f"{config.hook_target_seconds:.1f}s. Não cumprimente, contextualize o canal "
-                    "nem comece com pergunta terapêutica genérica."
-                    if is_retention_v2
+                    (
+                        "O Short exige um hook inicial forte e honesto. Copie-o como prefixo exato "
+                        "da primeira seção, use no máximo "
+                        f"{config.hook_max_words} palavras, termine até "
+                        f"{config.hook_target_seconds:.1f}s e siga a selected_family. Os seis "
+                        "modelos fornecidos pelo usuário são referências prioritárias, nunca "
+                        "moldes para clickbait ou promessa que o vídeo não entrega."
+                        if is_creative_v3
+                        else "O texto exato de strategy.hook deve abrir uma cena já em movimento, "
+                        "copiar o início da primeira seção, ter no máximo "
+                        f"{config.hook_max_words} palavras e terminar até "
+                        f"{config.hook_target_seconds:.1f}s. Não cumprimente, contextualize o "
+                        "canal nem comece com pergunta terapêutica genérica."
+                    )
+                    if is_creative_v3 or is_retention_v2
                     else "O texto exato de strategy.hook deve ser o prefixo da abertura "
                     "humana, usar "
                     f"no máximo {config.hook_max_words} palavras, mirar "
@@ -438,7 +504,8 @@ def prepare_shorts_script_queue(
                     "contraste, especificidade, quebra de padrão ou open loop. A técnica deve "
                     "servir à verdade da mensagem, nunca manipular."
                 )
-                if config.narrative_standard in {"retention_story_v2", "human_hook_to_bible"}
+                if config.narrative_standard
+                in {"creative_retention_v3", "retention_story_v2", "human_hook_to_bible"}
                 else (
                     "No padrão verse_first, strategy.hook é o prefixo da locução bíblica, com "
                     f"no máximo {config.hook_max_words} palavras e alvo de "
@@ -447,29 +514,47 @@ def prepare_shorts_script_queue(
             ),
             (
                 (
-                    "Preencha strategy.retention_story e não narrative_spine. Use o arquétipo "
-                    "selecionado no briefing: conflict_first, counterintuitive_reveal ou "
-                    "stair_step_progression. Estruture ao menos sete seções: cold open, ação ou "
-                    "conflito, citação, progressão, reengajamento, payoff/aplicação e CTA."
-                    if is_retention_v2
+                    (
+                        "Preencha strategy.creative_direction e não retention_story nem "
+                        "narrative_spine. Copie creative_mode, interpretive_stance e hook_family "
+                        "do "
+                        "briefing. Mapeie abertura, uma ou duas citações, ao menos dois movimentos "
+                        "de desenvolvimento, reengajamento, resolução e CTA. Aplicação e callback "
+                        "só existem quando o modo e o roteiro realmente precisarem deles."
+                        if is_creative_v3
+                        else "Preencha strategy.retention_story e não narrative_spine. Use o "
+                        "arquétipo selecionado no briefing: conflict_first, "
+                        "counterintuitive_reveal ou stair_step_progression. Estruture ao menos "
+                        "sete seções: cold open, ação ou conflito, citação, progressão, "
+                        "reengajamento, payoff/aplicação e CTA."
+                    )
+                    if is_creative_v3 or is_retention_v2
                     else "Siga seis movimentos: gancho humano, citação bíblica, contexto ou "
                     "conflito "
                     "bíblico, verdade central que resolve o gancho, aplicação concreta e "
                     "encerramento. Em narrative_spine, use tension_section_id para o gancho, "
                     "verse_section_id para a citação e bridge_section_id para o contexto."
                 )
-                if config.narrative_standard in {"retention_story_v2", "human_hook_to_bible"}
+                if config.narrative_standard
+                in {"creative_retention_v3", "retention_story_v2", "human_hook_to_bible"}
                 else (
                     "Siga seis movimentos: versículo, pergunta de tensão, ponte bíblica, verdade "
                     "central, aplicação concreta e encerramento."
                 )
             ),
             (
-                "Em retention_story, copie opening_promise, central_question, cada item de "
-                "progression, reengagement, payoff e practical_response para as seções "
-                "mapeadas. Cada progressão deve acrescentar fato, ação, consequência ou "
-                "mudança de entendimento; não apenas reformular a mesma tese."
-                if is_retention_v2
+                (
+                    "Em creative_direction, copie content_promise, resolution e viewer_takeaway "
+                    "para as seções mapeadas. organizing_question, practical_application e "
+                    "callback são opcionais. Cada desenvolvimento acrescenta fato, evidência, "
+                    "contexto, comparação, argumento, consequência ou mudança de entendimento."
+                    if is_creative_v3
+                    else "Em retention_story, copie opening_promise, central_question, cada item "
+                    "de progression, reengagement, payoff e practical_response para as seções "
+                    "mapeadas. Cada progressão deve acrescentar fato, ação, consequência ou "
+                    "mudança de entendimento; não apenas reformular a mesma tese."
+                )
+                if is_creative_v3 or is_retention_v2
                 else "Escolha exatamente um development_mode: contextual_reflection para explicar "
                 "o contexto e refletir; biblical_story_bridge para uma cena/personagem "
                 "bíblico; biblical_image_bridge para uma imagem ou metáfora explicitamente "
@@ -478,15 +563,23 @@ def prepare_shorts_script_queue(
             ),
             (
                 "Faça a citação começar entre 8 e 20 segundos e registre seu início e fim em "
-                "verse_opening. A Bíblia entra como evidência que muda a leitura do conflito, "
-                "não como bloco decorativo ou resposta entregue cedo demais."
+                "verse_opening. A Bíblia entra como evidência narrativa, explicativa ou "
+                "argumentativa coerente com o modo, não como bloco decorativo."
+                if is_creative_v3
+                else "Faça a citação começar entre 8 e 20 segundos e registre seu início e "
+                "fim em verse_opening. A Bíblia entra como evidência que muda a leitura do "
+                "conflito, não como bloco decorativo ou resposta entregue cedo demais."
                 if is_retention_v2
                 else "Use contextual_reflection como padrão seguro. Só escolha story, image ou "
                 "cross_reference quando houver outra fonte bíblica verificada nas entradas; "
                 "registre-a em narrative_spine.bridge_source_ids. Não invente alegorias."
             ),
             (
-                "A tensão precisa ser honesta, reconhecível e específica. Resolva o loop na "
+                "A promessa e o hook precisam ser honestos, reconhecíveis e específicos. Entregue "
+                "a resolução adequada ao modo; não force conflito, esconda informação trivial, "
+                "ameace, use culpa, explore medo ou prometa benefício espiritual."
+                if is_creative_v3
+                else "A tensão precisa ser honesta, reconhecível e específica. Resolva o loop na "
                 "verdade central; não esconda informação trivial, ameace, use culpa, explore medo "
                 "ou prometa benefício espiritual para manipular retenção."
             ),
@@ -494,7 +587,7 @@ def prepare_shorts_script_queue(
                 "Marque new_information e visual_change em todos os retention_beats. Inclua "
                 "um reengajamento entre 40% e 60% da duração, com nova consequência, reversão "
                 "ou revelação; registre exatamente como ele altera a pergunta do espectador."
-                if is_retention_v2
+                if is_retention_v2 or is_creative_v3
                 else "Copie literalmente tension_question, bridge_statement, central_truth e "
                 "practical_response para a narration das seções apontadas pelos respectivos "
                 "section_id. O pipeline normaliza open_loop deterministicamente para repetir "
@@ -515,9 +608,10 @@ def prepare_shorts_script_queue(
             ),
             (
                 "Planeje a narração e as direções visuais para produzir de oito a dez cenas: "
-                "uma ação concreta por imagem, mudança visual no meio e callback final. A "
+                "uma ação concreta por imagem e mudança visual no meio. Callback final é "
+                "obrigatório apenas no contrato v2 legado. A "
                 "thumbnail continua sendo uma edição da imagem ativa da abertura."
-                if is_retention_v2
+                if is_retention_v2 or is_creative_v3
                 else "Preserve o perfil visual e o ritmo configurados no projeto."
             ),
             (
@@ -533,16 +627,27 @@ def prepare_shorts_script_queue(
                 "superior. Não escreva texto de capa dentro da imagem e não use choque gratuito."
             ),
             (
-                "A aplicação precisa oferecer uma resposta prática específica para hoje, "
+                "Não force aplicação pessoal. Em modos factuais, termine com compreensão ou "
+                "conclusão factual; em modos analíticos, com síntese; em modos exploratórios, "
+                "com posição argumentada ou incerteza preservada. Só os modos devocionais "
+                "exigem resposta prática."
+                if is_creative_v3
+                else "A aplicação precisa oferecer uma resposta prática específica para hoje, "
                 "diferenciar texto bíblico de interpretação e evitar promessa de vitória "
                 "automática."
             ),
             (
-                "Use uma voz pastoral simples: a clareza acolhedora de um bom pastor ou padre "
-                "conversando com uma pessoa, sem caricatura religiosa e sem tom de palestra. "
-                "Escreva em português brasileiro falado, com frases curtas, palavras comuns, "
-                "verbos concretos, contrações naturais e ritmo cotidiano. Leia tudo em voz alta "
-                "e reescreva o que soar formal, terapêutico, publicitário ou com cara de IA."
+                "Use briefing.narration_tone e interpretive_stance. A voz pode ser narrativa, "
+                "didática, investigativa, filosófica ou pastoral conforme o modo; não a "
+                "converta automaticamente em aconselhamento. Escreva em português brasileiro "
+                "falado, com frases claras, verbos concretos e ritmo natural."
+                if is_creative_v3
+                else "Use uma voz pastoral simples: a clareza acolhedora de um bom pastor ou "
+                "padre conversando com uma pessoa, sem caricatura religiosa e sem tom de "
+                "palestra. Escreva em português brasileiro falado, com frases curtas, palavras "
+                "comuns, verbos concretos, contrações naturais e ritmo cotidiano. Leia tudo "
+                "em voz alta e reescreva o que soar formal, terapêutico, publicitário ou com "
+                "cara de IA."
             ),
             (
                 "Evite fórmulas com aparência de texto gerado, como 'a coragem nasce de', "
@@ -562,11 +667,12 @@ def prepare_shorts_script_queue(
                 "profundo e não escreva frases de efeito vazias."
             ),
             (
-                "Preencha retention_story.engagement com exatamente uma ação: comment, "
+                "Preencha o engagement do contrato ativo com exatamente uma ação: comment, "
                 "subscribe ou share. O spoken_text precisa ter no máximo "
                 f"{config.cta_max_words} palavras, ocupar até {config.cta_max_seconds:.1f}s "
-                "e nascer do payoff. Não empilhe curtir, comentar, inscrever-se e compartilhar."
-                if is_retention_v2
+                "e nascer do valor entregue. Não empilhe curtir, comentar, inscrever-se e "
+                "compartilhar."
+                if is_retention_v2 or is_creative_v3
                 else "Antes do CTA, escolha exatamente um comment_prompt adequado ao vídeo: "
                 "keyword_reaffirmation para uma palavra temática; next_step_commitment para "
                 "um compromisso curto; sentence_completion para o espectador completar uma "
@@ -578,7 +684,7 @@ def prepare_shorts_script_queue(
                 "prompt_text deve ser o mesmo spoken_text; response_cue pode ser uma resposta "
                 "natural ou uma palavra específica. Aspas e pausa isolada só são exigidas "
                 "quando você escolher explicitamente uma palavra-chave."
-                if is_retention_v2
+                if is_retention_v2 or is_creative_v3
                 else "Preencha comment_prompt.prompt_text com o convite completo falado, "
                 "response_cue com a palavra, frase ou início de frase esperado, objective com "
                 "o objetivo humano da interação e fit_reason explicando por que esse modo "
@@ -586,10 +692,16 @@ def prepare_shorts_script_queue(
                 "convite. Use somente um pedido de comentário e mantenha-o natural."
             ),
             (
-                "Preencha replay_bridge com um elemento real da abertura, um callback final "
-                "e o novo significado que ele ganha. O closing_callback deve aparecer no "
-                "spoken_text do CTA e encerrar o vídeo imediatamente, sem despedida."
-                if is_retention_v2
+                (
+                    "Callback é opcional no creative_retention_v3. Quando usado, copie-o em "
+                    "creative_direction.callback e faça-o acrescentar significado; não crie loop "
+                    "circular artificial."
+                    if is_creative_v3
+                    else "Preencha replay_bridge com um elemento real da abertura, um callback "
+                    "final e o novo significado que ele ganha. O closing_callback deve aparecer "
+                    "no spoken_text do CTA e encerrar o vídeo imediatamente, sem despedida."
+                )
+                if is_creative_v3 or is_retention_v2
                 else "Quando response_cue for uma palavra, escolha uma palavra-síntese expressiva, "
                 "específica e ligada à verdade central, ao payoff ou à aplicação. Ela deve "
                 f"ter ao menos {_MIN_COMMENT_CUE_SIGNIFICANT_CHARACTERS} letras. Boas referências "
@@ -601,7 +713,7 @@ def prepare_shorts_script_queue(
                 f"{config.retention_target_min_seconds:.0f}s e "
                 f"{config.retention_target_max_seconds:.0f}s. O CTA é o último movimento; "
                 "não acrescente resumo, agradecimento, despedida ou segunda chamada depois."
-                if is_retention_v2
+                if is_retention_v2 or is_creative_v3
                 else "Nunca use como resposta isolada palavras vagas ou fracas como BEM, SIM, "
                 "AMÉM, EU, AQUI, PERTO, FÉ, PAZ, FORÇA ou FIEL. Explique concretamente a "
                 "ligação da resposta com a resolução do roteiro."
@@ -612,9 +724,9 @@ def prepare_shorts_script_queue(
                 "promessa de resultado nem frases como 'comente amém para receber'."
             ),
             (
-                "Copie retention_story.engagement.spoken_text em strategy.cta e use esse "
-                "texto como toda a narração da seção closing mapeada por cta_section_id."
-                if is_retention_v2
+                "Copie engagement.spoken_text do contrato ativo em strategy.cta e use esse texto "
+                "como toda a narração da seção closing mapeada por cta_section_id."
+                if is_retention_v2 or is_creative_v3
                 else "Encerre sempre com o CTA exato, imediatamente depois do convite para "
                 f"comentar: '{config.final_subscribe_cta}' Não acrescente texto depois."
             ),
@@ -776,8 +888,11 @@ def _validate_scripture_contract(
             raise ValueError("A citação bíblica termina tarde demais para o ritmo do Short.")
     spine = strategy.narrative_spine
     story = strategy.retention_story
+    creative = strategy.creative_direction
     verse_section_id = (
-        story.scripture_section_id
+        creative.scripture_section_ids[0]
+        if creative is not None
+        else story.scripture_section_id
         if story is not None
         else spine.verse_section_id
         if spine is not None
@@ -971,8 +1086,79 @@ def _validate_retention_engagement_contract(
         raise ValueError("O CTA final precisa conter o callback declarado.")
 
 
+def _validate_creative_engagement_contract(
+    layout: ProjectLayout,
+    package: ShortsScriptPackage,
+) -> None:
+    config = layout.load_manifest().config.shorts_script
+    strategy = package.strategy
+    direction = strategy.creative_direction
+    if direction is None:
+        raise ValueError("creative_retention_v3 exige strategy.creative_direction.")
+    engagement = direction.engagement
+    spoken_text = _collapsed(engagement.spoken_text)
+    if _collapsed(strategy.cta) != spoken_text:
+        raise ValueError("strategy.cta precisa copiar creative_direction.engagement.spoken_text.")
+    if len(tokenize_words(spoken_text)) > config.cta_max_words:
+        raise ValueError("O CTA de creative_retention_v3 ultrapassa doze palavras.")
+    if engagement.target_end_seconds - engagement.target_start_seconds > config.cta_max_seconds:
+        raise ValueError("O CTA de creative_retention_v3 ultrapassa quatro segundos.")
+
+    normalized = _normalized(spoken_text)
+    action_markers = {
+        "comment": ("coment", "escrev", "conta pra"),
+        "subscribe": ("inscrev",),
+        "share": ("compartilh", "envia", "mande"),
+    }
+    detected = {
+        mode
+        for mode, markers in action_markers.items()
+        if any(marker in normalized for marker in markers)
+    }
+    if detected != {engagement.mode}:
+        raise ValueError("O CTA precisa pedir exatamente a ação declarada em engagement.mode.")
+    if not engagement.objective.strip() or not engagement.fit_reason.strip():
+        raise ValueError("O engagement precisa registrar objetivo e adequação ao valor entregue.")
+    forbidden_engagement_bait = (
+        "comente amem para receber",
+        "escreva amem para receber",
+        "para receber uma bencao",
+        "para deus te abencoar",
+        "prove sua fe",
+        "se voce ama deus",
+    )
+    if any(forbidden in normalized for forbidden in forbidden_engagement_bait):
+        raise ValueError("O CTA usa pressão ou promessa espiritual indevida.")
+
+    comment_prompt = strategy.comment_prompt
+    if engagement.mode == "comment":
+        if comment_prompt is None:
+            raise ValueError("engagement.mode=comment exige strategy.comment_prompt.")
+        if _collapsed(comment_prompt.prompt_text) != spoken_text:
+            raise ValueError("comment_prompt.prompt_text precisa copiar o CTA falado.")
+        if not _contains_normalized(comment_prompt.prompt_text, comment_prompt.response_cue):
+            raise ValueError("A resposta sugerida precisa aparecer no convite falado.")
+        if len(tokenize_words(comment_prompt.response_cue)) > config.comment_response_max_words:
+            raise ValueError("A resposta sugerida para o comentário está longa demais.")
+    elif comment_prompt is not None:
+        raise ValueError("comment_prompt só pode existir quando engagement.mode=comment.")
+
+    closing = package.script.sections[-1]
+    if closing.section_id != direction.cta_section_id or closing.role != "closing":
+        raise ValueError("O CTA precisa ocupar a última seção closing.")
+    if _collapsed(closing.narration) != spoken_text:
+        raise ValueError("A seção closing deve conter somente o CTA de uma ação.")
+    if direction.callback.strip() and not _contains_normalized(
+        closing.narration, direction.callback
+    ):
+        raise ValueError("O callback declarado precisa aparecer no CTA final.")
+
+
 def _validate_engagement_contract(layout: ProjectLayout, package: ShortsScriptPackage) -> None:
     config = layout.load_manifest().config.shorts_script
+    if config.narrative_standard == "creative_retention_v3":
+        _validate_creative_engagement_contract(layout, package)
+        return
     if config.narrative_standard == "retention_story_v2":
         _validate_retention_engagement_contract(layout, package)
         return
@@ -1342,6 +1528,220 @@ def _collect_retention_story_errors(
     return section_by_id, structurally_valid
 
 
+def _collect_creative_direction_errors(
+    layout: ProjectLayout,
+    package: ShortsScriptPackage,
+    errors: list[str],
+) -> tuple[dict[str, Any], bool]:
+    project = layout.load_manifest()
+    config = project.config.shorts_script
+    strategy = package.strategy
+    direction = strategy.creative_direction
+    sections = package.script.sections
+    section_by_id = {section.section_id: section for section in sections}
+    if direction is None:
+        _add_validation_error(errors, "creative_retention_v3 exige strategy.creative_direction.")
+        return section_by_id, False
+    if strategy.retention_story is not None or strategy.narrative_spine is not None:
+        _add_validation_error(
+            errors,
+            "creative_retention_v3 não deve preencher contratos narrativos legados.",
+        )
+
+    briefing = read_model(layout.briefing, Briefing)
+    if direction.creative_mode != briefing.creative_mode:
+        _add_validation_error(errors, "creative_mode diverge do modo resolvido no briefing.")
+    if direction.interpretive_stance != briefing.interpretive_stance:
+        _add_validation_error(errors, "interpretive_stance diverge do briefing.")
+    if direction.hook_family != briefing.hook_family:
+        _add_validation_error(errors, "hook_family diverge da família resolvida no briefing.")
+    if strategy.hook_family != direction.hook_family:
+        _add_validation_error(errors, "strategy.hook_family precisa copiar creative_direction.")
+    if not hook_matches_family(strategy.hook, direction.hook_family):
+        _add_validation_error(errors, "O hook não corresponde à família declarada.")
+
+    core_ids = [
+        direction.opening_section_id,
+        *direction.scripture_section_ids,
+        direction.resolution_section_id,
+        direction.cta_section_id,
+    ]
+    mapped_ids = [*core_ids, *direction.development_section_ids]
+    structurally_valid = True
+    if len(sections) < 6:
+        _add_validation_error(
+            errors,
+            "creative_retention_v3 exige ao menos seis movimentos editoriais.",
+        )
+    if len(set(direction.development_section_ids)) != len(direction.development_section_ids):
+        _add_validation_error(errors, "development_section_ids contém seção repetida.")
+        structurally_valid = False
+    if not set(mapped_ids).issubset(section_by_id):
+        _add_validation_error(errors, "creative_direction referencia section_id inexistente.")
+        structurally_valid = False
+    if not set(direction.reengagement_section_ids).issubset(direction.development_section_ids):
+        _add_validation_error(
+            errors,
+            "Todo reengajamento precisa fazer parte dos movimentos de desenvolvimento.",
+        )
+        structurally_valid = False
+
+    if structurally_valid and sections:
+        ordered_ids = [section.section_id for section in sections]
+        if direction.opening_section_id != ordered_ids[0]:
+            _add_validation_error(errors, "O hook precisa ocupar a primeira seção.")
+        if direction.cta_section_id != ordered_ids[-1]:
+            _add_validation_error(errors, "O CTA precisa ocupar a última seção.")
+        development_positions = [
+            ordered_ids.index(section_id) for section_id in direction.development_section_ids
+        ]
+        if development_positions != sorted(development_positions):
+            _add_validation_error(errors, "O desenvolvimento precisa seguir a ordem do roteiro.")
+        if ordered_ids.index(direction.resolution_section_id) <= max(
+            ordered_ids.index(section_id) for section_id in direction.reengagement_section_ids
+        ):
+            _add_validation_error(errors, "A resolução precisa vir depois do reengajamento.")
+
+        opening = section_by_id[direction.opening_section_id]
+        resolution = section_by_id[direction.resolution_section_id]
+        cta = section_by_id[direction.cta_section_id]
+        if opening.role != "opening":
+            _add_validation_error(errors, "O hook precisa usar role=opening.")
+        for scripture_id in direction.scripture_section_ids:
+            if section_by_id[scripture_id].role != "biblical_narrative":
+                _add_validation_error(errors, "Toda citação precisa usar role=biblical_narrative.")
+                break
+        if resolution.role not in {"biblical_narrative", "reflection", "application"}:
+            _add_validation_error(errors, "A resolução precisa usar uma role de desenvolvimento.")
+        if direction.practical_application.strip() and resolution.role != "application":
+            _add_validation_error(errors, "A aplicação declarada precisa usar role=application.")
+        if cta.role != "closing":
+            _add_validation_error(errors, "O CTA precisa usar role=closing.")
+
+        mapped_text = (
+            (direction.opening_section_id, direction.content_promise, "content_promise"),
+            (direction.resolution_section_id, direction.resolution, "resolution"),
+            (direction.resolution_section_id, direction.viewer_takeaway, "viewer_takeaway"),
+        )
+        for section_id, required_text, field_name in mapped_text:
+            if not _contains_normalized(section_by_id[section_id].narration, required_text):
+                _add_validation_error(
+                    errors,
+                    f"creative_direction.{field_name} precisa aparecer na seção mapeada.",
+                )
+        if direction.organizing_question.strip() and not _contains_normalized(
+            package.script.narration_text(), direction.organizing_question
+        ):
+            _add_validation_error(
+                errors,
+                "A organizing_question declarada precisa aparecer na locução.",
+            )
+        if direction.practical_application.strip() and not _contains_normalized(
+            resolution.narration, direction.practical_application
+        ):
+            _add_validation_error(
+                errors,
+                "A practical_application declarada precisa aparecer na resolução.",
+            )
+
+    if _normalized(strategy.content_promise) != _normalized(direction.content_promise):
+        _add_validation_error(errors, "content_promise precisa copiar creative_direction.")
+    expected_loop = direction.organizing_question or direction.content_promise
+    if _normalized(strategy.open_loop) != _normalized(expected_loop):
+        _add_validation_error(
+            errors,
+            "open_loop precisa copiar organizing_question ou content_promise.",
+        )
+    if _normalized(strategy.payoff) != _normalized(direction.resolution):
+        _add_validation_error(errors, "strategy.payoff precisa copiar a resolução.")
+    if _normalized(strategy.practical_value) != _normalized(direction.viewer_takeaway):
+        _add_validation_error(errors, "practical_value precisa copiar viewer_takeaway.")
+
+    if strategy.verse_opening is not None:
+        verse = strategy.verse_opening
+        if verse.target_start_seconds < config.scripture_citation_min_start_seconds:
+            _add_validation_error(errors, "A citação bíblica começa antes de oito segundos.")
+        if verse.target_end_seconds > config.scripture_citation_max_end_seconds:
+            _add_validation_error(errors, "A citação bíblica termina depois de vinte segundos.")
+        if verse.source_id not in direction.source_ids:
+            _add_validation_error(errors, "creative_direction não registra a fonte da citação.")
+
+    beats = strategy.retention_beats
+    final_end = max((beat.target_end_seconds for beat in beats), default=0.0)
+    if not config.retention_target_min_seconds <= final_end <= config.retention_target_max_seconds:
+        _add_validation_error(
+            errors,
+            "creative_retention_v3 precisa terminar entre 45 e 55 segundos.",
+        )
+    engagement = direction.engagement
+    if engagement.target_end_seconds != final_end:
+        _add_validation_error(errors, "O CTA precisa terminar junto com o último beat.")
+    cta_beats = [beat for beat in beats if beat.purpose == "cta"]
+    if len(cta_beats) != 1 or cta_beats[0].section_id != direction.cta_section_id:
+        _add_validation_error(errors, "A estratégia precisa de exatamente um beat de CTA final.")
+    elif (
+        cta_beats[0].target_start_seconds != engagement.target_start_seconds
+        or cta_beats[0].target_end_seconds != engagement.target_end_seconds
+    ):
+        _add_validation_error(errors, "O beat de CTA precisa usar os tempos do engagement.")
+
+    development_purposes = {
+        "orientation",
+        "stakes",
+        "progression",
+        "evidence",
+        "context",
+        "analysis",
+        "comparison",
+        "reveal",
+    }
+    development_beats = [beat for beat in beats if beat.purpose in development_purposes]
+    if len(development_beats) < config.minimum_progression_beats:
+        _add_validation_error(errors, "O roteiro possui poucos movimentos de desenvolvimento.")
+    reengagement_beats = [
+        beat
+        for beat in beats
+        if beat.section_id in direction.reengagement_section_ids
+        and beat.purpose in {"pattern_interrupt", "reveal"}
+    ]
+    if len(reengagement_beats) != len(direction.reengagement_section_ids):
+        _add_validation_error(errors, "O roteiro não mapeia todos os reengajamentos declarados.")
+    elif final_end and any(
+        not 0.4 <= beat.target_start_seconds / final_end <= 0.6 for beat in reengagement_beats
+    ):
+        _add_validation_error(errors, "O reengajamento precisa começar entre 40% e 60%.")
+    if not any(
+        beat.section_id == direction.resolution_section_id and beat.purpose == "resolution"
+        for beat in beats
+    ):
+        _add_validation_error(errors, "A resolução precisa de um beat próprio.")
+    if not any(beat.purpose == "hook" for beat in beats):
+        _add_validation_error(errors, "Shorts exigem um beat inicial de hook.")
+
+    new_information = []
+    for beat in beats:
+        if not (beat.new_information or "").strip() or not (beat.visual_change or "").strip():
+            _add_validation_error(
+                errors,
+                "Cada beat de creative_retention_v3 precisa declarar new_information e "
+                "visual_change.",
+            )
+            break
+        new_information.append(_normalized(beat.new_information or ""))
+    if len(new_information) != len(set(new_information)):
+        _add_validation_error(errors, "Os beats repetem informação em vez de progredir.")
+
+    sources = read_model(layout.sources, SourceLibrary)
+    for evidence_error in creative_evidence_errors(
+        package.script,
+        sources,
+        creative_mode=direction.creative_mode,
+        interpretive_stance=direction.interpretive_stance,
+    ):
+        _add_validation_error(errors, evidence_error)
+    return section_by_id, structurally_valid
+
+
 def _collect_package_validation_errors(
     layout: ProjectLayout,
     package: ShortsScriptPackage,
@@ -1392,7 +1792,7 @@ def _collect_package_validation_errors(
     if config.require_subscribe_cta and "inscrev" not in closing:
         _add_validation_error(errors, "O CTA final precisa convidar o espectador a se inscrever.")
     if (
-        config.narrative_standard != "retention_story_v2"
+        config.narrative_standard not in {"retention_story_v2", "creative_retention_v3"}
         and not strategy.reason_to_subscribe.strip()
     ):
         _add_validation_error(errors, "O CTA precisa explicar o benefício de acompanhar o canal.")
@@ -1408,10 +1808,13 @@ def _collect_package_validation_errors(
         if beat.target_end_seconds > project.target_duration_seconds:
             _add_validation_error(errors, "Um beat ultrapassa a duração-alvo do Short.")
         previous_start = beat.target_start_seconds
-    if not any(beat.opens_loop for beat in strategy.retention_beats):
-        _add_validation_error(errors, "A estratégia precisa abrir ao menos um loop de curiosidade.")
-    if not any(beat.resolves_loop for beat in strategy.retention_beats):
-        _add_validation_error(errors, "A estratégia precisa resolver o loop de curiosidade.")
+    if config.narrative_standard != "creative_retention_v3":
+        if not any(beat.opens_loop for beat in strategy.retention_beats):
+            _add_validation_error(
+                errors, "A estratégia precisa abrir ao menos um loop de curiosidade."
+            )
+        if not any(beat.resolves_loop for beat in strategy.retention_beats):
+            _add_validation_error(errors, "A estratégia precisa resolver o loop de curiosidade.")
 
     narration = _normalized(script.narration_text())
     if _normalized(LEGACY_SCRIPTURE_BOUNDARY_PHRASE) in narration:
@@ -1435,7 +1838,26 @@ def _collect_package_validation_errors(
     sources = read_model(layout.sources, SourceLibrary)
     spine = strategy.narrative_spine
     story = strategy.retention_story
-    if config.narrative_standard == "retention_story_v2":
+    creative = strategy.creative_direction
+    if config.narrative_standard == "creative_retention_v3":
+        section_by_id, structure_ready = _collect_creative_direction_errors(
+            layout,
+            package,
+            errors,
+        )
+        if strategy.verse_opening is None:
+            _add_validation_error(
+                errors,
+                "creative_retention_v3 exige ao menos uma citação bíblica literal.",
+            )
+        if strategy.hook_type == "scripture_opening":
+            _add_validation_error(errors, "O hook inicial não pode ser a referência bíblica.")
+        if not 1 <= len(strategy.hook_techniques) <= 3:
+            _add_validation_error(
+                errors,
+                "O hook precisa registrar de uma a três técnicas de atenção.",
+            )
+    elif config.narrative_standard == "retention_story_v2":
         section_by_id, structure_ready = _collect_retention_story_errors(
             layout,
             package,
@@ -1541,7 +1963,9 @@ def _collect_package_validation_errors(
                 )
 
     strategy_structure = (
-        story is not None
+        creative is not None
+        if config.narrative_standard == "creative_retention_v3"
+        else story is not None
         if config.narrative_standard == "retention_story_v2"
         else spine is not None
     )
@@ -1557,7 +1981,19 @@ def _collect_package_validation_errors(
         except ValueError as exc:
             _add_validation_error(errors, str(exc))
         else:
-            if config.narrative_standard == "retention_story_v2" and story is not None:
+            if config.narrative_standard == "creative_retention_v3" and creative is not None:
+                required_source_ids |= set(creative.source_ids)
+                if not required_source_ids.issubset(package.script.source_ids):
+                    _add_validation_error(
+                        errors,
+                        "O roteiro não registra todas as fontes da direção criativa.",
+                    )
+                if not required_source_ids.issubset(strategy.source_ids):
+                    _add_validation_error(
+                        errors,
+                        "A estratégia não registra todas as fontes da direção criativa.",
+                    )
+            elif config.narrative_standard == "retention_story_v2" and story is not None:
                 required_source_ids |= set(story.source_ids)
                 if not required_source_ids.issubset(package.script.source_ids):
                     _add_validation_error(
@@ -1647,6 +2083,40 @@ def _normalize_staging_package_payload(payload: Any) -> tuple[Any, tuple[str, ..
     strategy = normalized.get("strategy")
     if not isinstance(strategy, dict):
         return normalized, ()
+    creative = strategy.get("creative_direction")
+    if isinstance(creative, dict):
+        organizing_question = creative.get("organizing_question")
+        content_promise = creative.get("content_promise")
+        expected_loop = (
+            organizing_question
+            if isinstance(organizing_question, str) and organizing_question.strip()
+            else content_promise
+        )
+        if isinstance(expected_loop, str) and strategy.get("open_loop") != expected_loop:
+            strategy["open_loop"] = expected_loop
+            normalizations.append("strategy.open_loop sincronizado com creative_direction.")
+        field_pairs = (
+            ("content_promise", "content_promise"),
+            ("payoff", "resolution"),
+            ("practical_value", "viewer_takeaway"),
+            ("hook_family", "hook_family"),
+        )
+        for strategy_field, creative_field in field_pairs:
+            value = creative.get(creative_field)
+            if isinstance(value, str) and strategy.get(strategy_field) != value:
+                strategy[strategy_field] = value
+                normalizations.append(
+                    f"strategy.{strategy_field} sincronizado com "
+                    f"creative_direction.{creative_field}."
+                )
+        engagement = creative.get("engagement")
+        spoken_text = engagement.get("spoken_text") if isinstance(engagement, dict) else None
+        if isinstance(spoken_text, str) and strategy.get("cta") != spoken_text:
+            strategy["cta"] = spoken_text
+            normalizations.append(
+                "strategy.cta sincronizado com creative_direction.engagement.spoken_text."
+            )
+        return normalized, tuple(normalizations)
     story = strategy.get("retention_story")
     if isinstance(story, dict):
         central_question = story.get("central_question")

@@ -12,6 +12,7 @@ from pipeline_videos.models import (
     ScriptDocument,
     ScriptSection,
     ShortsCommentPrompt,
+    ShortsCreativeDirection,
     ShortsEngagementPlan,
     ShortsNarrativeSpine,
     ShortsReplayBridge,
@@ -316,6 +317,9 @@ def _retention_project(tmp_path):
         video_format="short",
         project_date=date(2026, 7, 16),
     )
+    manifest = layout.load_manifest()
+    manifest.config.shorts_script.narrative_standard = "retention_story_v2"
+    layout.save_manifest(manifest)
     write_json(
         layout.briefing,
         Briefing(
@@ -618,6 +622,103 @@ def _retention_package(queue: dict) -> ShortsScriptPackage:
     )
 
 
+def _creative_project(tmp_path):
+    layout = _retention_project(tmp_path)
+    manifest = layout.load_manifest()
+    manifest.config.shorts_script.narrative_standard = "creative_retention_v3"
+    layout.save_manifest(manifest)
+    briefing = read_model(layout.briefing, Briefing)
+    write_json(
+        layout.briefing,
+        briefing.model_copy(
+            update={
+                "creative_mode": "biblical_curiosity",
+                "interpretive_stance": "expository",
+                "hook_policy": "required",
+                "hook_family": "nobody_talks_but",
+                "viewer_outcome": "O detalhe gramatical muda a leitura do medo.",
+                "practical_application": "",
+            }
+        ),
+    )
+    return layout
+
+
+def _creative_package(queue: dict) -> ShortsScriptPackage:
+    legacy = _retention_package(queue)
+    strategy = legacy.strategy
+    assert strategy.retention_story is not None
+    hook = "Ninguém fala sobre esta palavra, mas ela muda toda a cena."
+    content_promise = "A primeira palavra muda a leitura do medo neste salmo."
+    resolution = "A palavra quando reconhece o medo antes de apresentar a confiança."
+    viewer_takeaway = "O detalhe gramatical muda a leitura do medo."
+    sections = [section.model_copy(deep=True) for section in legacy.script.sections]
+    sections[0] = sections[0].model_copy(update={"narration": f"{hook} {content_promise}"})
+    sections[5] = sections[5].model_copy(
+        update={
+            "role": "reflection",
+            "title": "A conclusão do detalhe",
+            "narration": f"{resolution} {viewer_takeaway}",
+            "retention_goal": "Concluir a curiosidade sem transformar o vídeo em conselho.",
+            "visual_direction": (
+                "A palavra quando permanece em destaque enquanto Davi encara a sombra."
+            ),
+        }
+    )
+    purposes = ["hook", "orientation", "evidence", "analysis", "reveal", "resolution", "cta"]
+    beats = [
+        beat.model_copy(
+            update={
+                "purpose": purpose,
+                "new_information": (
+                    f"Movimento {index} acrescenta uma evidência distinta sobre a palavra quando."
+                ),
+            }
+        )
+        for index, (beat, purpose) in enumerate(
+            zip(strategy.retention_beats, purposes, strict=True),
+            start=1,
+        )
+    ]
+    direction = ShortsCreativeDirection(
+        creative_mode="biblical_curiosity",
+        interpretive_stance="expository",
+        hook_family="nobody_talks_but",
+        opening_section_id="section-001",
+        scripture_section_ids=["section-003"],
+        development_section_ids=[
+            "section-002",
+            "section-003",
+            "section-004",
+            "section-005",
+        ],
+        reengagement_section_ids=["section-005"],
+        resolution_section_id="section-006",
+        cta_section_id="section-007",
+        content_promise=content_promise,
+        organizing_question="Sentir medo significava perder a fé?",
+        resolution=resolution,
+        viewer_takeaway=viewer_takeaway,
+        engagement=strategy.retention_story.engagement,
+        source_ids=["bpm-salmos-56-3"],
+    )
+    creative_strategy = strategy.model_copy(
+        update={
+            "content_promise": content_promise,
+            "hook": hook,
+            "hook_family": "nobody_talks_but",
+            "creative_direction": direction,
+            "retention_story": None,
+            "open_loop": direction.organizing_question,
+            "payoff": resolution,
+            "practical_value": viewer_takeaway,
+            "retention_beats": beats,
+        }
+    )
+    script = legacy.script.model_copy(update={"sections": sections})
+    return legacy.model_copy(update={"script": script, "strategy": creative_strategy})
+
+
 def test_shorts_specialist_queue_imports_script_review_and_retention_strategy(tmp_path) -> None:
     layout = _short_project(tmp_path)
     queue = prepare_shorts_script_queue(layout)
@@ -760,6 +861,33 @@ def test_retention_story_v2_rejects_stacked_cta(tmp_path) -> None:
 
     assert result.valid is False
     assert any("exatamente a única ação" in error for error in result.errors)
+
+
+def test_creative_retention_v3_accepts_curiosity_without_practical_application(tmp_path) -> None:
+    layout = _creative_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+
+    assert queue["schema_version"] == "4.0"
+    assert queue["retention_contract"]["standard"] == "creative_retention_v3"
+    assert queue["retention_contract"]["creative_mode"] == "biblical_curiosity"
+    assert queue["retention_contract"]["mode_guidance"]["id"] == "biblical_curiosity"
+    assert queue["retention_contract"]["hook"]["required"] is True
+    assert queue["retention_contract"]["hook"]["selected_family"] == "nobody_talks_but"
+    assert queue["retention_contract"]["application_required"] is False
+    assert queue["scripture_candidates"] == ["bpm-salmos-56-3"]
+
+    write_json(layout.shorts_script_package_staging, _creative_package(queue))
+    imported = import_shorts_script_package(layout)
+    contract = read_model(layout.creative_contract, CreativeContract)
+
+    assert imported.strategy.creative_direction is not None
+    assert imported.strategy.creative_direction.practical_application == ""
+    assert imported.strategy.verse_opening is not None
+    assert contract.algorithm == "creative-contract-v2"
+    assert contract.creative_mode == "biblical_curiosity"
+    assert contract.hook_used is True
+    assert contract.pacing.profile_id == "short_creative_v3"
+    assert all(section.role != "application" for section in imported.script.sections)
 
 
 def test_shorts_staging_preflight_aggregates_errors_and_is_read_only(tmp_path) -> None:

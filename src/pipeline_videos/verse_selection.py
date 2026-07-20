@@ -12,6 +12,16 @@ from datetime import date
 from pathlib import Path
 from typing import Literal
 
+from pipeline_videos.creative_direction import (
+    CREATIVE_MODE_SPECS,
+    DEVELOPMENT_MODE_TO_CREATIVE_MODES,
+    SHORT_AUTOMATIC_EXCLUSIONS,
+    default_interpretive_stance,
+    default_long_hook_policy,
+    hook_families_for_mode,
+    narration_tone_for_mode,
+    viewer_outcome_for_mode,
+)
 from pipeline_videos.git_registry import (
     read_shared_registry,
     shared_registry_enabled,
@@ -19,6 +29,8 @@ from pipeline_videos.git_registry import (
 )
 from pipeline_videos.models import (
     Briefing,
+    CreativeMode,
+    HookFamily,
     ProductionMode,
     SourceEntry,
     SourceLibrary,
@@ -273,7 +285,14 @@ def build_usage_index(
         retention_archetype = str(briefing.get("retention_archetype") or "").strip() or None
         if retention_archetype not in RETENTION_ARCHETYPES:
             retention_archetype = None
-        hook_family = retention_archetype
+        creative_mode = str(briefing.get("creative_mode") or "").strip() or None
+        if creative_mode not in CREATIVE_MODE_SPECS:
+            creative_mode = None
+        hook_family = str(briefing.get("hook_family") or "").strip() or None
+        if hook_family in {"auto", "none"}:
+            hook_family = None
+        if hook_family is None:
+            hook_family = retention_archetype
         engagement_mode = None
         if layout.shorts_script_strategy.is_file():
             strategy = _json_object(layout.shorts_script_strategy)
@@ -286,6 +305,19 @@ def build_usage_index(
                     retention_archetype = None
                 hook_family = retention_archetype
                 engagement = retention_story.get("engagement")
+                if isinstance(engagement, dict):
+                    engagement_mode = str(engagement.get("mode") or "").strip() or None
+                    if engagement_mode not in {"comment", "subscribe", "share"}:
+                        engagement_mode = None
+            creative_direction = strategy.get("creative_direction")
+            if isinstance(creative_direction, dict):
+                selected_mode = str(creative_direction.get("creative_mode") or "").strip()
+                if selected_mode in CREATIVE_MODE_SPECS:
+                    creative_mode = selected_mode
+                selected_hook = str(creative_direction.get("hook_family") or "").strip()
+                if selected_hook not in {"", "auto", "none"}:
+                    hook_family = selected_hook
+                engagement = creative_direction.get("engagement")
                 if isinstance(engagement, dict):
                     engagement_mode = str(engagement.get("mode") or "").strip() or None
                     if engagement_mode not in {"comment", "subscribe", "share"}:
@@ -325,6 +357,7 @@ def build_usage_index(
                 ),
                 retention_archetype=retention_archetype,
                 hook_family=hook_family,
+                creative_mode=creative_mode,
                 engagement_mode=engagement_mode,
                 created_at=created_at,
             )
@@ -407,6 +440,8 @@ def _reservation_record(
     project_id: str,
     video_format: Literal["landscape", "short"],
     retention_archetype: str | None = None,
+    creative_mode: CreativeMode | None = None,
+    hook_family: HookFamily | None = None,
 ) -> VerseUsageRecord:
     category = "shorts" if video_format == "short" else "videos-longos"
     now = utc_now()
@@ -430,7 +465,8 @@ def _reservation_record(
         themes=list(dict.fromkeys([candidate.central_theme, *candidate.themes])),
         characters=candidate.characters,
         retention_archetype=retention_archetype,
-        hook_family=retention_archetype,
+        hook_family=hook_family or retention_archetype,
+        creative_mode=creative_mode,
         created_at=now,
         updated_at=now,
     )
@@ -444,6 +480,8 @@ def reserve_project_candidates(
     candidates: list[VerseCandidate],
     catalog: VerseCatalog | None = None,
     retention_archetype: str | None = None,
+    creative_mode: CreativeMode | None = None,
+    hook_family: HookFamily | None = None,
 ) -> VerseUsageIndex:
     if not candidates:
         raise ValueError("Informe ao menos uma passagem para reservar.")
@@ -479,6 +517,8 @@ def reserve_project_candidates(
             project_id=project_id,
             video_format=video_format,
             retention_archetype=retention_archetype,
+            creative_mode=creative_mode,
+            hook_family=hook_family,
         )
         references = list(
             dict.fromkeys(
@@ -567,6 +607,100 @@ def select_retention_archetype(
         preferred,
         key=lambda archetype: (frequencies[archetype], preferred.index(archetype)),
     )
+
+
+def creative_modes_for_candidate(
+    candidate: VerseCandidate,
+    *,
+    video_format: Literal["landscape", "short"],
+) -> list[CreativeMode]:
+    modes: list[str] = []
+    for development_mode in candidate.preferred_development_modes:
+        modes.extend(DEVELOPMENT_MODE_TO_CREATIVE_MODES.get(development_mode, ()))
+    if candidate.characters:
+        modes.extend(("character_portrait", "biblical_storytelling", "cause_and_consequence"))
+    if candidate.possible_reveal.strip():
+        modes.extend(("biblical_curiosity", "misconception_correction"))
+    modes.extend(
+        (
+            "passage_explainer",
+            "question_driven_essay",
+            "devotional_application",
+            "pastoral_encouragement",
+        )
+    )
+    unique = [mode for mode in dict.fromkeys(modes) if mode in CREATIVE_MODE_SPECS]
+    # Historical context needs an independently verified contextual source, which the automatic
+    # verse catalog does not currently provide. It remains available for explicit briefings.
+    unique = [mode for mode in unique if mode != "historical_context"]
+    if video_format == "short":
+        unique = [mode for mode in unique if mode not in SHORT_AUTOMATIC_EXCLUSIONS]
+    return unique  # type: ignore[return-value]
+
+
+def select_creative_mode(
+    candidate: VerseCandidate,
+    usage: VerseUsageIndex,
+    *,
+    video_format: Literal["landscape", "short"],
+) -> CreativeMode:
+    """Choose a passage-compatible mode while avoiding recent editorial repetition."""
+    preferred = creative_modes_for_candidate(candidate, video_format=video_format)
+    if not preferred:
+        preferred = ["passage_explainer"]
+    recent = sorted(
+        (record for record in usage.records if record.video_format == video_format),
+        key=lambda item: item.created_at,
+        reverse=True,
+    )
+    last_four = {record.creative_mode for record in recent[:4] if record.creative_mode}
+    frequencies = Counter(
+        record.creative_mode for record in recent if record.creative_mode in preferred
+    )
+    return min(
+        preferred,
+        key=lambda mode: (
+            mode in last_four,
+            frequencies[mode],
+            preferred.index(mode),
+        ),
+    )
+
+
+def select_hook_family(
+    creative_mode: str,
+    usage: VerseUsageIndex,
+    *,
+    video_format: Literal["landscape", "short"],
+    hook_policy: str,
+) -> HookFamily:
+    """Resolve an ethical hook family; long-form optional modes may deliberately use none."""
+    if hook_policy == "none":
+        return "none"
+    recent = sorted(
+        (record for record in usage.records if record.video_format == video_format),
+        key=lambda item: item.created_at,
+        reverse=True,
+    )
+    if video_format == "landscape" and hook_policy == "optional":
+        latest_family = recent[0].hook_family if recent else None
+        if latest_family not in {None, "none"}:
+            return "none"
+        if not recent:
+            return "none"
+    preferred = list(hook_families_for_mode(creative_mode, short=video_format == "short"))
+    last_three = {record.hook_family for record in recent[:3] if record.hook_family}
+    frequencies = Counter(
+        record.hook_family for record in recent if record.hook_family in preferred
+    )
+    return min(
+        preferred,
+        key=lambda family: (
+            family in last_three,
+            frequencies[family],
+            preferred.index(family),
+        ),
+    )  # type: ignore[return-value]
 
 
 def _main_candidate_usage(
@@ -732,7 +866,15 @@ def create_auto_video(
             usage: VerseUsageIndex,
         ) -> tuple[
             VerseUsageIndex,
-            tuple[VerseCandidate, float, VerseUsageIndex, str | None],
+            tuple[
+                VerseCandidate,
+                float,
+                VerseUsageIndex,
+                str | None,
+                CreativeMode,
+                str,
+                HookFamily,
+            ],
         ]:
             candidate, score = select_unused_verse(
                 catalog,
@@ -742,18 +884,42 @@ def create_auto_video(
             retention_archetype = (
                 select_retention_archetype(candidate, usage) if video_format == "short" else None
             )
+            creative_mode = select_creative_mode(
+                candidate,
+                usage,
+                video_format=video_format,
+            )
+            hook_policy = (
+                "required" if video_format == "short" else default_long_hook_policy(creative_mode)
+            )
+            hook_family = select_hook_family(
+                creative_mode,
+                usage,
+                video_format=video_format,
+                hook_policy=hook_policy,
+            )
             predicted_id = project_directory_name(candidate.slug, project_date=project_date)
             reservation = _reservation_record(
                 candidate,
                 project_id=predicted_id,
                 video_format=video_format,
                 retention_archetype=retention_archetype,
+                creative_mode=creative_mode,
+                hook_family=hook_family,
             )
             updated = merge_usage_indexes(
                 usage,
                 VerseUsageIndex(generated_at=utc_now(), records=[reservation]),
             )
-            return updated, (candidate, score, usage, retention_archetype)
+            return updated, (
+                candidate,
+                score,
+                usage,
+                retention_archetype,
+                creative_mode,
+                hook_policy,
+                hook_family,
+            )
 
         if shared_registry_enabled():
 
@@ -761,18 +927,43 @@ def create_auto_video(
                 raw: dict[str, object],
             ) -> tuple[
                 dict[str, object],
-                tuple[VerseCandidate, float, VerseUsageIndex, str | None],
+                tuple[
+                    VerseCandidate,
+                    float,
+                    VerseUsageIndex,
+                    str | None,
+                    CreativeMode,
+                    str,
+                    HookFamily,
+                ],
             ]:
                 shared = VerseUsageIndex.model_validate(raw)
                 updated, result = select_and_reserve(merge_usage_indexes(shared, local))
                 return updated.model_dump(mode="json"), result
 
-            candidate, score, before, retention_archetype = update_shared_registry(
+            (
+                candidate,
+                score,
+                before,
+                retention_archetype,
+                creative_mode,
+                hook_policy,
+                hook_family,
+            ) = update_shared_registry(
                 mutate,
                 message="registry: reserve automatic passage",
             )
         else:
-            reserved, (candidate, score, before, retention_archetype) = select_and_reserve(local)
+            reserved, selection = select_and_reserve(local)
+            (
+                candidate,
+                score,
+                before,
+                retention_archetype,
+                creative_mode,
+                hook_policy,
+                hook_family,
+            ) = selection
             write_json(root / VERSE_USAGE_FILENAME, reserved)
         project_title = (
             candidate.title_seed.strip() or candidate.title
@@ -788,14 +979,23 @@ def create_auto_video(
             project_date=project_date,
             production_mode=production_mode,
         )
+        creative_spec = CREATIVE_MODE_SPECS[creative_mode]
+        practical_application = (
+            candidate.practical_application if creative_spec.application_required else ""
+        )
+        viewer_outcome = viewer_outcome_for_mode(
+            creative_mode,
+            theme=candidate.central_theme,
+            reveal=candidate.possible_reveal,
+        )
         briefing = Briefing(
             title=project_title,
             main_passage=candidate.reference,
             central_theme=candidate.central_theme,
-            practical_application=candidate.practical_application,
+            practical_application=practical_application,
             audience=candidate.audience,
             emotional_intent=candidate.emotional_intent,
-            narration_tone=candidate.narration_tone,
+            narration_tone=narration_tone_for_mode(creative_mode),
             target_duration_seconds=target_duration_seconds,
             bible_translation=candidate.translation,
             literal_quote_policy=(
@@ -808,12 +1008,13 @@ def create_auto_video(
             call_to_action=(
                 (
                     "Escolher exatamente uma ação natural — comentar, inscrever-se ou "
-                    "compartilhar — integrada ao payoff, em até doze palavras e quatro segundos."
+                    "compartilhar — conectada ao valor entregue, em até doze palavras e quatro "
+                    "segundos."
                 )
                 if video_format == "short"
                 else (
-                    "Concluir com uma aplicação prática fiel à passagem e um convite comunitário "
-                    "natural, sem promessas espirituais ou pressão para engajamento."
+                    "Encerrar depois da conclusão com exatamente um convite comunitário natural, "
+                    "sem exigir aplicação pessoal, promessa espiritual ou pressão."
                 )
             ),
             retention_archetype=retention_archetype,
@@ -822,6 +1023,12 @@ def create_auto_video(
             visual_progression=candidate.visual_progression,
             possible_reveal=candidate.possible_reveal,
             title_seed=candidate.title_seed,
+            creative_mode=creative_mode,
+            interpretive_stance=default_interpretive_stance(creative_mode),
+            hook_policy=hook_policy,
+            hook_family=hook_family,
+            viewer_outcome=viewer_outcome,
+            creative_rationale=(f"{creative_spec.label}: {creative_spec.purpose}"),
         )
         sources = SourceLibrary(
             entries=[
@@ -836,7 +1043,7 @@ def create_auto_video(
                     accessed_at=candidate.accessed_at,
                     excerpt=candidate.verse_text,
                     use_in_video=(
-                        "Citação literal obrigatória e base da reflexão do Short."
+                        "Citação literal obrigatória e base do desenvolvimento do Short."
                         if video_format == "short"
                         else "Citação literal obrigatória e base do desenvolvimento do vídeo."
                     ),
@@ -871,6 +1078,10 @@ def create_auto_video(
                 "clarity_score": candidate.clarity_score,
                 "retention_potential_score": candidate.retention_potential_score,
                 "retention_archetype": retention_archetype,
+                "creative_mode": creative_mode,
+                "interpretive_stance": default_interpretive_stance(creative_mode),
+                "hook_policy": hook_policy,
+                "hook_family": hook_family,
                 "catalog_id": catalog.catalog_id,
                 "usage_records_considered": len(before.records),
                 "development_modes": candidate.preferred_development_modes,

@@ -56,19 +56,26 @@ declarado na fila. O preflight é somente leitura e agrega todos os erros detect
 seguras são aplicadas deterministicamente; uma falha restante permite uma única correção antes de
 encerrar.
 
+Projetos novos usam `creative_retention_v3`. O seletor resolve modo criativo, postura e família de
+hook antes de abrir a fila. O hook continua obrigatório, a citação literal entra entre 8 e 20
+segundos, mas aplicação e callback passam a ser condicionais ao modo.
+
 O contrato editorial completo está em [Padrão de roteiro de Shorts](shorts-script-standard.md).
 
 ## Roteiro de vídeo longo
 
-Projetos longos novos usam `retention_story_long_v1`. O `ScriptDocument` inclui
-`long_form_strategy`, com um beat por seção, âncoras para todas as citações, reengajamentos
-proporcionais à duração, payoff no quarto final, aplicação, callback e uma única ação de CTA.
+Projetos longos novos usam `creative_retention_long_v2`. O `ScriptDocument` inclui
+`long_form_strategy`, com modo e postura explícitos, hook adaptativo, um beat por seção, âncoras
+para todas as citações, reengajamentos proporcionais à duração, resolução coerente com o modo e
+uma única ação de CTA. Aplicação, pergunta central e callback são opcionais quando o tema não os
+exige.
 
 O fluxo remoto produz e valida esse contrato antes de importar roteiro e revisão. No fluxo local, o
 agente principal segue [Padrão de roteiro para vídeos longos](long-form-script-standard.md) e importa
 o JSON estruturado com `import-script`. O validador rejeita duração insuficiente, abertura genérica,
-trechos sem valor novo, citações agrupadas, intervalos bíblicos excessivos, reengajamentos escassos
-e encerramento com mais de uma ação.
+trechos sem valor novo, evidência incompatível com a postura, citações agrupadas, intervalos
+bíblicos excessivos, reengajamentos escassos e encerramento com mais de uma ação. O catálogo
+completo está em [Direção criativa](creative-direction.md).
 
 ## Imagens
 
@@ -82,9 +89,10 @@ item já importado ou aprovado.
 
 ## Crescimento e thumbnail
 
-A fila exige exatamente um par complementar. O título concentra passagem, tema e busca. Em Shorts,
-a capa acrescenta tensão, decisão, contraste ou consequência, edita a imagem ativa da abertura e
-nasce no Imagegen com texto, palavra vermelha e seta, X, sublinhado ou pincel incorporados.
+A fila exige exatamente um par complementar. O título segue `Enfoque concreto | Passagem` e adapta
+o enfoque ao modo criativo, sem forçar tensão motivacional. Em Shorts, a capa acrescenta conflito,
+decisão, detalhe, contraste ou consequência, edita a imagem ativa da abertura e nasce no Imagegen
+com texto, palavra vermelha e seta, X, sublinhado ou pincel incorporados.
 
 Em vídeos longos, a fila usa `generated_theme_art` e o template
 `biblical_cinematic_landscape_v1`: geração nova horizontal 16:9, baseada exclusivamente no tema do

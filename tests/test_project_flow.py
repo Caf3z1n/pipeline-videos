@@ -3,7 +3,15 @@ from pathlib import Path
 
 import pytest
 
-from pipeline_videos.models import ApprovalStatus, Briefing, StageStatus, StyleProfile
+from pipeline_videos.models import (
+    DEFAULT_ELEVENLABS_MODEL_ID,
+    DEFAULT_ELEVENLABS_VOICE_ID,
+    ApprovalStatus,
+    Briefing,
+    ProjectConfig,
+    StageStatus,
+    StyleProfile,
+)
 from pipeline_videos.project import create_project
 from pipeline_videos.review import approve_briefing
 from pipeline_videos.state import set_approval
@@ -24,6 +32,11 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     briefing.practical_application = "Reconhecer limites e perseverar com esperança."
     briefing.audience = "adultos em momentos de incerteza"
     briefing.emotional_intent = "acolher e fortalecer"
+    briefing.viewer_outcome = "Compreender como o Salmo apresenta socorro e confiança."
+    briefing.creative_mode = "passage_explainer"
+    briefing.interpretive_stance = "expository"
+    briefing.hook_policy = "optional"
+    briefing.hook_family = "unanswered_question"
     briefing.interpretation_limits = ["Não prometer ausência de sofrimento."]
     briefing.claims_to_avoid = ["Não inventar contexto histórico."]
     write_json(layout.briefing, briefing)
@@ -44,7 +57,7 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     assert manifest.config.youtube_growth.thumbnail_reference_mode == "theme_only_v1"
     assert manifest.config.youtube_growth.title_variants == 1
     assert manifest.config.youtube_growth.thumbnail_variants == 1
-    assert manifest.config.youtube_growth.title_standard == "tension_pipe_passage_v2"
+    assert manifest.config.youtube_growth.title_standard == "creative_pipe_passage_v3"
     assert manifest.config.youtube_growth.description_standard == "scripture_timeline_v1"
     assert manifest.config.youtube_growth.thumbnail_standard == "biblical_cinematic_landscape_v1"
     assert manifest.config.youtube_growth.thumbnail_typography_standard == "no_text_v1"
@@ -55,7 +68,9 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     assert manifest.config.editorial_policy.require_literal_scripture_citations is True
     assert manifest.config.editorial_policy.require_quoted_comment_response is False
     assert manifest.config.long_form_script.enabled is True
-    assert manifest.config.long_form_script.narrative_standard == "retention_story_long_v1"
+    assert manifest.config.long_form_script.narrative_standard == "creative_retention_long_v2"
+    assert manifest.config.long_form_script.opening_value_max_seconds == 40.0
+    assert manifest.config.long_form_script.require_callback is False
     assert manifest.config.long_form_script.first_scripture_citation_max_seconds == 75.0
     assert manifest.config.long_form_script.maximum_scripture_citation_gap_seconds == 105.0
     assert manifest.config.long_form_script.maximum_reengagement_gap_seconds == 120.0
@@ -79,7 +94,8 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     assert manifest.config.captions.font_family == "Montserrat ExtraBold"
     assert manifest.config.captions.variant == "active_card_v2"
     assert manifest.config.captions.word_arrival_animation is True
-    assert manifest.config.audio.voice_id == "wKukuyYdIlElkaj9zEQG"
+    assert manifest.config.audio.voice_id == DEFAULT_ELEVENLABS_VOICE_ID
+    assert manifest.config.audio.model_id == DEFAULT_ELEVENLABS_MODEL_ID
     assert (layout.root / "visual/fonts/files/Montserrat-ExtraBold.ttf").is_file()
     assert (layout.root / "visual/fonts/OFL-Montserrat.txt").is_file()
     assert manifest.stages["briefing"].status == StageStatus.COMPLETED
@@ -128,6 +144,14 @@ def test_existing_preview_manifest_is_migrated_on_load(tmp_path) -> None:
     assert all(not field.startswith("preview_") for field in manifest.config.render.model_dump())
 
 
+def test_missing_versioned_config_keeps_legacy_script_contracts() -> None:
+    config = ProjectConfig.model_validate({})
+
+    assert config.long_form_script.narrative_standard == "legacy"
+    assert config.shorts_script.narrative_standard == "retention_story_v2"
+    assert config.youtube_growth.title_standard == "passage_pipe_topic_v1"
+
+
 def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> None:
     layout = create_project(
         "davi-golias-short",
@@ -166,7 +190,7 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.youtube_growth.title_variants == 1
     assert manifest.config.youtube_growth.thumbnail_variants == 1
     assert manifest.config.youtube_growth.thumbnail_reference_mode == "opening_scene_edit_v1"
-    assert manifest.config.youtube_growth.title_standard == "tension_pipe_passage_v2"
+    assert manifest.config.youtube_growth.title_standard == "creative_pipe_passage_v3"
     assert manifest.config.youtube_growth.thumbnail_typography_standard == (
         "integrated_extruded_3d_v1"
     )
@@ -188,7 +212,8 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.captions.max_words_per_line == 3
     assert manifest.config.captions.highlight_card_radius == 24
     assert manifest.config.captions.word_arrival_animation is True
-    assert manifest.config.audio.voice_id == "wKukuyYdIlElkaj9zEQG"
+    assert manifest.config.audio.voice_id == DEFAULT_ELEVENLABS_VOICE_ID
+    assert manifest.config.audio.model_id == DEFAULT_ELEVENLABS_MODEL_ID
     assert (layout.root / manifest.config.captions.font_file).is_file()
     assert manifest.config.production.mode == "final_candidate_one_shot"
     assert manifest.config.production.use_subagents is True
@@ -198,7 +223,7 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.production.worker_context_policy == "compact_only"
     assert manifest.config.shorts_script.enabled is True
     assert manifest.config.shorts_script.use_specialist_subagent is True
-    assert manifest.config.shorts_script.narrative_standard == "retention_story_v2"
+    assert manifest.config.shorts_script.narrative_standard == "creative_retention_v3"
     assert manifest.config.shorts_script.require_verified_scripture is True
     assert manifest.config.shorts_script.min_words == 105
     assert manifest.config.shorts_script.max_words == 130

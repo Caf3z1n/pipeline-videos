@@ -171,7 +171,7 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
         queue["outputs"].get("thumbnail_count", len(queue["outputs"]["thumbnails"])),
     )
     title_standard = queue["outputs"]["title_standard"]
-    if title_standard == "tension_pipe_passage_v2":
+    if title_standard in {"tension_pipe_passage_v2", "creative_pipe_passage_v3"}:
         titles = [
             "O detalhe escondido em Davi e Golias | 1 Samuel 17",
             "Por que Davi e Golias começou antes da pedra | 1 Samuel 17",
@@ -336,7 +336,7 @@ def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path
     assert queue["outputs"]["text_overlay_required"] is False
     assert queue["outputs"]["imagegen_text_authority"] is False
     assert queue["outputs"]["text_forbidden"] is True
-    assert queue["outputs"]["title_standard"] == "tension_pipe_passage_v2"
+    assert queue["outputs"]["title_standard"] == "creative_pipe_passage_v3"
     assert queue["outputs"]["description_standard"] == "scripture_timeline_v1"
     assert queue["outputs"]["thumbnail_standard"] == "biblical_cinematic_landscape_v1"
     assert queue["outputs"]["thumbnail_typography_standard"] == "no_text_v1"
@@ -507,8 +507,8 @@ def test_short_growth_queue_requests_composed_first_frame(tmp_path) -> None:
     assert len(queue["outputs"]["thumbnails"]) == 1
     assert queue["outputs"]["thumbnail_source_mode"] == "generated_integrated_art"
     assert queue["outputs"]["external_image_generation_required"] is True
-    assert queue["outputs"]["title_standard"] == "tension_pipe_passage_v2"
-    assert any("Tensão ou promessa concreta" in item for item in queue["instructions"])
+    assert queue["outputs"]["title_standard"] == "creative_pipe_passage_v3"
+    assert any("Enfoque concreto" in item for item in queue["instructions"])
     assert any("strategy.promise_match" in item for item in queue["instructions"])
     assert any("frame zero" in instruction for instruction in queue["instructions"])
 

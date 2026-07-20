@@ -233,6 +233,103 @@ def _long_script_fixture() -> tuple[
     return document, sources, briefing, config, editorial_policy
 
 
+def _creative_long_fixture() -> tuple[
+    ScriptDocument,
+    SourceLibrary,
+    Briefing,
+    LongFormScriptConfig,
+]:
+    document, sources, legacy_briefing, _, _ = _long_script_fixture()
+    legacy = document.long_form_strategy
+    assert legacy is not None
+    opening_line = "José recebeu no Egito os irmãos que anos antes o haviam vendido como escravo."
+    viewer_outcome = (
+        "Compreender como Gênesis 45 progride da revelação da identidade ao reencontro."
+    )
+    sections = [section.model_copy(deep=True) for section in document.sections]
+    sections[0] = sections[0].model_copy(
+        update={
+            "narration": sections[0].narration.replace(legacy.opening_hook, opening_line, 1),
+        }
+    )
+    sections[4] = sections[4].model_copy(
+        update={
+            "role": "reflection",
+            "narration": sections[4].narration.replace(
+                legacy.practical_application,
+                viewer_outcome,
+                1,
+            ),
+        }
+    )
+    functions = [
+        ["orientation", "evidence"],
+        ["context", "progression"],
+        ["evidence", "reengagement"],
+        ["analysis", "reengagement"],
+        ["resolution", "synthesis"],
+        ["cta"],
+    ]
+    beats = [
+        beat.model_copy(update={"functions": beat_functions})
+        for beat, beat_functions in zip(legacy.progression, functions, strict=True)
+    ]
+    briefing = legacy_briefing.model_copy(
+        update={
+            "practical_application": "",
+            "creative_mode": "passage_explainer",
+            "interpretive_stance": "expository",
+            "hook_policy": "none",
+            "hook_family": "none",
+            "viewer_outcome": viewer_outcome,
+            "creative_rationale": (
+                "Explicar a progressão da passagem sem converter a conclusão em conselho."
+            ),
+        }
+    )
+    placeholder_anchors = [
+        anchor.model_copy(update={"target_start_seconds": 0}) for anchor in legacy.scripture_anchors
+    ]
+    strategy = LongFormScriptStrategy(
+        standard="creative_retention_long_v2",
+        target_viewer=briefing.audience,
+        viewer_need="acompanhar com clareza a progressão factual e literária da passagem",
+        content_promise=legacy.content_promise,
+        central_question=legacy.central_question,
+        opening_line=opening_line,
+        creative_mode="passage_explainer",
+        interpretive_stance="expository",
+        hook_policy="none",
+        hook_family="none",
+        hook_rationale="A abertura orienta a cena sem criar urgência artificial.",
+        resolution_timing="final_quarter",
+        progression=beats,
+        scripture_anchors=placeholder_anchors,
+        resolution=legacy.payoff,
+        viewer_takeaway=viewer_outcome,
+        engagement=legacy.engagement,
+        source_ids=legacy.source_ids,
+    )
+    creative_document = document.model_copy(
+        update={"sections": sections, "long_form_strategy": strategy}
+    )
+    citations = scripture_citations(creative_document)
+    creative_document.long_form_strategy = strategy.model_copy(
+        update={
+            "scripture_anchors": [
+                anchor.model_copy(update={"target_start_seconds": citation.estimated_start_seconds})
+                for anchor, citation in zip(placeholder_anchors, citations, strict=True)
+            ]
+        }
+    )
+    config = LongFormScriptConfig(
+        enabled=True,
+        narrative_standard="creative_retention_long_v2",
+        require_callback=False,
+    )
+    return creative_document, sources, briefing, config
+
+
 def test_long_form_v1_validates_retention_citation_cadence_and_single_cta() -> None:
     document, sources, briefing, config, editorial_policy = _long_script_fixture()
 
@@ -388,7 +485,7 @@ def test_long_form_strategy_drives_creative_contract_and_visual_resets(tmp_path)
     )
 
 
-def test_new_long_project_import_enforces_and_persists_v1_contract(tmp_path) -> None:
+def test_legacy_long_project_import_enforces_and_persists_v1_contract(tmp_path) -> None:
     document, sources, briefing, _, _ = _long_script_fixture()
     layout = create_project(
         "jose-importacao",
@@ -397,6 +494,10 @@ def test_new_long_project_import_enforces_and_persists_v1_contract(tmp_path) -> 
         project_date=date(2026, 7, 16),
         target_duration_seconds=180,
     )
+    manifest = layout.load_manifest()
+    manifest.config.long_form_script.narrative_standard = "retention_story_long_v1"
+    manifest.config.long_form_script.require_callback = True
+    layout.save_manifest(manifest)
     write_json(layout.briefing, briefing)
     write_json(layout.sources, sources)
     source = tmp_path / "long-script.json"
@@ -409,3 +510,44 @@ def test_new_long_project_import_enforces_and_persists_v1_contract(tmp_path) -> 
     assert 153 <= imported.estimated_duration_seconds <= 201.6
     assert layout.creative_contract.is_file()
     assert layout.load_manifest().stages["script"].status.value == "completed"
+
+
+def test_creative_long_accepts_hookless_explainer_without_application(tmp_path) -> None:
+    document, sources, briefing, config = _creative_long_fixture()
+
+    diagnostics = validate_long_form_retention_script(
+        document,
+        target_duration_seconds=180,
+        config=config,
+        sources=sources,
+        briefing=briefing,
+    )
+
+    assert diagnostics["hook_used"] is False
+    assert diagnostics["creative_mode"] == "passage_explainer"
+    assert len(diagnostics["scripture_citation_timestamps"]) == 3
+    assert document.long_form_strategy is not None
+    assert document.long_form_strategy.archetype is None
+    assert document.long_form_strategy.practical_application == ""
+    assert all(section.role != "application" for section in document.sections)
+
+    layout = create_project(
+        "genesis-45-explicado",
+        "Como Gênesis 45 constrói o reencontro",
+        projects_dir=tmp_path / "projects",
+        project_date=date(2026, 7, 19),
+        target_duration_seconds=180,
+    )
+    write_json(layout.briefing, briefing)
+    write_json(layout.sources, sources)
+    source = tmp_path / "creative-long-script.json"
+    write_json(source, document)
+
+    imported = import_script(layout, source)
+    contract = ensure_creative_contract(layout, imported)
+
+    assert contract.algorithm == "creative-contract-v2"
+    assert contract.hook_used is False
+    assert contract.hook_family == "none"
+    assert contract.pacing.profile_id == "long_creative_v2"
+    assert "resolution" in {function for beat in contract.beats for function in beat.functions}

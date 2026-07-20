@@ -231,7 +231,8 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
         if (
             manifest.video_format != "short"
             and manifest.config.long_form_script.enabled
-            and manifest.config.long_form_script.narrative_standard == "retention_story_long_v1"
+            and manifest.config.long_form_script.narrative_standard
+            in {"retention_story_long_v1", "creative_retention_long_v2"}
         ):
             from pipeline_videos.models import Briefing, SourceLibrary
 
@@ -242,7 +243,9 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                 sources=read_model(layout.sources, SourceLibrary),
                 briefing=read_model(layout.briefing, Briefing),
             )
-            report.checks["long_form_retention_standard"] = "retention_story_long_v1"
+            report.checks["long_form_retention_standard"] = (
+                manifest.config.long_form_script.narrative_standard
+            )
             report.checks["long_form_estimated_duration_seconds"] = long_diagnostics[
                 "estimated_duration_seconds"
             ]
@@ -266,7 +269,12 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                 "O contrato criativo não cobre exatamente as seções ativas do roteiro."
             )
         functions = {function for beat in contract.beats for function in beat.functions}
-        if "hook" not in functions or "payoff" not in functions:
+        if contract.algorithm == "creative-contract-v2":
+            if "resolution" not in functions:
+                report.errors.append("O contrato criativo precisa declarar resolução.")
+            if contract.hook_used and "hook" not in functions:
+                report.errors.append("O contrato criativo marcou hook sem beat correspondente.")
+        elif "hook" not in functions or "payoff" not in functions:
             report.errors.append("O contrato criativo precisa declarar gancho e payoff.")
         reengagements = sum("reengagement" in beat.functions for beat in contract.beats)
         report.checks["creative_reengagements"] = reengagements
@@ -276,7 +284,8 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                     manifest.target_duration_seconds,
                     manifest.config.long_form_script,
                 )
-                if manifest.config.long_form_script.narrative_standard == "retention_story_long_v1"
+                if manifest.config.long_form_script.narrative_standard
+                in {"retention_story_long_v1", "creative_retention_long_v2"}
                 else 2
             )
             report.checks["creative_required_reengagements"] = required_reengagements

@@ -1,11 +1,51 @@
 from __future__ import annotations
 
+import os
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-DEFAULT_ELEVENLABS_VOICE_ID = "wKukuyYdIlElkaj9zEQG"
+type ElevenLabsVoiceVariant = Literal["jesus_1", "jesus_2"]
+
+ELEVENLABS_VOICE_VARIANTS: dict[ElevenLabsVoiceVariant, str] = {
+    "jesus_1": "qfOmqDJTQP75MDYJvxKc",
+    "jesus_2": "rtrpEL7BeMd5aTru4HPq",
+}
+ELEVENLABS_VOICE_ENV_BY_VARIANT: dict[ElevenLabsVoiceVariant, str] = {
+    "jesus_1": "ELEVENLABS_VOICE_JESUS_1_ID",
+    "jesus_2": "ELEVENLABS_VOICE_JESUS_2_ID",
+}
+DEFAULT_ELEVENLABS_VOICE_VARIANT: ElevenLabsVoiceVariant = "jesus_1"
+DEFAULT_ELEVENLABS_VOICE_ID = ELEVENLABS_VOICE_VARIANTS[DEFAULT_ELEVENLABS_VOICE_VARIANT]
+DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2"
+
+
+def normalize_elevenlabs_voice_variant(value: str) -> ElevenLabsVoiceVariant:
+    normalized = value.strip().casefold().replace("-", "_").replace(" ", "_")
+    if normalized not in ELEVENLABS_VOICE_VARIANTS:
+        choices = ", ".join(ELEVENLABS_VOICE_VARIANTS)
+        raise ValueError(f"Variação de voz desconhecida: {value!r}. Use uma de: {choices}.")
+    return cast(ElevenLabsVoiceVariant, normalized)
+
+
+def elevenlabs_voice_id_for_variant(variant: ElevenLabsVoiceVariant) -> str:
+    configured = os.getenv(ELEVENLABS_VOICE_ENV_BY_VARIANT[variant], "").strip()
+    if configured:
+        return configured
+    if variant == DEFAULT_ELEVENLABS_VOICE_VARIANT:
+        default_override = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
+        if default_override:
+            return default_override
+    return ELEVENLABS_VOICE_VARIANTS[variant]
+
+
+def default_elevenlabs_voice_id() -> str:
+    return elevenlabs_voice_id_for_variant(DEFAULT_ELEVENLABS_VOICE_VARIANT)
+
+
+def default_elevenlabs_model_id() -> str:
+    return os.getenv("ELEVENLABS_MODEL_ID", "").strip() or DEFAULT_ELEVENLABS_MODEL_ID
 
 
 class PipelineModel(BaseModel):
@@ -13,6 +53,59 @@ class PipelineModel(BaseModel):
 
 
 type ProductionMode = Literal["final_candidate_one_shot"]
+
+type CreativeMode = Literal[
+    "auto",
+    "biblical_storytelling",
+    "character_portrait",
+    "passage_explainer",
+    "biblical_curiosity",
+    "historical_context",
+    "philosophical_reflection",
+    "thematic_investigation",
+    "comparison_contrast",
+    "ethical_dilemma",
+    "misconception_correction",
+    "literary_exploration",
+    "question_driven_essay",
+    "chronological_reconstruction",
+    "cause_and_consequence",
+    "devotional_application",
+    "pastoral_encouragement",
+]
+
+type InterpretiveStance = Literal[
+    "factual",
+    "expository",
+    "analytical",
+    "exploratory",
+    "devotional",
+]
+
+type HookPolicy = Literal["auto", "required", "optional", "none"]
+
+type HookFamily = Literal[
+    "auto",
+    "none",
+    "if_you_want_do_this",
+    "what_happens_if_you_stop",
+    "still_doing_losing",
+    "nobody_talks_but",
+    "want_to_learn_start",
+    "never_do_this",
+    "start_in_scene",
+    "surprising_fact",
+    "unanswered_question",
+    "contradiction",
+    "consequence_first",
+    "quote_first",
+]
+
+type ResolutionTiming = Literal["distributed", "late", "final_quarter"]
+
+APPLICATION_REQUIRED_CREATIVE_MODES = frozenset(
+    {"devotional_application", "pastoral_encouragement"}
+)
 
 
 class StageStatus(StrEnum):
@@ -152,8 +245,8 @@ class CaptionStyle(PipelineModel):
 
 class AudioConfig(PipelineModel):
     provider: Literal["mock", "elevenlabs", "local_manual"] = "elevenlabs"
-    voice_id: str | None = DEFAULT_ELEVENLABS_VOICE_ID
-    model_id: str = "eleven_flash_v2_5"
+    voice_id: str | None = Field(default_factory=default_elevenlabs_voice_id)
+    model_id: str = Field(default_factory=default_elevenlabs_model_id)
     output_format: str = "mp3_44100_128"
     language_code: str = "pt"
     stability: float = 0.55
@@ -201,6 +294,7 @@ class YouTubeGrowthConfig(PipelineModel):
     title_standard: Literal[
         "passage_pipe_topic_v1",
         "tension_pipe_passage_v2",
+        "creative_pipe_passage_v3",
     ] = "passage_pipe_topic_v1"
     description_standard: Literal["scripture_timeline_v1"] = "scripture_timeline_v1"
     thumbnail_standard: Literal[
@@ -237,12 +331,17 @@ class EditorialPolicyConfig(PipelineModel):
 
 class LongFormScriptConfig(PipelineModel):
     enabled: bool = False
-    narrative_standard: Literal["legacy", "retention_story_long_v1"] = "legacy"
+    narrative_standard: Literal[
+        "legacy",
+        "retention_story_long_v1",
+        "creative_retention_long_v2",
+    ] = "legacy"
     estimated_narration_wpm: int = Field(default=145, ge=120, le=180)
     minimum_duration_ratio: float = Field(default=0.85, ge=0.7, le=1.0)
     maximum_duration_ratio: float = Field(default=1.12, ge=1.0, le=1.35)
     opening_hook_max_words: int = Field(default=38, ge=12, le=60)
     opening_target_max_seconds: float = Field(default=20.0, ge=8.0, le=35.0)
+    opening_value_max_seconds: float = Field(default=40.0, ge=20.0, le=75.0)
     first_scripture_citation_max_seconds: float = Field(default=75.0, ge=30.0, le=120.0)
     minimum_scripture_citation_gap_seconds: float = Field(default=25.0, ge=0.0, le=60.0)
     maximum_scripture_citation_gap_seconds: float = Field(default=105.0, ge=60.0, le=180.0)
@@ -288,6 +387,7 @@ class ShortsScriptConfig(PipelineModel):
     hook_max_words: int = Field(default=12, ge=4, le=24)
     hook_target_seconds: float = Field(default=2.0, ge=1.0, le=4.0)
     narrative_standard: Literal[
+        "creative_retention_v3",
         "retention_story_v2",
         "human_hook_to_bible",
         "verse_first",
@@ -413,6 +513,12 @@ class Briefing(PipelineModel):
     visual_progression: list[str] = Field(default_factory=list)
     possible_reveal: str = ""
     title_seed: str = ""
+    creative_mode: CreativeMode = "auto"
+    interpretive_stance: InterpretiveStance = "expository"
+    hook_policy: HookPolicy = "auto"
+    hook_family: HookFamily = "auto"
+    viewer_outcome: str = ""
+    creative_rationale: str = ""
 
 
 class SourceEntry(PipelineModel):
@@ -534,6 +640,7 @@ class VerseUsageRecord(PipelineModel):
         | None
     ) = None
     hook_family: str | None = None
+    creative_mode: CreativeMode | None = None
     engagement_mode: Literal["comment", "subscribe", "share"] | None = None
     created_at: str
     updated_at: str | None = None
@@ -554,11 +661,20 @@ class LongFormRetentionBeat(PipelineModel):
     functions: list[
         Literal[
             "hook",
+            "orientation",
             "progression",
+            "evidence",
+            "context",
+            "analysis",
+            "comparison",
             "reengagement",
             "contemplation",
+            "reveal",
             "payoff",
+            "resolution",
+            "synthesis",
             "application",
+            "callback",
             "cta",
         ]
     ] = Field(min_length=1)
@@ -597,43 +713,93 @@ class LongFormEngagementPlan(PipelineModel):
 
 
 class LongFormScriptStrategy(PipelineModel):
-    standard: Literal["retention_story_long_v1"] = "retention_story_long_v1"
-    archetype: Literal[
-        "conflict_first",
-        "counterintuitive_reveal",
-        "stair_step_progression",
-    ]
+    standard: Literal[
+        "retention_story_long_v1",
+        "creative_retention_long_v2",
+    ] = "retention_story_long_v1"
+    archetype: (
+        Literal[
+            "conflict_first",
+            "counterintuitive_reveal",
+            "stair_step_progression",
+        ]
+        | None
+    ) = None
     target_viewer: str
     viewer_need: str
     content_promise: str
-    central_question: str
-    opening_hook: str
-    opening_conflict: str
+    central_question: str = ""
+    opening_hook: str = ""
+    opening_conflict: str = ""
+    opening_line: str = ""
+    creative_mode: CreativeMode = "auto"
+    interpretive_stance: InterpretiveStance = "expository"
+    hook_policy: HookPolicy = "auto"
+    hook_family: HookFamily = "auto"
+    hook_rationale: str = ""
+    resolution_timing: ResolutionTiming = "late"
     progression: list[LongFormRetentionBeat] = Field(min_length=3)
     scripture_anchors: list[LongFormScriptureAnchor] = Field(min_length=1)
-    payoff: str
-    practical_application: str
-    callback: str
+    payoff: str = ""
+    resolution: str = ""
+    viewer_takeaway: str = ""
+    practical_application: str = ""
+    callback: str = ""
     engagement: LongFormEngagementPlan
     source_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_story_contract(self) -> LongFormScriptStrategy:
-        required = (
+        common_required = (
             self.target_viewer,
             self.viewer_need,
             self.content_promise,
-            self.central_question,
-            self.opening_hook,
-            self.opening_conflict,
-            self.payoff,
-            self.practical_application,
-            self.callback,
             self.engagement.spoken_text,
             self.engagement.payoff_connection,
         )
+        if self.standard == "retention_story_long_v1":
+            if self.archetype is None:
+                raise ValueError("O contrato longo v1 precisa declarar um arquétipo de retenção")
+            required = (
+                *common_required,
+                self.central_question,
+                self.opening_hook,
+                self.opening_conflict,
+                self.payoff,
+                self.practical_application,
+                self.callback,
+            )
+        else:
+            required = (
+                *common_required,
+                self.opening_line,
+                self.resolution,
+                self.viewer_takeaway,
+                self.hook_rationale,
+            )
         if not all(value.strip() for value in required):
             raise ValueError("A estratégia longa não pode ter movimentos narrativos vazios")
+        if self.standard == "creative_retention_long_v2":
+            if self.creative_mode == "auto":
+                raise ValueError("A estratégia longa precisa resolver creative_mode")
+            if self.hook_policy == "auto" or self.hook_family == "auto":
+                raise ValueError("A estratégia longa precisa resolver política e família do hook")
+            if self.hook_policy == "required" and self.hook_family == "none":
+                raise ValueError("hook_policy=required exige uma família de hook")
+            if self.hook_policy == "none" and self.hook_family != "none":
+                raise ValueError("hook_policy=none exige hook_family=none")
+            if self.hook_family == "none" and self.opening_hook.strip():
+                raise ValueError("Uma abertura sem hook não deve preencher opening_hook")
+            if (
+                self.hook_family != "none"
+                and self.opening_hook.strip() != self.opening_line.strip()
+            ):
+                raise ValueError("O hook usado precisa copiar opening_line")
+            if (
+                self.creative_mode in APPLICATION_REQUIRED_CREATIVE_MODES
+                and not self.practical_application.strip()
+            ):
+                raise ValueError("O modo devocional precisa declarar aplicação prática")
         beat_ids = [beat.beat_id for beat in self.progression]
         if len(set(beat_ids)) != len(beat_ids):
             raise ValueError("beat_id precisa ser único na estratégia longa")
@@ -641,11 +807,32 @@ class LongFormScriptStrategy(PipelineModel):
         if len(set(section_ids)) != len(section_ids):
             raise ValueError("Cada seção precisa ter exatamente um beat na estratégia longa")
         functions = {function for beat in self.progression for function in beat.functions}
-        required_functions = {"hook", "progression", "payoff", "application", "cta"}
-        if not required_functions.issubset(functions):
-            raise ValueError(
-                "A estratégia longa precisa declarar gancho, progressão, payoff, aplicação e CTA"
-            )
+        if self.standard == "retention_story_long_v1":
+            required_functions = {"hook", "progression", "payoff", "application", "cta"}
+            if not required_functions.issubset(functions):
+                raise ValueError(
+                    "A estratégia longa precisa declarar gancho, progressão, payoff, "
+                    "aplicação e CTA"
+                )
+        else:
+            development_functions = {
+                "progression",
+                "evidence",
+                "context",
+                "analysis",
+                "comparison",
+                "reveal",
+            }
+            if not functions.intersection(development_functions):
+                raise ValueError("A estratégia criativa precisa desenvolver informação nova")
+            if not {"resolution", "cta"}.issubset(functions):
+                raise ValueError("A estratégia criativa precisa declarar resolução e CTA")
+            if self.hook_family == "none" and "hook" in functions:
+                raise ValueError("A abertura escolhida sem hook não pode marcar função hook")
+            if self.hook_family != "none" and "hook" not in functions:
+                raise ValueError("A estratégia declarou hook, mas nenhum beat cumpre essa função")
+            if self.practical_application.strip() and "application" not in functions:
+                raise ValueError("A aplicação declarada precisa de um beat de application")
         return self
 
 
@@ -682,8 +869,10 @@ class CreativePacingProfile(PipelineModel):
     profile_id: Literal[
         "balanced_long_v1",
         "long_retention_v1",
+        "long_creative_v2",
         "short_v1",
         "short_retention_v2",
+        "short_creative_v3",
     ]
     default_scene_seconds: float = Field(gt=0.0)
     opening_scene_seconds: float = Field(gt=0.0)
@@ -697,11 +886,20 @@ class CreativeBeat(PipelineModel):
     functions: list[
         Literal[
             "hook",
+            "orientation",
             "progression",
+            "evidence",
+            "context",
+            "analysis",
+            "comparison",
             "reengagement",
             "contemplation",
+            "reveal",
             "payoff",
+            "resolution",
+            "synthesis",
             "application",
+            "callback",
             "cta",
         ]
     ]
@@ -723,7 +921,7 @@ class CreativeBeat(PipelineModel):
 
 class CreativeContract(PipelineModel):
     schema_version: Literal["1.0"] = "1.0"
-    algorithm: Literal["creative-contract-v1"] = "creative-contract-v1"
+    algorithm: Literal["creative-contract-v1", "creative-contract-v2"] = "creative-contract-v1"
     input_hash: str
     format: Literal["long_form", "short"]
     target_viewer: str
@@ -735,12 +933,20 @@ class CreativeContract(PipelineModel):
     narrative_standard: Literal[
         "legacy",
         "retention_story_long_v1",
+        "creative_retention_long_v2",
+        "creative_retention_v3",
         "retention_story_v2",
         "human_hook_to_bible",
         "verse_first",
     ] = "legacy"
     central_question: str = ""
     callback: str = ""
+    creative_mode: CreativeMode = "auto"
+    interpretive_stance: InterpretiveStance = "expository"
+    hook_family: HookFamily = "auto"
+    hook_used: bool = True
+    resolution: str = ""
+    viewer_takeaway: str = ""
     engagement_action: Literal["comment", "subscribe", "share"] | None = None
     scripture_citation_timestamps: list[float] = Field(default_factory=list)
     source_ids: list[str] = Field(default_factory=list)
@@ -753,10 +959,11 @@ class CreativeContract(PipelineModel):
     @model_validator(mode="after")
     def validate_critical_components(self) -> CreativeContract:
         if not all(
-            value.strip()
-            for value in (self.target_viewer, self.content_promise, self.opening_hook, self.payoff)
+            value.strip() for value in (self.target_viewer, self.content_promise, self.payoff)
         ):
-            raise ValueError("Público, promessa, gancho e payoff não podem ficar vazios")
+            raise ValueError("Público, promessa e entrega final não podem ficar vazios")
+        if self.hook_used and not self.opening_hook.strip():
+            raise ValueError("Um contrato com hook precisa preservar a fala de abertura")
         beat_section_ids = [beat.section_id for beat in self.beats]
         if not self.section_ids or beat_section_ids != self.section_ids:
             raise ValueError("O contrato criativo precisa cobrir cada seção exatamente uma vez")
@@ -766,8 +973,14 @@ class CreativeContract(PipelineModel):
         if self.critical_component_ids != expected_critical:
             raise ValueError("A lista de componentes críticos não corresponde aos beats")
         functions = {function for beat in self.beats for function in beat.functions}
-        if not {"hook", "payoff"}.issubset(functions):
-            raise ValueError("O contrato criativo precisa declarar gancho e payoff")
+        if self.algorithm == "creative-contract-v1":
+            if not {"hook", "payoff"}.issubset(functions):
+                raise ValueError("O contrato criativo precisa declarar gancho e payoff")
+        else:
+            if "resolution" not in functions:
+                raise ValueError("O contrato criativo precisa declarar resolução")
+            if self.hook_used and "hook" not in functions:
+                raise ValueError("O contrato criativo marcou hook sem beat correspondente")
         if self.format == "long_form" and len(self.beats) >= 5:
             reengagements = sum("reengagement" in beat.functions for beat in self.beats)
             if reengagements < 2:
@@ -1144,12 +1357,19 @@ class ShortsRetentionBeat(PipelineModel):
     section_id: str
     purpose: Literal[
         "hook",
+        "orientation",
         "open_loop",
         "stakes",
         "progression",
+        "evidence",
+        "context",
+        "analysis",
+        "comparison",
         "pattern_interrupt",
         "reveal",
         "payoff",
+        "resolution",
+        "synthesis",
         "application",
         "callback",
         "cta",
@@ -1270,6 +1490,43 @@ class ShortsRetentionStory(PipelineModel):
     source_ids: list[str] = Field(default_factory=list)
 
 
+class ShortsCreativeDirection(PipelineModel):
+    pattern: Literal["creative_retention_v3"] = "creative_retention_v3"
+    creative_mode: CreativeMode
+    interpretive_stance: InterpretiveStance
+    hook_family: HookFamily
+    opening_section_id: str
+    scripture_section_ids: list[str] = Field(min_length=1, max_length=2)
+    development_section_ids: list[str] = Field(min_length=2, max_length=6)
+    reengagement_section_ids: list[str] = Field(min_length=1, max_length=2)
+    resolution_section_id: str
+    cta_section_id: str
+    content_promise: str
+    organizing_question: str = ""
+    resolution: str
+    viewer_takeaway: str
+    practical_application: str = ""
+    callback: str = ""
+    engagement: ShortsEngagementPlan
+    source_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_creative_direction(self) -> ShortsCreativeDirection:
+        if self.creative_mode == "auto":
+            raise ValueError("creative_mode precisa ser resolvido antes do roteiro")
+        if self.hook_family in {"auto", "none"}:
+            raise ValueError("Shorts exigem uma família de hook concreta")
+        required = (self.content_promise, self.resolution, self.viewer_takeaway)
+        if not all(value.strip() for value in required):
+            raise ValueError("Promessa, resolução e valor final não podem ficar vazios")
+        if (
+            self.creative_mode in APPLICATION_REQUIRED_CREATIVE_MODES
+            and not self.practical_application.strip()
+        ):
+            raise ValueError("O modo devocional precisa declarar aplicação prática")
+        return self
+
+
 class ShortsScriptStrategy(PipelineModel):
     target_viewer: str
     viewer_need: str
@@ -1283,6 +1540,7 @@ class ShortsScriptStrategy(PipelineModel):
         "direct_tension",
         "surprising_detail",
     ]
+    hook_family: HookFamily = "auto"
     hook_techniques: list[
         Literal[
             "self_relevance",
@@ -1299,6 +1557,7 @@ class ShortsScriptStrategy(PipelineModel):
     additional_scriptures: list[ShortsVerseOpening] = Field(default_factory=list)
     narrative_spine: ShortsNarrativeSpine | None = None
     retention_story: ShortsRetentionStory | None = None
+    creative_direction: ShortsCreativeDirection | None = None
     open_loop: str
     payoff: str
     practical_value: str

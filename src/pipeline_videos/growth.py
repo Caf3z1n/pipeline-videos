@@ -124,7 +124,13 @@ def _growth_context_payload(layout: ProjectLayout) -> dict[str, Any]:
         "target_viewer": contract.target_viewer,
         "content_promise": contract.content_promise,
         "opening_hook": contract.opening_hook,
+        "hook_used": contract.hook_used,
+        "hook_family": contract.hook_family,
+        "creative_mode": contract.creative_mode,
+        "interpretive_stance": contract.interpretive_stance,
         "payoff": contract.payoff,
+        "resolution": contract.resolution,
+        "viewer_takeaway": contract.viewer_takeaway,
         "practical_application": contract.practical_application,
         "main_passage": contract.main_passage,
         "source_ids": contract.source_ids,
@@ -311,6 +317,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 key: growth_context["creative_contract"][key]
                 for key in ("input_hash", "content_promise", "opening_hook")
             },
+            "hook_used": growth_context["creative_contract"].get("hook_used", True),
             "opening_scene_id": growth_context["opening_scene"]["scene_id"],
         },
         "status": StageStatus.WAITING_EXTERNAL.value,
@@ -437,11 +444,13 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         "instructions": [
             (
                 "Leia somente inputs.compact_context; o creative_contract é a autoridade para "
-                "promessa, gancho, payoff e função de cada trecho."
+                "promessa, primeira fala, resolução, modo criativo e função de cada trecho."
             ),
             (
                 "Copie creative_contract.content_promise e creative_contract.opening_hook "
-                "literalmente para os campos homônimos da strategy; não os reinterprete."
+                "literalmente para os campos homônimos da strategy. Quando hook_used=false, "
+                "opening_hook representa a primeira fala contratada, não uma autorização para "
+                "transformá-la em hook sensacionalista."
             ),
             "Preserve rigorosamente fatos, passagens e fontes do projeto.",
             f"Entregue {config.title_variants} combinações distintas de título para teste.",
@@ -614,6 +623,30 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 ),
             ]
         )
+    elif config.title_standard == "creative_pipe_passage_v3":
+        main_passage = str(
+            growth_context.get("creative_contract", {}).get("main_passage", "")
+        ).strip()
+        payload["instructions"].extend(
+            [
+                (
+                    "Todos os títulos devem seguir 'Enfoque concreto | "
+                    f"{main_passage}'. Antes da barra, adapte a forma ao creative_mode: fato "
+                    "narrativo, personagem, curiosidade, pergunta específica, comparação, dilema, "
+                    "tese interpretativa ou promessa prática. Não force tensão motivacional."
+                ),
+                (
+                    "Preencha strategy.promise_match copiando content_promise, opening_hook como "
+                    "opening_line e contract_guard.opening_scene_id. Em title_delivery, copie "
+                    "exatamente a parte do título antes da barra. Em thumbnail_delivery, copie "
+                    + (
+                        "metadata.thumbnail_concept."
+                        if is_theme_based_long
+                        else "exatamente o texto do primeiro thumbnail_design."
+                    )
+                ),
+            ]
+        )
     if config.description_standard == "scripture_timeline_v1" and not is_short:
         payload["instructions"].extend(
             [
@@ -652,18 +685,27 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                     "seguinte."
                 ),
                 (
-                    "Em cada par, o título deve carregar tensão concreta, referência e busca; a "
-                    "imagem acrescenta emoção, gesto, paisagem e conflito visual sem texto."
+                    "Em cada par, o título deve carregar um enfoque concreto coerente com o "
+                    "modo criativo, referência e busca; a imagem acrescenta emoção, gesto, "
+                    "paisagem ou detalhe visual sem texto."
+                    if is_theme_based_long and config.title_standard == "creative_pipe_passage_v3"
+                    else "Em cada par, o título deve carregar tensão concreta, referência e "
+                    "busca; a imagem acrescenta emoção, gesto, paisagem e conflito visual sem "
+                    "texto."
                     if is_theme_based_long
                     else (
-                        "Em cada par, o título deve carregar tensão concreta, referência e busca; "
-                        "a thumbnail acrescenta conflito, decisão ou consequência visual."
+                        "Em cada par, o título deve carregar um enfoque concreto coerente com o "
+                        "modo criativo, referência e busca; a thumbnail acrescenta conflito, "
+                        "decisão, detalhe ou consequência visual."
+                        if config.title_standard == "creative_pipe_passage_v3"
+                        else "Em cada par, o título deve carregar tensão concreta, referência "
+                        "e busca; a thumbnail acrescenta conflito, decisão ou consequência "
+                        "visual."
                         if config.title_standard == "tension_pipe_passage_v2"
                         else "Em cada par, distribua a promessa: o título deve carregar "
                         "referência, tema e intenção de busca; o texto da thumbnail deve "
-                        "acrescentar tensão, "
-                        "decisão, contraste, consequência ou pergunta visual que o título ainda "
-                        "não disse."
+                        "acrescentar tensão, decisão, contraste, consequência ou pergunta visual "
+                        "que o título ainda não disse."
                     )
                 ),
                 (
@@ -676,7 +718,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
             payload["instructions"].append(
                 "É proibido repetir na thumbnail a tensão escrita antes da barra vertical. "
                 "Também não use a frase inteira da thumbnail dentro do título."
-                if config.title_standard == "tension_pipe_passage_v2"
+                if config.title_standard in {"tension_pipe_passage_v2", "creative_pipe_passage_v3"}
                 else "É proibido repetir na thumbnail a frase temática que aparece depois da "
                 "barra vertical do título. Também não use essa frase inteira como trecho "
                 "dentro da thumbnail, nem a frase inteira da thumbnail dentro do título."
@@ -928,7 +970,9 @@ def _title_topic(title: str, title_standard: str) -> str:
     if "|" not in title:
         return title.strip()
     left, right = (part.strip() for part in title.split("|", 1))
-    return left if title_standard == "tension_pipe_passage_v2" else right
+    return (
+        left if title_standard in {"tension_pipe_passage_v2", "creative_pipe_passage_v3"} else right
+    )
 
 
 def _pairing_content_tokens(value: str) -> list[str]:
@@ -1117,18 +1161,24 @@ def _validate_package(
             raise ValueError(
                 "Todos os títulos precisam seguir 'Passagem principal | Tema principal'."
             )
-    elif outputs.get("title_standard") == "tension_pipe_passage_v2":
+    elif outputs.get("title_standard") in {
+        "tension_pipe_passage_v2",
+        "creative_pipe_passage_v3",
+    }:
         briefing = read_model(layout.briefing, Briefing)
         suffix = f" | {briefing.main_passage.strip()}"
         if not suffix.strip(" |") or any(
             not title.endswith(suffix) or not title.removesuffix(suffix).strip() for title in titles
         ):
-            raise ValueError(
-                "Todos os títulos precisam seguir 'Tensão concreta | Passagem principal'."
+            expected = (
+                "Enfoque concreto | Passagem principal"
+                if outputs.get("title_standard") == "creative_pipe_passage_v3"
+                else "Tensão concreta | Passagem principal"
             )
+            raise ValueError(f"Todos os títulos precisam seguir '{expected}'.")
         promise_match = package.strategy.promise_match
         if promise_match is None:
-            raise ValueError("O título v2 exige strategy.promise_match.")
+            raise ValueError("Este padrão de título exige strategy.promise_match.")
         if promise_match.content_promise != contract_guard.get("content_promise"):
             raise ValueError("promise_match mudou a promessa do contrato criativo.")
         if promise_match.opening_line != contract_guard.get("opening_hook"):
@@ -1136,7 +1186,7 @@ def _validate_package(
         if promise_match.opening_scene_id != contract_guard.get("opening_scene_id"):
             raise ValueError("promise_match não aponta para a cena de abertura ativa.")
         if promise_match.title_delivery != metadata.title.removesuffix(suffix).strip():
-            raise ValueError("title_delivery precisa copiar a tensão antes da barra.")
+            raise ValueError("title_delivery precisa copiar o enfoque antes da barra.")
         expected_thumbnail_delivery = (
             metadata.thumbnail_concept
             if typography_standard == "no_text_v1"

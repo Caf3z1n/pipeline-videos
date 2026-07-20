@@ -36,14 +36,22 @@ SECTION_ROLES = (
 )
 
 CREATIVE_CONTRACT_ALGORITHM = "creative-contract-v1"
+CREATIVE_CONTRACT_ALGORITHM_V2 = "creative-contract-v2"
 SHORT_BEAT_FUNCTIONS = {
     "hook": "hook",
+    "orientation": "orientation",
     "open_loop": "progression",
     "stakes": "progression",
     "progression": "progression",
+    "evidence": "evidence",
+    "context": "context",
+    "analysis": "analysis",
+    "comparison": "comparison",
     "pattern_interrupt": "reengagement",
     "reveal": "reengagement",
     "payoff": "payoff",
+    "resolution": "resolution",
+    "synthesis": "synthesis",
     "application": "application",
     "callback": "payoff",
     "cta": "cta",
@@ -102,10 +110,24 @@ def build_creative_contract(
     long_strategy = document.long_form_strategy if not is_short else None
     if is_short and strategy is None and layout.shorts_script_strategy.is_file():
         strategy = read_model(layout.shorts_script_strategy, ShortsScriptStrategy)
+    short_creative = strategy.creative_direction if strategy is not None else None
+    is_creative_long = (
+        long_strategy is not None and long_strategy.standard == "creative_retention_long_v2"
+    )
+    is_creative_short = (
+        is_short
+        and project.config.shorts_script.narrative_standard == "creative_retention_v3"
+        and short_creative is not None
+    )
+    contract_algorithm = (
+        CREATIVE_CONTRACT_ALGORITHM_V2
+        if is_creative_long or is_creative_short
+        else CREATIVE_CONTRACT_ALGORITHM
+    )
 
     input_hash = sha256_value(
         {
-            "algorithm": CREATIVE_CONTRACT_ALGORITHM,
+            "algorithm": contract_algorithm,
             "format": project.video_format,
             "briefing": briefing,
             "script": document,
@@ -165,7 +187,9 @@ def build_creative_contract(
             if linked
             else section.retention_goal or section.title or section.role.replace("_", " ")
         )
-        critical = bool({"hook", "reengagement", "payoff", "application"}.intersection(functions))
+        critical = bool(
+            {"hook", "reengagement", "payoff", "resolution", "application"}.intersection(functions)
+        )
         beats.append(
             CreativeBeat(
                 section_id=section.section_id,
@@ -182,20 +206,32 @@ def build_creative_contract(
     content_promise = (
         long_strategy.content_promise
         if long_strategy is not None
+        else short_creative.content_promise
+        if short_creative is not None
         else strategy.content_promise
         if strategy is not None
         else briefing.central_theme.strip() or document.title.strip()
     )
     opening_hook = (
-        long_strategy.opening_hook
+        (
+            long_strategy.opening_line
+            if long_strategy.standard == "creative_retention_long_v2"
+            else long_strategy.opening_hook
+        )
         if long_strategy is not None
         else strategy.hook
         if strategy is not None
         else _first_sentence(first_section.narration)
     )
     payoff = (
-        long_strategy.payoff
+        (
+            long_strategy.resolution
+            if long_strategy.standard == "creative_retention_long_v2"
+            else long_strategy.payoff
+        )
         if long_strategy is not None
+        else short_creative.resolution
+        if short_creative is not None
         else strategy.payoff
         if strategy is not None
         else briefing.practical_application.strip()
@@ -203,8 +239,14 @@ def build_creative_contract(
         or _first_sentence(closing.narration)
     )
     practical_application = (
-        long_strategy.practical_application
+        (
+            long_strategy.viewer_takeaway
+            if long_strategy.standard == "creative_retention_long_v2"
+            else long_strategy.practical_application
+        )
         if long_strategy is not None
+        else short_creative.viewer_takeaway
+        if short_creative is not None
         else strategy.practical_value
         if strategy is not None
         else briefing.practical_application.strip() or payoff
@@ -216,7 +258,16 @@ def build_creative_contract(
         if strategy is not None
         else briefing.audience.strip() or "pessoas interessadas nesta mensagem bíblica"
     )
-    if is_short and project.config.shorts_script.narrative_standard == "retention_story_v2":
+    if is_creative_short:
+        pacing = CreativePacingProfile(
+            profile_id="short_creative_v3",
+            default_scene_seconds=5.5,
+            opening_scene_seconds=2.0,
+            reengagement_scene_seconds=5.0,
+            contemplative_scene_seconds=6.0,
+            payoff_scene_seconds=5.5,
+        )
+    elif is_short and project.config.shorts_script.narrative_standard == "retention_story_v2":
         pacing = CreativePacingProfile(
             profile_id="short_retention_v2",
             default_scene_seconds=5.5,
@@ -233,6 +284,15 @@ def build_creative_contract(
             reengagement_scene_seconds=8.0,
             contemplative_scene_seconds=8.0,
             payoff_scene_seconds=8.0,
+        )
+    elif is_creative_long:
+        pacing = CreativePacingProfile(
+            profile_id="long_creative_v2",
+            default_scene_seconds=10.0,
+            opening_scene_seconds=7.0,
+            reengagement_scene_seconds=7.0,
+            contemplative_scene_seconds=14.0,
+            payoff_scene_seconds=9.0,
         )
     elif long_strategy is not None:
         pacing = CreativePacingProfile(
@@ -253,6 +313,7 @@ def build_creative_contract(
             payoff_scene_seconds=13.0,
         )
     return CreativeContract(
+        algorithm=contract_algorithm,
         input_hash=input_hash,
         format="short" if is_short else "long_form",
         target_viewer=target_viewer,
@@ -271,12 +332,54 @@ def build_creative_contract(
         central_question=(
             long_strategy.central_question
             if long_strategy is not None
+            else short_creative.organizing_question
+            if short_creative is not None
             else strategy.open_loop
             if strategy is not None
             else ""
         ),
-        callback=long_strategy.callback if long_strategy is not None else "",
-        engagement_action=(long_strategy.engagement.action if long_strategy is not None else None),
+        callback=(
+            long_strategy.callback
+            if long_strategy is not None
+            else short_creative.callback
+            if short_creative is not None
+            else ""
+        ),
+        creative_mode=(
+            long_strategy.creative_mode
+            if is_creative_long and long_strategy is not None
+            else short_creative.creative_mode
+            if short_creative is not None
+            else briefing.creative_mode
+        ),
+        interpretive_stance=(
+            long_strategy.interpretive_stance
+            if is_creative_long and long_strategy is not None
+            else short_creative.interpretive_stance
+            if short_creative is not None
+            else briefing.interpretive_stance
+        ),
+        hook_family=(
+            long_strategy.hook_family
+            if is_creative_long and long_strategy is not None
+            else short_creative.hook_family
+            if short_creative is not None
+            else briefing.hook_family
+        ),
+        hook_used=(
+            long_strategy.hook_family != "none"
+            if is_creative_long and long_strategy is not None
+            else True
+        ),
+        resolution=payoff,
+        viewer_takeaway=practical_application,
+        engagement_action=(
+            long_strategy.engagement.action
+            if long_strategy is not None
+            else short_creative.engagement.mode
+            if short_creative is not None
+            else None
+        ),
         scripture_citation_timestamps=[
             citation.estimated_start_seconds
             for citation in scripture_citations(document, words_per_minute=wpm)

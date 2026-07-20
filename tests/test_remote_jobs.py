@@ -10,7 +10,11 @@ import pytest
 from typer.testing import CliRunner
 
 from pipeline_videos.cli import app
-from pipeline_videos.models import DEFAULT_ELEVENLABS_VOICE_ID
+from pipeline_videos.models import (
+    DEFAULT_ELEVENLABS_MODEL_ID,
+    DEFAULT_ELEVENLABS_VOICE_ID,
+    ELEVENLABS_VOICE_VARIANTS,
+)
 from pipeline_videos.remote_jobs import (
     CodexPhaseSpec,
     RemoteCodexRun,
@@ -59,10 +63,17 @@ def test_remote_request_applies_safe_defaults_and_requires_explicit_external_aut
     assert request.duration_seconds == 50
     assert request.publication_mode == "private_review"
     assert request.publish_at is None
+    assert request.creative_mode == "auto"
+    assert request.hook_policy == "auto"
+    assert request.hook_family == "auto"
+    assert request.voice_variant == "jesus_1"
 
     store = RemoteJobStore(tmp_path / "jobs")
     with pytest.raises(ValueError, match="autorizar explicitamente"):
         store.enqueue(RemoteVideoRequest(video_format="short"))
+
+    with pytest.raises(ValueError, match="Shorts exigem hook inicial"):
+        _request(hook_policy="none")
 
 
 def test_scheduled_request_requires_timezone_and_publish_at() -> None:
@@ -121,18 +132,31 @@ def test_prepare_job_project_enables_local_specialists_without_human_approval(tm
     assert manifest.config.production.image_workers == 3
     assert manifest.config.production.optimization_profile == "token_optimized_v1"
     assert manifest.config.shorts_script.use_specialist_subagent is True
-    assert manifest.config.shorts_script.narrative_standard == "retention_story_v2"
+    assert manifest.config.shorts_script.narrative_standard == "creative_retention_v3"
     assert manifest.config.youtube_growth.use_specialist_subagent is True
-    assert manifest.config.youtube_growth.title_standard == "tension_pipe_passage_v2"
+    assert manifest.config.youtube_growth.title_standard == "creative_pipe_passage_v3"
     assert manifest.config.youtube_growth.title_variants == 1
     assert manifest.config.youtube_growth.thumbnail_variants == 1
     assert manifest.config.audio.voice_id == DEFAULT_ELEVENLABS_VOICE_ID
+    assert manifest.config.audio.model_id == DEFAULT_ELEVENLABS_MODEL_ID
     assert manifest.config.youtube_publication.allow_automated_private_review_upload is True
     assert all(record.status.value == "pending" for record in manifest.approvals.values())
     prompt = codex_checkpoint_prompt(Path("/tmp/checkpoint.json"))
     assert "mesma sessão" in prompt
     assert "AGENTS.md" in prompt
     assert "crie exatamente os subagentes" in prompt.casefold()
+
+
+def test_remote_job_can_select_second_jesus_voice(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(voice_variant="jesus_2"))
+
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+    manifest = layout.load_manifest()
+
+    assert manifest.config.audio.voice_id == ELEVENLABS_VOICE_VARIANTS["jesus_2"]
+    decisions = layout.decisions.read_text(encoding="utf-8")
+    assert '"voice_variant": "jesus_2"' in decisions
 
 
 def test_long_script_phase_declares_one_functional_pacing_contract(tmp_path) -> None:
@@ -143,10 +167,10 @@ def test_long_script_phase_declares_one_functional_pacing_contract(tmp_path) -> 
     spec = _long_script_phase_spec(layout)
     task = spec.payload["task"]
 
-    assert task["creative_contract"]["narrative_standard"] == "retention_story_long_v1"
+    assert task["creative_contract"]["narrative_standard"] == "creative_retention_long_v2"
     assert task["creative_contract"]["content_promise_source"] == "briefing.central_theme"
-    assert task["creative_contract"]["payoff_source"] == "briefing.practical_application"
-    assert task["creative_contract"]["pacing_profile"] == "long_retention_v1"
+    assert task["creative_contract"]["resolution_source"] == "writer_synthesis_supported_by_sources"
+    assert task["creative_contract"]["pacing_profile"] == "long_creative_v2"
     assert task["creative_contract"]["required_reengagements"] == 4
     assert task["creative_contract"]["maximum_reengagement_gap_seconds"] == 120.0
     assert task["scripture_cadence"] == {
@@ -156,7 +180,7 @@ def test_long_script_phase_declares_one_functional_pacing_contract(tmp_path) -> 
         "final_citation_max_distance_seconds": 120.0,
     }
     assert any("long_form_strategy" in item for item in task["instructions"])
-    assert any("cada seção acrescenta" in item for item in task["instructions"])
+    assert any("cada seção acrescenta" in item.casefold() for item in task["instructions"])
 
 
 def test_codex_agent_command_starts_persistent_sol_medium_session(tmp_path) -> None:

@@ -18,11 +18,11 @@ cada token. Depois converte o áudio para WAV mono 48 kHz e soma o offset real d
 
 ## Configuração escolhida
 
-- default econômico: `eleven_flash_v2_5`;
-- alternativa de qualidade long-form: `eleven_multilingual_v2`;
+- modelo padrão: `eleven_multilingual_v2` (`Eleven Multilingual v2`);
 - output seguro para Free: `mp3_44100_128`;
 - language code: `pt` quando suportado pelo modelo;
-- voice ID configurável agora e compatível com clone autorizado no futuro.
+- `jesus_1`: voz padrão `qfOmqDJTQP75MDYJvxKc`;
+- `jesus_2`: variação `rtrpEL7BeMd5aTru4HPq`.
 
 Os [modelos atuais](https://elevenlabs.io/docs/overview/models) e limites efetivos podem mudar. A
 API oficial `GET /v1/models` informa capacidade TTS, limites por usuário Free/pago e custo relativo.
@@ -31,7 +31,10 @@ API oficial `GET /v1/models` informa capacidade TTS, limites por usuário Free/p
 
 - chave lida apenas de `ELEVENLABS_API_KEY`;
 - voice ID de config do projeto ou `ELEVENLABS_VOICE_ID`; o padrão para novas produções é
-  `wKukuyYdIlElkaj9zEQG`;
+  `jesus_1`;
+- os presets podem ser substituídos no ambiente por `ELEVENLABS_VOICE_JESUS_1_ID` e
+  `ELEVENLABS_VOICE_JESUS_2_ID`;
+- `ELEVENLABS_MODEL_ID` pode substituir o modelo padrão;
 - chamada bloqueada sem `--allow-external`;
 - headers `request-id`, `character-cost`, `x-trace-id` e concorrência ficam nos metadados;
 - áudio base64 e chave nunca ficam em logs;
@@ -41,6 +44,13 @@ API oficial `GET /v1/models` informa capacidade TTS, limites por usuário Free/p
 
 Consulte [Errors](https://elevenlabs.io/docs/eleven-api/resources/errors) e
 [API authentication](https://elevenlabs.io/docs/api-reference/authentication).
+
+Selecione uma variação por projeto sem copiar IDs manualmente:
+
+```powershell
+uv run pipeline-videos audio configure <projeto> --voice-variant jesus_1
+uv run pipeline-videos audio configure <projeto> --voice-variant jesus_2
+```
 
 ## Plano gratuito e publicação
 

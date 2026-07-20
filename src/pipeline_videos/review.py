@@ -3,12 +3,18 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from pipeline_videos.models import ApprovalStatus, BiblicalReview, Briefing, ScriptDocument
+from pipeline_videos.models import (
+    APPLICATION_REQUIRED_CREATIVE_MODES,
+    ApprovalStatus,
+    BiblicalReview,
+    Briefing,
+    ScriptDocument,
+)
 from pipeline_videos.state import complete_stage, invalidate, set_approval
 from pipeline_videos.storage import ProjectLayout, read_json, read_model, write_json
 from pipeline_videos.utils import relative_posix, sha256_file, sha256_value
 
-REQUIRED_BRIEFING_FIELDS = (
+LEGACY_REQUIRED_BRIEFING_FIELDS = (
     "main_passage",
     "central_theme",
     "practical_application",
@@ -19,11 +25,34 @@ REQUIRED_BRIEFING_FIELDS = (
 
 def validate_briefing_for_approval(layout: ProjectLayout) -> Briefing:
     briefing = read_model(layout.briefing, Briefing)
-    missing = [name for name in REQUIRED_BRIEFING_FIELDS if not getattr(briefing, name).strip()]
+    project = layout.load_manifest()
+    creative_standard = (
+        project.config.shorts_script.narrative_standard == "creative_retention_v3"
+        if project.video_format == "short"
+        else project.config.long_form_script.narrative_standard == "creative_retention_long_v2"
+    )
+    required_fields = (
+        ("main_passage", "central_theme", "audience", "emotional_intent", "viewer_outcome")
+        if creative_standard
+        else LEGACY_REQUIRED_BRIEFING_FIELDS
+    )
+    missing = [name for name in required_fields if not getattr(briefing, name).strip()]
     if missing:
         raise ValueError(
             f"O briefing ainda não pode ser aprovado. Campos vazios: {', '.join(missing)}"
         )
+    if creative_standard:
+        if briefing.creative_mode == "auto":
+            raise ValueError("Resolva creative_mode antes de aprovar o briefing.")
+        if briefing.hook_policy == "auto" or briefing.hook_family == "auto":
+            raise ValueError("Resolva política e família do hook antes de aprovar o briefing.")
+        if project.video_format == "short" and briefing.hook_family == "none":
+            raise ValueError("Shorts exigem um hook inicial.")
+        if (
+            briefing.creative_mode in APPLICATION_REQUIRED_CREATIVE_MODES
+            and not briefing.practical_application.strip()
+        ):
+            raise ValueError("O modo devocional exige practical_application no briefing.")
     if not briefing.interpretation_limits:
         raise ValueError("Registre ao menos um limite de interpretação no briefing.")
     if not briefing.claims_to_avoid:

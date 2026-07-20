@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from pipeline_videos.creative_direction import CREATIVE_MODE_SPECS
 from pipeline_videos.editorial import scripture_citations
 from pipeline_videos.models import (
     ApprovalStatus,
@@ -27,7 +28,7 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-METADATA_ALGORITHM_VERSION = "1.1"
+METADATA_ALGORITHM_VERSION = "1.2"
 
 
 def _timestamp(seconds: float) -> str:
@@ -143,15 +144,20 @@ def build_metadata(layout: ProjectLayout, *, force: bool = False) -> YouTubeMeta
     )
     subject = briefing.central_theme.strip().rstrip(".") or briefing.main_passage
     subject_title = subject[:1].upper() + subject[1:]
+    mode_label = (
+        CREATIVE_MODE_SPECS[briefing.creative_mode].label
+        if briefing.creative_mode in CREATIVE_MODE_SPECS
+        else "Conteúdo bíblico"
+    )
     title = (
         script.title[:100]
         if script is not None
         else f"{subject_title} — reflexão sobre {briefing.main_passage}"[:100]
     )
     alternatives = [
-        f"Quando o coração precisa lembrar: {subject}"[:100],
-        f"{briefing.main_passage}: esperança para os dias difíceis"[:100],
-        f"A mensagem de {briefing.main_passage} para hoje"[:100],
+        f"{subject_title} | {briefing.main_passage}"[:100],
+        f"{mode_label}: {subject}"[:100],
+        f"O que {briefing.main_passage} revela sobre {subject}"[:100],
     ]
     source_lines = []
     for entry in sources.entries:
@@ -162,11 +168,11 @@ def build_metadata(layout: ProjectLayout, *, force: bool = False) -> YouTubeMeta
     description = "\n\n".join(
         part
         for part in (
-            f"Uma reflexão em português sobre {briefing.main_passage}. Tema central: {subject}.",
-            briefing.practical_application,
+            f"{mode_label} em português sobre {briefing.main_passage}. Tema central: {subject}.",
+            briefing.viewer_outcome or briefing.practical_application,
             "Referências consultadas:\n" + "\n".join(source_lines) if source_lines else "",
-            "Este conteúdo distingue a passagem bíblica de sua aplicação devocional. "
-            "Consulte o texto bíblico completo na tradução de sua preferência.",
+            "Este conteúdo distingue texto bíblico, contexto verificado, interpretação e "
+            "elaboração criativa. Consulte a passagem completa na tradução de sua preferência.",
         )
         if part
     )

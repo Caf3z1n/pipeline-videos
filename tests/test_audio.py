@@ -16,7 +16,19 @@ from pipeline_videos.audio import (
     generate_audio,
 )
 from pipeline_videos.manual_audio import import_manual_audio, prepare_manual_audio
-from pipeline_videos.models import AudioConfig, PromptBlocks, Scene, SceneManifest, StageStatus
+from pipeline_videos.models import (
+    DEFAULT_ELEVENLABS_MODEL_ID,
+    DEFAULT_ELEVENLABS_VOICE_ID,
+    ELEVENLABS_VOICE_VARIANTS,
+    AudioConfig,
+    PromptBlocks,
+    Scene,
+    SceneManifest,
+    StageStatus,
+    default_elevenlabs_model_id,
+    elevenlabs_voice_id_for_variant,
+    normalize_elevenlabs_voice_variant,
+)
 from pipeline_videos.project import create_project
 from pipeline_videos.storage import ProjectLayout, write_json
 
@@ -289,7 +301,7 @@ def test_elevenlabs_retries_locally_and_falls_back_to_raw_alignment() -> None:
             client=client,
             api_key="super-secret",
             voice_id="voice/id",
-            body={"text": "Oi", "model_id": "eleven_flash_v2_5"},
+            body={"text": "Oi", "model_id": "eleven_multilingual_v2"},
             output_format="mp3_44100_64",
             sleep=sleeps.append,
             jitter=lambda: 0,
@@ -327,6 +339,36 @@ def test_elevenlabs_source_spec_supports_encoded_and_raw_formats() -> None:
 
 def test_legacy_sapi_config_migrates_to_elevenlabs() -> None:
     assert AudioConfig.model_validate({"provider": "sapi"}).provider == "elevenlabs"
+
+
+def test_elevenlabs_defaults_and_named_voice_variants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key in (
+        "ELEVENLABS_VOICE_ID",
+        "ELEVENLABS_VOICE_JESUS_1_ID",
+        "ELEVENLABS_VOICE_JESUS_2_ID",
+        "ELEVENLABS_MODEL_ID",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    config = AudioConfig()
+
+    assert config.voice_id == DEFAULT_ELEVENLABS_VOICE_ID
+    assert config.model_id == DEFAULT_ELEVENLABS_MODEL_ID
+    assert normalize_elevenlabs_voice_variant("Jesus-2") == "jesus_2"
+    assert elevenlabs_voice_id_for_variant("jesus_2") == ELEVENLABS_VOICE_VARIANTS["jesus_2"]
+
+    monkeypatch.setenv("ELEVENLABS_VOICE_JESUS_1_ID", "voice-jesus-1-env")
+    monkeypatch.setenv("ELEVENLABS_VOICE_JESUS_2_ID", "voice-jesus-2-env")
+    monkeypatch.setenv("ELEVENLABS_MODEL_ID", "model-env")
+
+    assert AudioConfig().voice_id == "voice-jesus-1-env"
+    assert elevenlabs_voice_id_for_variant("jesus_2") == "voice-jesus-2-env"
+    assert default_elevenlabs_model_id() == "model-env"
+
+    with pytest.raises(ValueError, match="Variação de voz desconhecida"):
+        normalize_elevenlabs_voice_variant("voz-inexistente")
 
 
 def test_manual_audio_waits_then_imports_with_local_alignment(tmp_path: Path) -> None:

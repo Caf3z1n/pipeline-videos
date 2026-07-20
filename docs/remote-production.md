@@ -10,7 +10,11 @@ Cada pedido declara:
 
 - `video_format`: `short` ou `long`;
 - `topic`: tema opcional; vazio usa o catálogo local e evita repetir passagens;
+- `creative_mode`: modo editorial explícito ou `auto` para variar conforme passagem e histórico;
+- `hook_policy`: `auto`, `required`, `optional` ou `none`; Shorts não aceitam `none`;
+- `hook_family`: família concreta ou `auto`; Shorts sempre resolvem uma família antes do roteiro;
 - `duration_seconds`: opcional, com padrão de 50 s para Short e 540 s para longo;
+- `voice_variant`: `jesus_1` (padrão) ou `jesus_2`;
 - `start_policy`: `immediate` ou `overnight`;
 - `publication_mode`: `private_review` ou `scheduled`;
 - `publish_at`: obrigatório somente em `scheduled`, sempre com fuso;
@@ -70,8 +74,10 @@ visibilidade inicial `private`. Agendamento exige também `publication_mode=sche
 
 ## Segurança e operação
 
-`.env`, OAuth, músicas, jobs e projetos ficam em `shared/`, fora dos releases Git. Nunca envie esses
-arquivos ao GitHub ou aos logs. O registro compartilhado de conteúdo permanece em
+`.env`, OAuth, músicas, jobs e projetos ficam em `shared/`, fora dos releases Git. A VPS mantém
+`ELEVENLABS_VOICE_ID`, os presets `ELEVENLABS_VOICE_JESUS_1_ID` e
+`ELEVENLABS_VOICE_JESUS_2_ID`, além de `ELEVENLABS_MODEL_ID`, nesse arquivo persistente. Nunca envie
+esses arquivos ao GitHub ou aos logs. O registro compartilhado de conteúdo permanece em
 `shared/content-registry.git` e guarda somente metadados editoriais sem roteiro, mídia ou segredo.
 
 Antes de criar um projeto automático, o worker carrega o catálogo base e o banco curado de expansão

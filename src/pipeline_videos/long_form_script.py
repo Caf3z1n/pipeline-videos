@@ -5,6 +5,7 @@ import re
 import unicodedata
 from typing import Any
 
+from pipeline_videos.creative_direction import creative_evidence_errors, hook_matches_family
 from pipeline_videos.editorial import quoted_comment_response, scripture_citations
 from pipeline_videos.models import (
     Briefing,
@@ -61,10 +62,11 @@ def _validate_story_alignment(
     document: ScriptDocument,
     config: LongFormScriptConfig,
     briefing: Briefing | None,
+    sources: SourceLibrary | None,
 ) -> None:
     strategy = document.long_form_strategy
     if strategy is None:
-        raise ValueError("retention_story_long_v1 exige long_form_strategy no roteiro.")
+        raise ValueError("O padrão longo configurado exige long_form_strategy no roteiro.")
     if strategy.standard != config.narrative_standard:
         raise ValueError("O padrão da estratégia longa não corresponde à configuração do projeto.")
     if not document.sections:
@@ -96,31 +98,79 @@ def _validate_story_alignment(
 
     opening = document.sections[0].narration.strip()
     if any(pattern.search(opening) for pattern in _GENERIC_OPENING_PATTERNS):
-        raise ValueError("A abertura longa deve começar no conflito, sem saudação ou introdução.")
-    if not _normalized(opening).startswith(_normalized(strategy.opening_hook)):
-        raise ValueError("opening_hook precisa ser o prefixo literal da locução de abertura.")
-    if len(tokenize_words(strategy.opening_hook)) > config.opening_hook_max_words:
-        raise ValueError(f"opening_hook ultrapassa {config.opening_hook_max_words} palavras.")
-    if not _contains(opening, strategy.content_promise):
-        raise ValueError("A abertura precisa verbalizar content_promise.")
-    if not _contains(opening, strategy.central_question):
-        raise ValueError("A abertura precisa verbalizar central_question.")
+        raise ValueError("A abertura longa não pode usar saudação ou introdução genérica.")
+
+    if strategy.standard == "retention_story_long_v1":
+        if not _normalized(opening).startswith(_normalized(strategy.opening_hook)):
+            raise ValueError("opening_hook precisa ser o prefixo literal da locução de abertura.")
+        if len(tokenize_words(strategy.opening_hook)) > config.opening_hook_max_words:
+            raise ValueError(f"opening_hook ultrapassa {config.opening_hook_max_words} palavras.")
+        if not _contains(opening, strategy.content_promise):
+            raise ValueError("A abertura precisa verbalizar content_promise.")
+        if not _contains(opening, strategy.central_question):
+            raise ValueError("A abertura precisa verbalizar central_question.")
+    else:
+        if not _normalized(opening).startswith(_normalized(strategy.opening_line)):
+            raise ValueError("opening_line precisa ser o prefixo literal da locução de abertura.")
+        if strategy.hook_family != "none":
+            if not hook_matches_family(strategy.opening_hook, strategy.hook_family):
+                raise ValueError("O hook não corresponde à família declarada.")
+            if len(tokenize_words(strategy.opening_hook)) > config.opening_hook_max_words:
+                raise ValueError(
+                    f"opening_hook ultrapassa {config.opening_hook_max_words} palavras."
+                )
+        early_narration = " ".join(section.narration for section in document.sections[:2])
+        if not _contains(early_narration, strategy.content_promise):
+            raise ValueError("A promessa de conteúdo precisa ficar clara nos movimentos iniciais.")
+        if strategy.central_question.strip() and not _contains(
+            early_narration, strategy.central_question
+        ):
+            raise ValueError("A pergunta organizadora declarada precisa aparecer no início.")
     if briefing is not None:
         if (
             briefing.audience.strip()
             and strategy.target_viewer.strip() != briefing.audience.strip()
         ):
             raise ValueError("target_viewer precisa copiar briefing.audience.")
-        if (
-            briefing.practical_application.strip()
-            and strategy.practical_application.strip() != briefing.practical_application.strip()
-        ):
-            raise ValueError("practical_application precisa copiar briefing.practical_application.")
+        if strategy.standard == "retention_story_long_v1":
+            if (
+                briefing.practical_application.strip()
+                and strategy.practical_application.strip() != briefing.practical_application.strip()
+            ):
+                raise ValueError(
+                    "practical_application precisa copiar briefing.practical_application."
+                )
+        else:
+            if strategy.creative_mode != briefing.creative_mode:
+                raise ValueError("creative_mode precisa copiar o modo resolvido no briefing.")
+            if strategy.interpretive_stance != briefing.interpretive_stance:
+                raise ValueError(
+                    "interpretive_stance precisa copiar a postura definida no briefing."
+                )
+            if strategy.hook_policy != briefing.hook_policy:
+                raise ValueError("hook_policy precisa copiar a política definida no briefing.")
+            if briefing.hook_family != "auto" and strategy.hook_family != briefing.hook_family:
+                raise ValueError("hook_family precisa copiar a família definida no briefing.")
+            if (
+                briefing.viewer_outcome.strip()
+                and strategy.viewer_takeaway.strip() != briefing.viewer_outcome.strip()
+            ):
+                raise ValueError("viewer_takeaway precisa copiar briefing.viewer_outcome.")
+            if (
+                briefing.practical_application.strip()
+                and strategy.practical_application.strip() != briefing.practical_application.strip()
+            ):
+                raise ValueError(
+                    "A aplicação declarada precisa copiar briefing.practical_application."
+                )
 
-    payoff_text = " ".join(
+    resolution_functions = (
+        {"payoff"} if strategy.standard == "retention_story_long_v1" else {"resolution"}
+    )
+    resolution_text = " ".join(
         section.narration
         for section, beat in zip(document.sections, strategy.progression, strict=True)
-        if "payoff" in beat.functions
+        if resolution_functions.intersection(beat.functions)
     )
     application_text = " ".join(
         section.narration
@@ -128,12 +178,34 @@ def _validate_story_alignment(
         if "application" in beat.functions
     )
     closing = document.sections[-1].narration.strip()
-    if not _contains(payoff_text, strategy.payoff):
-        raise ValueError("O payoff declarado precisa aparecer literalmente no movimento de payoff.")
-    if not _contains(application_text, strategy.practical_application):
-        raise ValueError("A aplicação declarada precisa aparecer no movimento de aplicação.")
-    if config.require_callback and not _contains(closing, strategy.callback):
-        raise ValueError("A closing precisa retomar a abertura por meio do callback declarado.")
+    if strategy.standard == "retention_story_long_v1":
+        if not _contains(resolution_text, strategy.payoff):
+            raise ValueError(
+                "O payoff declarado precisa aparecer literalmente no movimento de payoff."
+            )
+        if not _contains(application_text, strategy.practical_application):
+            raise ValueError("A aplicação declarada precisa aparecer no movimento de aplicação.")
+        if config.require_callback and not _contains(closing, strategy.callback):
+            raise ValueError("A closing precisa retomar a abertura pelo callback declarado.")
+    else:
+        if not _contains(resolution_text, strategy.resolution):
+            raise ValueError("A resolução declarada precisa aparecer no movimento de resolução.")
+        if not _contains(resolution_text, strategy.viewer_takeaway):
+            raise ValueError("O valor final precisa aparecer no movimento de resolução.")
+        if strategy.practical_application.strip() and not _contains(
+            application_text, strategy.practical_application
+        ):
+            raise ValueError("A aplicação opcional precisa aparecer em um beat de application.")
+        if strategy.callback.strip() and not _contains(closing, strategy.callback):
+            raise ValueError("O callback declarado precisa aparecer na closing.")
+        evidence_errors = creative_evidence_errors(
+            document,
+            sources,
+            creative_mode=strategy.creative_mode,
+            interpretive_stance=strategy.interpretive_stance,
+        )
+        if evidence_errors:
+            raise ValueError(evidence_errors[0])
     if not _normalized(closing).endswith(_normalized(strategy.engagement.spoken_text)):
         raise ValueError("O CTA precisa ser o último movimento da locução.")
 
@@ -168,21 +240,42 @@ def _validate_timing_and_retention(
         raise ValueError("O último beat longo precisa terminar dentro da janela de duração.")
 
     first_beat = strategy.progression[0]
-    if "hook" not in first_beat.functions:
-        raise ValueError("O primeiro beat longo precisa cumprir a função de hook.")
-    if first_beat.target_end_seconds > config.opening_target_max_seconds:
-        raise ValueError(
-            f"O cold open longo precisa terminar até {config.opening_target_max_seconds:.0f}s."
+    if strategy.standard == "retention_story_long_v1":
+        if "hook" not in first_beat.functions:
+            raise ValueError("O primeiro beat longo precisa cumprir a função de hook.")
+        if first_beat.target_end_seconds > config.opening_target_max_seconds:
+            raise ValueError(
+                f"O cold open longo precisa terminar até {config.opening_target_max_seconds:.0f}s."
+            )
+        resolution_starts = [
+            beat.target_start_seconds for beat in strategy.progression if "payoff" in beat.functions
+        ]
+        resolution_start = min(resolution_starts)
+        minimum_resolution_ratio = config.payoff_start_minimum_ratio
+    else:
+        hook_used = strategy.hook_family != "none"
+        if hook_used and "hook" not in first_beat.functions:
+            raise ValueError("O primeiro beat precisa cumprir o hook declarado.")
+        opening_limit = (
+            config.opening_target_max_seconds if hook_used else config.opening_value_max_seconds
         )
-
-    payoff_starts = [
-        beat.target_start_seconds for beat in strategy.progression if "payoff" in beat.functions
-    ]
-    payoff_start = min(payoff_starts)
-    if payoff_start < target_duration_seconds * config.payoff_start_minimum_ratio:
-        raise ValueError(
-            "O payoff longo foi antecipado antes de a progressão sustentar a promessa."
-        )
+        if first_beat.target_end_seconds > opening_limit:
+            raise ValueError(
+                f"O primeiro movimento precisa entregar valor até {opening_limit:.0f}s."
+            )
+        resolution_starts = [
+            beat.target_start_seconds
+            for beat in strategy.progression
+            if "resolution" in beat.functions
+        ]
+        resolution_start = min(resolution_starts)
+        minimum_resolution_ratio = {
+            "distributed": 0.35,
+            "late": 0.60,
+            "final_quarter": 0.75,
+        }[strategy.resolution_timing]
+    if resolution_start < target_duration_seconds * minimum_resolution_ratio:
+        raise ValueError("A resolução foi antecipada antes de o desenvolvimento sustentá-la.")
 
     reengagements = [
         beat.target_start_seconds
@@ -195,9 +288,15 @@ def _validate_timing_and_retention(
             f"O vídeo longo precisa de ao menos {required} reengajamentos; recebeu "
             f"{len(reengagements)}."
         )
-    if any(timestamp >= payoff_start for timestamp in reengagements):
+    if strategy.standard == "retention_story_long_v1" and any(
+        timestamp >= resolution_start for timestamp in reengagements
+    ):
         raise ValueError("Reengajamentos precisam preparar o payoff, não ocorrer depois dele.")
-    retention_anchors = [0.0, *reengagements, payoff_start]
+    retention_anchors = (
+        [0.0, *reengagements, resolution_start]
+        if strategy.standard == "retention_story_long_v1"
+        else [0.0, *reengagements, previous_end]
+    )
     gaps = [
         right - left for left, right in zip(retention_anchors, retention_anchors[1:], strict=False)
     ]
@@ -211,7 +310,13 @@ def _validate_timing_and_retention(
         "estimated_duration_seconds": round(estimated_duration, 2),
         "reengagement_count": len(reengagements),
         "reengagement_timestamps": reengagements,
-        "payoff_start_seconds": payoff_start,
+        "payoff_start_seconds": resolution_start,
+        "resolution_start_seconds": resolution_start,
+        "hook_used": strategy.standard == "retention_story_long_v1"
+        or strategy.hook_family != "none",
+        "creative_mode": (
+            strategy.creative_mode if strategy.standard == "creative_retention_long_v2" else None
+        ),
     }
 
 
@@ -319,7 +424,7 @@ def validate_long_form_retention_script(
 ) -> dict[str, Any]:
     if not config.enabled or config.narrative_standard == "legacy":
         return {}
-    _validate_story_alignment(document, config, briefing)
+    _validate_story_alignment(document, config, briefing, sources)
     diagnostics = _validate_timing_and_retention(
         document,
         target_duration_seconds=target_duration_seconds,

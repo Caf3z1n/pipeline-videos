@@ -124,7 +124,7 @@ def _scene_seconds_for_section(
         return contract.pacing.reengagement_scene_seconds
     if "contemplation" in functions:
         return contract.pacing.contemplative_scene_seconds
-    if functions.intersection({"payoff", "application", "cta"}):
+    if functions.intersection({"payoff", "resolution", "synthesis", "application", "cta"}):
         return contract.pacing.payoff_scene_seconds
     return contract.pacing.default_scene_seconds
 
@@ -414,7 +414,7 @@ def build_scenes(
                 and (
                     project.video_format == "short"
                     or project.config.long_form_script.narrative_standard
-                    == "retention_story_long_v1"
+                    in {"retention_story_long_v1", "creative_retention_long_v2"}
                 )
             )
             retention_reset = "reengagement" in contract_beats[section.section_id].functions
@@ -464,13 +464,14 @@ def build_scenes(
             raise ValueError("O roteiro não produziu nenhuma cena.")
         if (
             project.video_format == "short"
-            and project.config.shorts_script.narrative_standard == "retention_story_v2"
+            and project.config.shorts_script.narrative_standard
+            in {"retention_story_v2", "creative_retention_v3"}
             and target_scene_seconds is None
             and layout.shorts_script_strategy.is_file()
             and not 8 <= len(scenes) <= 10
         ):
             raise ValueError(
-                "retention_story_v2 precisa produzir de 8 a 10 cenas; "
+                "O padrão criativo de Shorts precisa produzir de 8 a 10 cenas; "
                 f"o roteiro atual produziu {len(scenes)}."
             )
         manifest = SceneManifest(

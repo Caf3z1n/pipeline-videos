@@ -66,11 +66,13 @@ em qualidade V4 e não registra aprovação humana automaticamente.
 
 ## Contratos de conteúdo
 
-- `Briefing`: passagem, tema, aplicação, público, emoção, duração, tradução e limites.
+- `Briefing`: passagem, tema, modo criativo, postura, política de hook, valor final, público,
+  emoção, duração, tradução e limites. Aplicação é condicional ao modo.
 - `SourceLibrary`: tipo, escopo da afirmação, fonte, acesso, verificação e direitos.
 - `ScriptDocument`: seções narrativas, base bíblica e classificação das afirmações.
-- `CreativeContract`: promessa, gancho, payoff, valor de cada seção, componentes críticos e perfil
-  determinístico de ritmo, derivados sem chamada externa.
+- `CreativeContract`: modo, postura, promessa, primeira fala, presença ou ausência de hook,
+  resolução, valor de cada seção, componentes críticos e perfil determinístico de ritmo,
+  derivados sem chamada externa.
 - `BiblicalReview`: findings com severidade, evidência, resolução e aprovação.
 - `SceneManifest`: narração, tempo, emoção, ambiente, enquadramento, função e prompt modular.
 - `ImageManifest`: prompt/hash, versões, candidato ativo e versão aprovada.

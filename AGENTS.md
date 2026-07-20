@@ -8,8 +8,9 @@
 4. Execute `uv run pipeline-videos status <id-ou-pasta>` antes de regenerar qualquer artefato.
 5. A pasta do vídeo é a fonte de verdade; o chat é auxiliar.
 6. Para criar, retomar ou renderizar vídeo, leia `docs/optimized-production.md`.
-7. Para roteiro de Short, leia também `docs/shorts-script-standard.md`.
-8. Para roteiro de vídeo longo, leia também `docs/long-form-script-standard.md`.
+7. Para roteiro novo, leia também `docs/creative-direction.md`.
+8. Para roteiro de Short, leia também `docs/shorts-script-standard.md`.
+9. Para roteiro de vídeo longo, leia também `docs/long-form-script-standard.md`.
 
 ## Organização
 
@@ -41,6 +42,8 @@
 - Registre tradução, fonte, acesso e direitos de citação literal.
 - Classifique afirmações como `biblical_text`, `verified_context`, `interpretation` ou
   `creative_elaboration`.
+- Em postura factual, não use `interpretation` nem `creative_elaboration` na locução. Em postura
+  exploratória, deixe opinião e inferência explicitamente distinguíveis da Bíblia.
 - Preserve incertezas; finding `blocking` aberto impede aprovação.
 - Nunca invente nem registre aprovação humana em nome do usuário. Para upload privado solicitado
   explicitamente, use o candidato automatizado validado em vez de preencher aprovações.
@@ -74,7 +77,8 @@
   novamente versículo, CTA, estilo ou fluxo já padronizados.
 - O seletor automático usa o catálogo local verificado, combina as pastas com o registro Git
   compartilhado, reserva por compare-and-swap antes de criar o projeto e favorece variedade de
-  livro, tema, personagem e testamento. Falha do registro bloqueia a seleção; não use fallback local.
+  livro, tema, personagem, testamento, modo criativo e família de hook. Falha do registro bloqueia a
+  seleção; não use fallback local.
 - O briefing automático não equivale a aprovação humana.
 - No modo completo, prepare `script/shorts-queue.json` e crie exatamente um
   `shorts_script_specialist`, com raciocínio alto e staging exclusivo; o agente principal valida e
@@ -90,13 +94,16 @@
 
 ## Contratos dos especialistas
 
-- O roteirista de Shorts novos usa `retention_story_v2`: cold open concreto, progressão,
-  citação literal entre 8 e 20 segundos, reengajamento, payoff, aplicação, callback e exatamente
-  uma ação de CTA em até quatro segundos, conforme `docs/shorts-script-standard.md`.
-- O roteirista de vídeos longos novos usa `retention_story_long_v1`: conflito e promessa em até 20
-  segundos, pergunta central, progressão por movimentos, reengajamentos proporcionais à duração,
-  citações literais periódicas, payoff no quarto final, aplicação, callback e exatamente uma ação
-  de CTA em até dez segundos, conforme `docs/long-form-script-standard.md`.
+- O roteirista de Shorts novos usa `creative_retention_v3`: modo e postura explícitos, hook inicial
+  obrigatório, citação literal entre 8 e 20 segundos, desenvolvimento com informação nova,
+  reengajamento, resolução coerente com o modo e exatamente uma ação de CTA em até quatro segundos.
+  Aplicação e callback são opcionais, salvo nos modos devocionais.
+- O roteirista de vídeos longos novos usa `creative_retention_long_v2`: modo e postura explícitos,
+  hook adaptativo, progressão por movimentos, reengajamentos proporcionais à duração, citações
+  literais periódicas, resolução coerente com o modo e exatamente uma ação de CTA em até dez
+  segundos. Pergunta, aplicação e callback são opcionais.
+- Retenção não implica mensagem motivacional. A resolução pode ser desfecho factual, explicação,
+  descoberta, síntese, posição filosófica, incerteza preservada ou aplicação.
 - Crie exatamente um `youtube_growth_specialist` quando `youtube/growth-queue.json` estiver
   pendente, localmente ou na VPS, com raciocínio médio. Nenhum especialista publica nem promete
   CTR/alcance.
@@ -115,12 +122,13 @@
   espesso visível, bordas chanfradas, textura material, highlights, sombras de contato/oclusão e
   perspectiva coerentes com a cena. A palavra dominante usa escala muito maior; palavra vermelha e
   seta/X/sublinhado/pincel preservam o mesmo tratamento 3D. Nunca use texto plano, adesivo ou overlay.
-- Shorts e vídeos longos novos seguem `Tensão concreta | Passagem`. A descrição abre com resumo
+- Shorts e vídeos longos novos seguem `Enfoque concreto | Passagem`. O enfoque se adapta ao modo
+  criativo sem forçar tensão motivacional. A descrição abre com resumo
   curto e, em vídeos longos,
   traz timeline das citações iniciada exatamente por `00:00 - Abertura`.
-- O especialista cria exatamente um par título+thumbnail. O título carrega referência, tensão e
+- O especialista cria exatamente um par título+thumbnail. O título carrega referência, enfoque e
   busca. Em Shorts, a frase da capa acrescenta decisão, contraste ou consequência. No padrão
-  `tension_pipe_passage_v2`, a capa de Short não repete a tensão situada antes de `|`; projetos
+  `creative_pipe_passage_v3`, a capa de Short não repete o enfoque situado antes de `|`; projetos
   legados com passagem primeiro continuam sem repetir a frase temática depois de `|`. Em longos, o
   conceito visual complementa o título sem texto no bitmap.
 - Thumbnails novas de Shorts usam conflito/personagem reconhecível, destaque vermelho e ao menos uma
@@ -195,8 +203,9 @@
   e card ativo vermelho `#E5484D` com raio 24, sempre centralizadas.
 - As palavras da legenda entram progressivamente com animação curta de posição, escala e opacidade,
   preservando fonte, layout e card ativo.
-- A voz ElevenLabs padrão é `wKukuyYdIlElkaj9zEQG`; overrides explícitos do projeto continuam
-  válidos.
+- A voz ElevenLabs padrão é o preset `jesus_1` (`qfOmqDJTQP75MDYJvxKc`); `jesus_2`
+  (`rtrpEL7BeMd5aTru4HPq`) é a segunda variação. O modelo padrão é `eleven_multilingual_v2`;
+  overrides explícitos do projeto continuam válidos.
 - A resposta pedida nos comentários fica entre aspas, sozinha na legenda, e permanece visível
   durante um segundo de silêncio antes da continuação.
 - Em Shorts, a resposta pedida nos comentários deve ser uma palavra-síntese expressiva e contextual,

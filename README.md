@@ -29,8 +29,11 @@ incorporados; vídeos longos recebem uma imagem cinematográfica limpa, sem text
 formam uma única combinação complementar em todos os modos novos.
 
 O padrão editorial mantém toda a locução em português e exige citações bíblicas literais
-verificadas. Shorts e vídeos longos novos usam `Tensão concreta | Passagem` e CTA de uma única
-ação. Longos recebem também uma timeline bíblica iniciada por `00:00 - Abertura`. Nas capas de
+verificadas. Projetos novos escolhem entre 16 modos criativos e usam
+`Enfoque concreto | Passagem`, sem converter automaticamente a conclusão em aplicação
+motivacional. Shorts mantêm hook inicial obrigatório; longos usam hook adaptativo. Ambos encerram
+com CTA de uma única ação. Longos recebem também uma timeline bíblica iniciada por
+`00:00 - Abertura`. Nas capas de
 Shorts, a palavra de impacto e o elemento narrativo usam vermelho, com seta, X, sublinhado ou pincel
 apontando para algo real da cena. As capas longas preservam uma área limpa no lado oposto ao
 personagem.
@@ -177,12 +180,12 @@ uv run pipeline-videos catalog status --format short
 uv run pipeline-videos catalog status --format long
 ```
 
-O projeto já nasce com `retention_story_v2`: cold open de até dois segundos, conflito concreto,
-citação literal entre 8 e 20 segundos, progressão, reengajamento, payoff, aplicação e CTA de uma
-única ação. O seletor considera potencial narrativo, reserva `conflict_first`,
-`counterintuitive_reveal` ou `stair_step_progression` e evita repetir os dois últimos formatos. O
-briefing recebe pergunta central, progressão visual, possível revelação e semente de título. A voz
-continua pastoral, simples e cotidiana; a revisão bíblica e o padrão visual
+O projeto já nasce com `creative_retention_v3`: hook de até dois segundos, citação literal entre 8
+e 20 segundos, desenvolvimento, reengajamento, resolução e CTA de uma única ação. O seletor
+considera potencial narrativo, passagem e histórico recente para variar modo criativo e família de
+hook. O briefing recebe postura interpretativa, resultado para o espectador, progressão visual,
+possível revelação e semente de título. O tom segue o modo — factual, expositivo, analítico,
+exploratório ou devocional — enquanto a revisão bíblica e o padrão visual
 `cinematic-family-3d-v1` permanecem obrigatórios. A aprovação humana do briefing continua pendente.
 
 O comando manual continua disponível quando você quiser definir explicitamente o tema:
@@ -196,8 +199,8 @@ O nome físico recebe a data local e o tema: `DD-MM-AAAA_tema-do-video`. O argum
 funcionando como alias, portanto `status salmo-121` encontra a pasta datada correspondente.
 
 O segundo comando imprime uma mensagem pronta para colar na conversa com o Codex. Ela pede que o
-agente leia o estado persistido e conduza a conversa sobre tema, passagem, versículos, mensagem,
-público, duração, tom e limites de interpretação sem gerar ativos prematuramente.
+agente leia o estado persistido e conduza a conversa sobre tema, passagem, versículos, modo
+criativo, postura, política de hook, público, duração e limites sem gerar ativos prematuramente.
 
 Para retomar dias depois:
 
@@ -225,8 +228,8 @@ uv run pipeline-videos approve salmo-121 briefing --by "Pedro"
 ### 2. Roteiro e revisão bíblica
 
 Em Shorts reais, use primeiro a etapa especializada. O subagente lê somente a fila e grava um pacote
-no staging; o processo principal valida referências, contagem de palavras, gancho, beats, payoff,
-CTA e revisão bíblica antes de promover a nova versão:
+no staging; o processo principal valida referências, contagem de palavras, gancho, beats, resolução,
+modo criativo, resolução, CTA e revisão bíblica antes de promover a nova versão:
 
 ```powershell
 uv run pipeline-videos script shorts-prepare davi-e-golias
@@ -238,32 +241,34 @@ uv run pipeline-videos script shorts-import davi-e-golias
 O `shorts-check-staging` é somente leitura e devolve, de uma vez, todos os erros detectáveis do
 pacote. O especialista deve corrigir o lote completo antes do único import. O import também
 sincroniza deterministicamente os campos duplicados sem reescrever o staging: `open_loop` nos
-formatos legados e promessa, pergunta, payoff, aplicação e CTA em `retention_story_v2`.
+formatos legados e promessa, pergunta opcional, resolução, valor final e CTA em
+`creative_retention_v3`.
 
 O roteiro anterior é arquivado em `script/versions/`. O mapa de retenção fica em
 `script/retention-strategy.json`. Vídeos longos continuam aceitando importação direta, mas projetos
 novos exigem `ScriptDocument.long_form_strategy` com o contrato de retenção e a cadência bíblica.
-Toda importação também deriva `script/creative-contract.json` sem chamada externa: promessa, gancho,
-payoff, função de cada seção, componentes críticos e perfil de ritmo passam a ser reutilizados por
+Toda importação também deriva `script/creative-contract.json` sem chamada externa: modo, promessa,
+primeira fala, resolução, função de cada seção, componentes críticos e perfil de ritmo passam a ser reutilizados por
 cenas, crescimento e validação, em vez de serem decididos novamente.
 
-Novos Shorts seguem `retention_story_v2`: começam dentro de uma ação ou conflito em até dois
-segundos, sustentam uma pergunta específica, inserem a citação verificada entre 8 e 20 segundos e
-fazem o valor crescer até um reengajamento entre 40% e 60% da duração. O payoff resolve a abertura,
-a aplicação é concreta e o encerramento pede somente comentar, inscrever-se ou compartilhar, em até
-quatro segundos. Um callback verbal ou visual retoma a abertura sem criar loop artificial. Os
-formatos `human_hook_to_bible` e `verse_first` continuam válidos nos projetos que já os armazenam.
+Novos Shorts seguem `creative_retention_v3`: selecionam uma direção editorial, abrem com hook
+obrigatório em até dois segundos, inserem a citação verificada entre 8 e 20 segundos e fazem o valor
+crescer até um reengajamento entre 40% e 60% da duração. A resolução pode ser factual,
+explicativa, analítica, filosófica ou devocional. Aplicação e callback só entram quando servem ao
+modo. O encerramento pede somente comentar, inscrever-se ou compartilhar, em até quatro segundos.
+Contratos anteriores continuam válidos nos projetos que já os armazenam.
 O contrato completo está em
 [docs/shorts-script-standard.md](docs/shorts-script-standard.md).
 
-Vídeos longos novos seguem `retention_story_long_v1`: entram no conflito em até vinte segundos,
-declaram promessa e pergunta central, avançam por movimentos com informação nova e distribuem
-reengajamentos conforme a duração. O alvo bíblico permanece entre 0,8 e 1,2 citações literais por
-minuto, mas o validador também exige cadência: primeira citação até 75 segundos, intervalo de 25 a
-105 segundos entre âncoras e uma citação próxima da parte final. O payoff fica no quarto final, a
-aplicação é específica, o callback retoma a abertura e exatamente uma ação de CTA encerra o vídeo.
+Vídeos longos novos seguem `creative_retention_long_v2`: o hook pode ser obrigatório, opcional ou
+dispensado conforme tema e modo. A abertura sempre entrega valor cedo; os movimentos acrescentam
+informação nova e os reengajamentos acompanham a duração. O alvo bíblico permanece entre 0,8 e 1,2
+citação literal por minuto, com primeira citação até 75 segundos, intervalo de 25 a 105 segundos
+entre âncoras e uma citação próxima da parte final. Pergunta, aplicação e callback são opcionais;
+a resolução segue o modo e exatamente uma ação de CTA encerra o vídeo.
 O contrato completo está em
 [docs/long-form-script-standard.md](docs/long-form-script-standard.md).
+O catálogo comum está em [docs/creative-direction.md](docs/creative-direction.md).
 
 Nas locuções, referências são sempre verbalizadas com `capítulo` e `versículo`: “Josué, capítulo
 1, versículo 9”. O formato compacto `Josué 1:9` permanece apenas nos campos técnicos e metadados.
@@ -297,7 +302,7 @@ uv run pipeline-videos build-scenes salmo-121 --target-seconds 8
 ```
 
 Sem override, Shorts preservam o corte rápido existente e longos novos usam o perfil
-`long_retention_v1`: abertura em planos de aproximadamente seis segundos, reengajamentos em sete,
+`long_creative_v2`: abertura em planos curtos, reengajamentos em aproximadamente sete segundos,
 progressão regular em dez e planos mais longos somente em reflexão contemplativa com função
 declarada. Projetos longos anteriores preservam `balanced_long_v1`.
 
@@ -344,11 +349,14 @@ Copie `.env.example` para `.env` e defina os valores localmente. Nunca cole chav
 ```powershell
 uv run pipeline-videos audio configure salmo-121 `
   --provider elevenlabs `
-  --voice-id "SEU_VOICE_ID" `
-  --model eleven_flash_v2_5
+  --voice-variant jesus_1 `
+  --model eleven_multilingual_v2
 
 uv run pipeline-videos audio generate salmo-121 --allow-external
 ```
+
+`jesus_1` é o preset padrão. Use `--voice-variant jesus_2` para a segunda variação; `--voice-id`
+continua disponível apenas para uma voz personalizada fora desses presets.
 
 `--allow-external` é obrigatório para a ElevenLabs porque a chamada consome créditos. O padrão de
 saída é `mp3_44100_128`, convertido localmente para WAV 48 kHz. O áudio é gerado por cena; hashes
@@ -417,13 +425,15 @@ descrição única, palavras-chave, intenção de busca, hipótese de CTR e just
 Na VPS, a mesma combinação é processada pelo `youtube_growth_specialist`, com contexto compacto e
 raciocínio médio. O contrato visual e a complementaridade entre título e capa permanecem iguais.
 
-Nos projetos novos, todas as opções de título começam pela passagem principal, uma barra vertical e
-o tema reconhecível do vídeo. A descrição abre com resumo curto e, em vídeos longos, recebe uma
-timeline das citações no ponto em que entram na narrativa.
+Nos projetos novos, o título usa `Enfoque concreto | Passagem`. O enfoque pode ser fato,
+personagem, curiosidade, pergunta, comparação, dilema, tese ou promessa prática. A descrição abre
+com resumo curto e, em vídeos longos, recebe uma timeline das citações no ponto em que entram na
+narrativa.
 
-O par editorial distribui funções entre os dois elementos. O título concentra referência, tema e
-intenção de busca. Em Shorts, a frase curta da capa acrescenta tensão, decisão, contraste ou
-consequência. Em longos, a imagem comunica emoção, gesto, paisagem e conflito sem qualquer texto,
+O par editorial distribui funções entre os dois elementos. O título concentra referência, enfoque e
+intenção de busca. Em Shorts, a frase curta da capa acrescenta conflito, decisão, detalhe,
+contraste ou consequência. Em longos, a imagem comunica personagem, gesto, paisagem, objeto ou
+conflito sem qualquer texto,
 letra, logotipo ou marcação editorial.
 
 Nos Shorts, o título principal precisa conter a expressão de busca primária, pelo menos uma opção
@@ -639,8 +649,7 @@ Todos os caminhos armazenados são relativos à pasta do vídeo. Isso torna cada
 O adaptador segue o endpoint oficial
 [`POST /v1/text-to-speech/{voice_id}/with-timestamps`](https://elevenlabs.io/docs/api-reference/text-to-speech/convert-with-timestamps),
 prefere `normalized_alignment`, preserva headers de custo/diagnóstico e repete com backoff apenas
-erros transitórios. O default `eleven_flash_v2_5` reduz consumo na conta gratuita; troque para
-`eleven_multilingual_v2` quando qualidade long-form for prioritária.
+erros transitórios. O padrão atual é `eleven_multilingual_v2` para Shorts e vídeos longos.
 
 Os planos, limites e licenças mudam. Em 13/07/2026, a
 [página oficial de preços](https://elevenlabs.io/pricing/api?price.platform=api) informava 10.000
