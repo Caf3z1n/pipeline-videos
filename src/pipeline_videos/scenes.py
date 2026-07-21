@@ -14,9 +14,10 @@ from pipeline_videos.models import (
     SceneManifest,
     ScriptDocument,
     ScriptSection,
+    ShortsScriptStrategy,
     StyleProfile,
 )
-from pipeline_videos.project import DEFAULT_STYLE, load_style
+from pipeline_videos.project import load_style
 from pipeline_videos.script import ensure_creative_contract
 from pipeline_videos.state import (
     complete_stage,
@@ -37,8 +38,21 @@ SHOTS = (
     "silhueta em contraluz com composição assimétrica",
 )
 
-SCENE_ALGORITHM_VERSION = "5.0"
+UNRESTRICTED_SHOTS = (
+    "plano geral que revele com clareza a ação e o ambiente",
+    "plano médio lateral com interação natural entre as figuras",
+    "close sereno no rosto, gesto ou objeto central da cena",
+    "plano alto mostrando a relação entre personagens e ambiente",
+    "plano sobre o ombro com profundidade natural",
+    "plano baixo suave que valorize a ação principal",
+)
+
+SCENE_ALGORITHM_VERSION = "6.1"
 LEGACY_ENFORCED_VISUAL_STANDARD_IDS = {"davi-poupa-saul-flat-v1"}
+FIXED_SPOKEN_REFERENCE_VISUAL_BRIEF = (
+    "A imagem padrão do perfil mostra uma Bíblia aberta sobre uma mesa de madeira diante de "
+    "uma paisagem serena, em pintura editorial bíblica de guache."
+)
 
 
 ROLE_DIRECTIONS = {
@@ -150,7 +164,7 @@ def _resolved_style(layout: ProjectLayout) -> StyleProfile:
     if not image_config.enforce_visual_standard:
         return style
 
-    canonical = load_style(DEFAULT_STYLE)
+    canonical = load_style(style.style_id)
     if canonical.visual_standard_id != image_config.visual_standard_id:
         previous_standard_id = image_config.visual_standard_id
         if previous_standard_id not in LEGACY_ENFORCED_VISUAL_STANDARD_IDS:
@@ -195,6 +209,7 @@ def assemble_prompt(
     emotion: str,
     canvas_width: int,
     canvas_height: int,
+    reserve_caption_safe_area: bool = True,
 ) -> PromptBlocks:
     negative = list(style.negative_constraints)
     negative.extend(
@@ -214,40 +229,41 @@ def assemble_prompt(
         if is_vertical
         else f"quadro de cena horizontal {aspect} para vídeo reflexivo no YouTube"
     )
-    safe_area = (
-        "manter entre 42% e 58% da altura uma área do mesmo fundo contínuo, com poucos detalhes "
-        "e baixo contraste para as legendas; nunca transformar essa área em faixa branca, painel, "
-        "retângulo vazio ou divisor; posicionar rosto, gesto e símbolos essenciais acima, abaixo "
-        "ou lateralmente; evitar elementos essenciais nas bordas direita e inferior da interface "
-        "do Short"
-        if is_vertical
-        else "manter espaço seguro para legendas na parte inferior"
-    )
+    constraints = "imagem sem texto"
+    if reserve_caption_safe_area:
+        safe_area = (
+            "manter entre 42% e 58% da altura uma área do mesmo fundo contínuo, com poucos "
+            "detalhes e baixo contraste para as legendas; nunca transformar essa área em faixa "
+            "branca, painel, retângulo vazio ou divisor; posicionar rosto, gesto e símbolos "
+            "essenciais acima, abaixo ou lateralmente; evitar elementos essenciais nas bordas "
+            "direita e inferior da interface do Short"
+            if is_vertical
+            else "manter espaço seguro para legendas na parte inferior"
+        )
+        constraints = f"{safe_area}; {constraints}"
     assembled = "\n".join(
         [
             "Use case: illustration-story",
             f"Asset type: {asset_type}",
             (
-                "Primary request: uma única composição contínua, um único momento, um único "
-                f"ambiente e uma ação principal. {scene_description}"
-            ),
-            (
-                f"Visual standard: {style.visual_standard_id}. Preserve a aparência de animação "
-                "3D cinematográfica familiar premium do perfil: personagens expressivos, formas "
-                "arredondadas, materiais estilizados, profundidade e iluminação de longa-metragem. "
-                "A fidelidade ao padrão tem prioridade sobre realismo fotográfico ou espetáculo "
-                "visual que distraia da mensagem."
+                f"Visual standard: {style.visual_standard_id}. "
+                f"{style.reference_note or 'Siga literalmente o perfil visual do projeto.'} "
+                "A fidelidade a esse padrão tem prioridade sobre qualquer estilo conflitante."
                 if style.visual_standard_id
                 else "Visual standard: seguir literalmente o perfil de estilo do projeto."
             ),
             f"Style/medium: {style.medium}. " + "; ".join(style.principles),
             f"Color palette: {_palette_description(palette)}. Clima: {palette.mood}.",
             f"Continuity: {'; '.join(continuity) if continuity else 'sem personagem recorrente'}",
+            f"Constraints: {constraints}",
+            f"Avoid: {'; '.join(negative)}",
+            (
+                "Primary request: uma única composição contínua, um único momento, um único "
+                f"ambiente e uma ação principal. {scene_description}"
+            ),
             f"Composition/framing: {composition}; composição {orientation} "
             f"cinematográfica {aspect}",
             f"Lighting/mood: {emotion}",
-            f"Constraints: {safe_area}; imagem sem texto",
-            f"Avoid: {'; '.join(negative)}",
         ]
     )
     return PromptBlocks(
@@ -275,13 +291,21 @@ def _scene_from_chunk(
     high_impact_opening: bool = False,
     opening_anchor: bool = False,
     retention_reset: bool = False,
+    visual_brief: str | None = None,
+    visual_relation: str = "contextual",
+    image_source_mode: str = "generated",
+    image_source_path: str | None = None,
+    reserve_caption_safe_area: bool = True,
 ) -> Scene:
     subject, environment, function = ROLE_DIRECTIONS[section.role]
-    if section.visual_direction:
+    if visual_brief:
+        subject = visual_brief
+    elif section.visual_direction:
         subject = section.visual_direction
     if section.retention_goal:
         function = section.retention_goal
-    shot = SHOTS[index % len(SHOTS)]
+    shots = SHOTS if reserve_caption_safe_area else UNRESTRICTED_SHOTS
+    shot = shots[index % len(shots)]
     emotional_intent = {
         "opening": "silêncio, pergunta e acolhimento",
         "biblical_narrative": "reverência e atenção",
@@ -326,7 +350,7 @@ def _scene_from_chunk(
         )
     elif retention_reset:
         shot = (
-            f"{SHOTS[(index + 2) % len(SHOTS)]}, mudança deliberada de escala, direção de olhar "
+            f"{shots[(index + 2) % len(shots)]}, mudança deliberada de escala, direção de olhar "
             "ou profundidade em relação ao movimento anterior"
         )
         emotional_intent += "; renovação clara de curiosidade sem choque gratuito"
@@ -345,8 +369,10 @@ def _scene_from_chunk(
         emotion=emotional_intent,
         canvas_width=canvas_width,
         canvas_height=canvas_height,
+        reserve_caption_safe_area=reserve_caption_safe_area,
     )
     scene_id = f"scene-{index + 1:03d}"
+    narration_block_id = f"audio-block-{index + 1:03d}"
     return Scene(
         scene_id=scene_id,
         order=index + 1,
@@ -359,6 +385,11 @@ def _scene_from_chunk(
         narrative_function=function,
         prompt=prompt,
         image_id=f"image-{index + 1:03d}",
+        image_source_mode=image_source_mode,
+        image_source_path=image_source_path,
+        narration_block_id=narration_block_id,
+        visual_relation=visual_relation,
+        visual_brief=subject,
         approval=ApprovalStatus.PENDING,
     )
 
@@ -382,6 +413,16 @@ def build_scenes(
     continuity = read_model(layout.continuity, ContinuityBible)
     project = layout.load_manifest()
     render_config = project.config.render
+    narration_block_planning = (
+        project.video_format == "short"
+        and project.config.images.scene_planning_standard == "narration_block_visual_v1"
+        and target_scene_seconds is None
+    )
+    visual_strategy = (
+        read_model(layout.shorts_script_strategy, ShortsScriptStrategy)
+        if narration_block_planning
+        else None
+    )
     input_hash = sha256_value(
         {
             "algorithm": SCENE_ALGORITHM_VERSION,
@@ -391,6 +432,11 @@ def build_scenes(
             "palette": palette,
             "continuity": continuity,
             "creative_contract": contract,
+            "scene_planning_standard": project.config.images.scene_planning_standard,
+            "composition_safety_mode": project.config.images.composition_safety_mode,
+            "spoken_reference_image_mode": (project.config.images.spoken_reference_image_mode),
+            "spoken_reference_image_path": (project.config.images.spoken_reference_image_path),
+            "visual_scenes": visual_strategy.visual_scenes if visual_strategy else None,
             "target_scene_seconds": target_scene_seconds,
             "short_verse_visual_change_seconds": (
                 project.config.shorts_script.verse_visual_change_seconds
@@ -407,59 +453,113 @@ def build_scenes(
         recurring = _continuity_lines(continuity)
         scenes: list[Scene] = []
         contract_beats = {beat.section_id: beat for beat in contract.beats}
-        for section_index, section in enumerate(script.sections):
-            high_impact_opening = (
-                section_index == 0
-                and section.role == "opening"
-                and (
-                    project.video_format == "short"
-                    or project.config.long_form_script.narrative_standard
-                    in {"retention_story_long_v1", "creative_retention_long_v2"}
-                )
-            )
-            retention_reset = "reengagement" in contract_beats[section.section_id].functions
-            section_seconds = _scene_seconds_for_section(
-                contract,
-                section,
-                explicit_seconds=target_scene_seconds,
-            )
-            section_target_words = (
-                max(
-                    8,
-                    round(
-                        145
-                        / 60
-                        * (
-                            project.config.shorts_script.verse_visual_change_seconds
-                            if project.video_format == "short"
-                            else section_seconds
-                        )
-                    ),
-                )
-                if high_impact_opening
-                else max(8, round(145 / 60 * section_seconds))
-            )
-            chunks = _split_long_text(
-                section.narration,
-                section_target_words,
-                allow_clause_breaks=high_impact_opening,
-            )
-            for chunk_index, chunk in enumerate(chunks):
+        section_by_id = {section.section_id: section for section in script.sections}
+        reserve_caption_safe_area = (
+            project.config.images.composition_safety_mode == "caption_safe_area_v1"
+        )
+        fixed_reference_section_id = (
+            visual_strategy.cinematic_devotional.reference_section_id
+            if visual_strategy is not None
+            and visual_strategy.cinematic_devotional is not None
+            and project.config.images.spoken_reference_image_mode == "fixed_profile_asset_v1"
+            else None
+        )
+        if visual_strategy is not None:
+            if not visual_strategy.visual_scenes:
+                raise ValueError("O padrão narration_block_visual_v1 exige strategy.visual_scenes.")
+            for planned in visual_strategy.visual_scenes:
+                section = section_by_id.get(planned.section_id)
+                if section is None:
+                    raise ValueError(
+                        f"O plano visual referencia uma seção inexistente: {planned.section_id}."
+                    )
+                retention_reset = "reengagement" in contract_beats[section.section_id].functions
+                uses_fixed_reference_image = planned.section_id == fixed_reference_section_id
                 scenes.append(
                     _scene_from_chunk(
                         section,
-                        chunk,
+                        planned.narration,
                         len(scenes),
                         style,
                         palette,
                         recurring,
                         render_config.width,
                         render_config.height,
-                        high_impact_opening=high_impact_opening,
-                        opening_anchor=high_impact_opening and chunk_index == 0,
                         retention_reset=retention_reset,
+                        visual_brief=(
+                            FIXED_SPOKEN_REFERENCE_VISUAL_BRIEF
+                            if uses_fixed_reference_image
+                            else planned.scene_description
+                        ),
+                        visual_relation=(
+                            "contextual" if uses_fixed_reference_image else planned.visual_relation
+                        ),
+                        image_source_mode=(
+                            "fixed_profile_asset_v1" if uses_fixed_reference_image else "generated"
+                        ),
+                        image_source_path=(
+                            project.config.images.spoken_reference_image_path
+                            if uses_fixed_reference_image
+                            else None
+                        ),
+                        reserve_caption_safe_area=reserve_caption_safe_area,
                     )
                 )
+        else:
+            for section_index, section in enumerate(script.sections):
+                high_impact_opening = (
+                    section_index == 0
+                    and section.role == "opening"
+                    and (
+                        project.video_format == "short"
+                        or project.config.long_form_script.narrative_standard
+                        in {"retention_story_long_v1", "creative_retention_long_v2"}
+                    )
+                )
+                retention_reset = "reengagement" in contract_beats[section.section_id].functions
+                section_seconds = _scene_seconds_for_section(
+                    contract,
+                    section,
+                    explicit_seconds=target_scene_seconds,
+                )
+                section_target_words = (
+                    max(
+                        8,
+                        round(
+                            145
+                            / 60
+                            * (
+                                project.config.shorts_script.verse_visual_change_seconds
+                                if project.video_format == "short"
+                                else section_seconds
+                            )
+                        ),
+                    )
+                    if high_impact_opening
+                    else max(8, round(145 / 60 * section_seconds))
+                )
+                chunks = _split_long_text(
+                    section.narration,
+                    section_target_words,
+                    allow_clause_breaks=high_impact_opening,
+                )
+                for chunk_index, chunk in enumerate(chunks):
+                    scenes.append(
+                        _scene_from_chunk(
+                            section,
+                            chunk,
+                            len(scenes),
+                            style,
+                            palette,
+                            recurring,
+                            render_config.width,
+                            render_config.height,
+                            high_impact_opening=high_impact_opening,
+                            opening_anchor=high_impact_opening and chunk_index == 0,
+                            retention_reset=retention_reset,
+                            reserve_caption_safe_area=reserve_caption_safe_area,
+                        )
+                    )
         if not scenes:
             raise ValueError("O roteiro não produziu nenhuma cena.")
         if (
@@ -469,14 +569,25 @@ def build_scenes(
             and target_scene_seconds is None
             and layout.shorts_script_strategy.is_file()
             and not (
-                project.config.shorts_script.target_scene_min
+                (
+                    3
+                    if project.config.shorts_script.generation_mode
+                    == "deterministic_compact_visual_plan_v1"
+                    else project.config.shorts_script.target_scene_min
+                )
                 <= len(scenes)
                 <= project.config.shorts_script.target_scene_max
             )
         ):
+            minimum_scene_count = (
+                3
+                if project.config.shorts_script.generation_mode
+                == "deterministic_compact_visual_plan_v1"
+                else project.config.shorts_script.target_scene_min
+            )
             raise ValueError(
                 "O padrão criativo de Shorts precisa produzir de "
-                f"{project.config.shorts_script.target_scene_min} a "
+                f"{minimum_scene_count} a "
                 f"{project.config.shorts_script.target_scene_max} cenas; "
                 f"o roteiro atual produziu {len(scenes)}."
             )

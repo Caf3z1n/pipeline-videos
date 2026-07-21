@@ -34,10 +34,10 @@ from pipeline_videos.state import (
 from pipeline_videos.storage import ProjectLayout, read_json, read_model, write_json
 from pipeline_videos.utils import relative_posix, sha256_file, sha256_value, utc_now
 
-CODEX_QUEUE_SCHEMA_VERSION = "1.6"
+CODEX_QUEUE_SCHEMA_VERSION = "1.7"
 
 
-def _scene_prompt_payload(scenes: SceneManifest) -> dict[str, Any]:
+def _scene_prompt_payload(layout: ProjectLayout, scenes: SceneManifest) -> dict[str, Any]:
     """Return only inputs that affect an image, excluding mutable workflow state."""
     return {
         "script_version": scenes.script_version,
@@ -49,6 +49,15 @@ def _scene_prompt_payload(scenes: SceneManifest) -> dict[str, Any]:
                 "image_id": scene.image_id,
                 "order": scene.order,
                 "prompt": scene.prompt.assembled_prompt,
+                "image_source_mode": scene.image_source_mode,
+                "image_source_path": scene.image_source_path,
+                "image_source_hash": (
+                    sha256_file(layout.root / scene.image_source_path)
+                    if scene.image_source_mode == "fixed_profile_asset_v1"
+                    and scene.image_source_path
+                    and (layout.root / scene.image_source_path).is_file()
+                    else None
+                ),
             }
             for scene in scenes.scenes
         ],
@@ -114,10 +123,93 @@ def _manifest_matches(manifest: ImageManifest, scenes: SceneManifest) -> bool:
     if manifest.palette_id != scenes.palette_id:
         return False
     expected = [
-        (scene.image_id, scene.scene_id, scene.prompt.assembled_prompt) for scene in scenes.scenes
+        (
+            scene.image_id,
+            scene.scene_id,
+            scene.prompt.assembled_prompt,
+            scene.image_source_mode,
+            scene.image_source_path,
+        )
+        for scene in scenes.scenes
     ]
-    current = [(item.image_id, item.scene_id, item.prompt) for item in manifest.items]
+    current = [
+        (item.image_id, item.scene_id, item.prompt, item.source_mode, item.source_path)
+        for item in manifest.items
+    ]
     return current == expected
+
+
+def _fixed_profile_asset_path(layout: ProjectLayout, item: ImageItem) -> Path:
+    if item.source_mode != "fixed_profile_asset_v1" or not item.source_path:
+        raise ValueError(f"A cena {item.scene_id} não declara um ativo fixo válido.")
+    source = (layout.root / item.source_path).resolve()
+    try:
+        source.relative_to(layout.root.resolve())
+    except ValueError as exc:
+        raise ValueError(f"Caminho inseguro para ativo fixo: {item.source_path}") from exc
+    if not source.is_file():
+        raise FileNotFoundError(f"Ativo visual fixo não encontrado: {source}")
+    return source
+
+
+def _materialize_fixed_profile_assets(
+    layout: ProjectLayout,
+    scenes: SceneManifest,
+    manifest: ImageManifest,
+) -> tuple[bool, bool]:
+    manifest_changed = False
+    scenes_changed = False
+    scene_by_id = {scene.scene_id: scene for scene in scenes.scenes}
+    for item in manifest.items:
+        if item.source_mode != "fixed_profile_asset_v1":
+            continue
+        source = _fixed_profile_asset_path(layout, item)
+        source_hash = sha256_file(source)
+        current = next(
+            (
+                version
+                for version in item.versions
+                if version.provider == "profile-fixed-asset"
+                and version.prompt_hash == item.prompt_hash
+                and version.metadata.get("source_hash") == source_hash
+                and (layout.root / version.path).is_file()
+            ),
+            None,
+        )
+        if current is None:
+            version, destination = _next_version(layout, item, ".png")
+            width, height = _save_imported_png(
+                source,
+                destination,
+                reject_panel_like=False,
+            )
+            current = ImageVersion(
+                version=version,
+                path=relative_posix(destination, layout.root),
+                provider="profile-fixed-asset",
+                prompt_hash=item.prompt_hash,
+                created_at=utc_now(),
+                metadata={
+                    "asset_role": "spoken_reference",
+                    "source_path": item.source_path,
+                    "source_hash": source_hash,
+                    "width": width,
+                    "height": height,
+                    "sha256": sha256_file(destination),
+                },
+            )
+            item.versions.append(current)
+            manifest_changed = True
+        if item.active_version != current.version or item.status != StageStatus.COMPLETED:
+            item.active_version = current.version
+            item.status = StageStatus.COMPLETED
+            item.last_error = None
+            manifest_changed = True
+        scene = scene_by_id[item.scene_id]
+        if scene.generation_status != StageStatus.COMPLETED:
+            scene.generation_status = StageStatus.COMPLETED
+            scenes_changed = True
+    return manifest_changed, scenes_changed
 
 
 def _write_scenes_if_changed(
@@ -216,12 +308,20 @@ def build_image_manifest(
     """Build the portable image manifest while preserving every existing version."""
     scenes = read_model(layout.scenes, SceneManifest)
     selected = _selected_ids(scenes, scene_id)
-    input_hash = sha256_value(_scene_prompt_payload(scenes))
+    input_hash = sha256_value(_scene_prompt_payload(layout, scenes))
 
     existing: ImageManifest | None = None
     if layout.images.is_file():
         existing = read_model(layout.images, ImageManifest)
         if not force and _manifest_matches(existing, scenes):
+            manifest_changed, scenes_changed = _materialize_fixed_profile_assets(
+                layout, scenes, existing
+            )
+            if manifest_changed:
+                existing.generated_at = utc_now()
+                write_json(layout.images, existing)
+            if scenes_changed:
+                write_json(layout.scenes, scenes)
             if not stage_is_current(layout, "image_manifest", input_hash):
                 start_stage(layout, "image_manifest", input_hash, provider="scene-manifest")
                 complete_stage(
@@ -249,13 +349,23 @@ def build_image_manifest(
                     scene_id=scene.scene_id,
                     prompt=prompt,
                     prompt_hash=prompt_hash,
+                    source_mode=scene.image_source_mode,
+                    source_path=scene.image_source_path,
                 )
             else:
                 item = previous.model_copy(deep=True)
                 item.scene_id = scene.scene_id
-                prompt_changed = item.prompt_hash != prompt_hash or item.prompt != prompt
+                source_changed = (
+                    item.source_mode != scene.image_source_mode
+                    or item.source_path != scene.image_source_path
+                )
+                prompt_changed = (
+                    item.prompt_hash != prompt_hash or item.prompt != prompt or source_changed
+                )
                 item.prompt = prompt
                 item.prompt_hash = prompt_hash
+                item.source_mode = scene.image_source_mode
+                item.source_path = scene.image_source_path
                 if prompt_changed:
                     item.status = StageStatus.STALE if item.versions else StageStatus.PENDING
                     item.last_error = None
@@ -270,7 +380,10 @@ def build_image_manifest(
             palette_id=scenes.palette_id,
             items=items,
         )
+        _, scenes_changed = _materialize_fixed_profile_assets(layout, scenes, manifest)
         write_json(layout.images, manifest)
+        if scenes_changed:
+            write_json(layout.scenes, scenes)
         complete_stage(
             layout,
             "image_manifest",
@@ -404,7 +517,9 @@ def build_codex_queue(
     pending_items = [
         item
         for item in manifest.items
-        if item.scene_id in selected and (force or not _active_version_is_current(layout, item))
+        if item.scene_id in selected
+        and item.source_mode == "generated"
+        and (force or not _active_version_is_current(layout, item))
     ]
     growth_worker_reserved = (
         project.config.youtube_growth.enabled
@@ -445,7 +560,7 @@ def build_codex_queue(
         queue_items.append(queue_entry)
 
     generated_at = utc_now()
-    source_manifest_hash = sha256_value(_scene_prompt_payload(scenes))
+    source_manifest_hash = sha256_value(_scene_prompt_payload(layout, scenes))
     batch_id = sha256_value(
         {
             "project_id": project.project_id,
@@ -463,6 +578,20 @@ def build_codex_queue(
         "batch_id": batch_id,
         "source_manifest_hash": source_manifest_hash,
         "provider": "codex-built-in-imagegen",
+        "fixed_profile_assets": [
+            {
+                "scene_id": item.scene_id,
+                "source_path": item.source_path,
+                "active_path": (
+                    _version(item, item.active_version).path
+                    if _version(item, item.active_version) is not None
+                    else None
+                ),
+                "role": "spoken_reference",
+            }
+            for item in manifest.items
+            if item.source_mode == "fixed_profile_asset_v1"
+        ],
         "visual_standard": {
             "id": style.visual_standard_id,
             "style_profile": relative_posix(layout.style_profile, layout.root),
@@ -497,9 +626,8 @@ def build_codex_queue(
             "Gerar uma imagem por item com a ferramenta imagegen embutida do Codex.",
             *imagegen_retry_instructions(asset_label="item de imagem"),
             (
-                "Preservar o visual_standard em todas as cenas: animação 3D cinematográfica "
-                "familiar premium, personagens expressivos, formas arredondadas, materiais "
-                "estilizados e iluminação de longa-metragem."
+                f"Preservar o visual_standard {style.visual_standard_id} em todas as cenas: "
+                f"{style.reference_note or style.medium}."
             ),
             (
                 "Cada arquivo deve mostrar uma única composição contínua, um único momento, "
@@ -507,9 +635,8 @@ def build_codex_queue(
                 "díptico, tríptico, tela dividida, cenas empilhadas, faixa branca ou divisor."
             ),
             (
-                "Não reinterpretar o padrão como fotorrealismo, live action, ilustração 2D "
-                "flat, anime, low-poly, boneco de plástico ou render 3D genérico. Não copiar "
-                "personagens ou elementos de filmes existentes."
+                "Aplicar literalmente o estilo, os princípios e as restrições negativas já "
+                "incluídos em cada prompt; não substituir o padrão por outro meio visual."
             ),
             "Cada trabalhador salva somente no staging_path relativo à raiz do projeto.",
             "Trabalhadores não importam, não aprovam e não modificam JSONs compartilhados.",

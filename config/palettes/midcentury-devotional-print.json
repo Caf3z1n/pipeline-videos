@@ -1,0 +1,15 @@
+{
+  "palette_id": "midcentury-devotional-print",
+  "name": "Impressão devocional de 1955",
+  "mood": "calmo, simples, reverente e devocional",
+  "colors": [
+    {"name": "azul céu acinzentado", "hex": "#8FA6B2", "role": "céu e planos atmosféricos"},
+    {"name": "azul profundo dessaturado", "hex": "#405867", "role": "roupas e sombras frias"},
+    {"name": "marfim", "hex": "#EEE7D5", "role": "áreas claras e tecidos"},
+    {"name": "vermelho tijolo moderado", "hex": "#9B5548", "role": "acentos humanos e vestes"},
+    {"name": "terracota", "hex": "#A87055", "role": "solo e arquitetura simples"},
+    {"name": "marrom neutro", "hex": "#746355", "role": "madeira, cabelo e contornos suaves"},
+    {"name": "oliva discreto", "hex": "#79806A", "role": "vegetação e contraponto natural"},
+    {"name": "pele levemente quente", "hex": "#C88F70", "role": "tons de pele naturais e moderados"}
+  ]
+}

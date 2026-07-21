@@ -13,6 +13,11 @@ filosófica, uma incerteza preservada ou uma aplicação. Somente os modos devoc
 conselho prático.
 
 Shorts novos usam `creative_retention_v3`; longos novos usam `creative_retention_long_v2`.
+
+Nos Shorts, a direção criativa também entrega `strategy.visual_scenes`: blocos literais da locução
+com uma cena concreta por bloco e relação `literal`, `contextual` ou `symbolic`. A descrição deve
+variar ação, ambiente, personagem ou objeto quando isso beneficiar a continuidade, sem transformar
+simbolismo em afirmação bíblica factual. O estilo pictórico é acrescentado depois pelo pipeline.
 Projetos existentes preservam o padrão salvo no próprio `project.json` e não são migrados
 implicitamente.
 
@@ -64,8 +69,9 @@ continua impedindo aprovação.
 Shorts padrão novos usam `hook_contract=user_six_v1`: a primeira fala é específica, honesta, tem no
 máximo 12 palavras, termina até dois segundos e corresponde exatamente a uma das seis estruturas
 aceitas. Shorts em `adaptive_compact_v1` usam `cinematic_interruption_v1`: a primeira fala tem de
-duas a oito palavras e parece Jesus interrompendo um pensamento do espectador, como “Olhe para mim.”
-ou “Eu sei que você está cansado.”.
+10 a 12 palavras, começa como uma interrupção direta — por exemplo, “Olhe para mim.” — e continua
+com uma tensão específica ligada ao versículo. O hook é curado no catálogo e não pode ser
+reescrito pelo roteirista.
 Vídeos longos resolvem `hook_policy` como `required`, `optional` ou `none` conforme o modo e o tema.
 Quando não há hook, `opening_line` ainda precisa orientar a cena e entregar valor nos primeiros 40
 segundos; saudação genérica continua proibida.
@@ -97,10 +103,24 @@ Independentemente do modo:
 
 Shorts mantêm ao menos uma citação literal verificada. O perfil padrão usa 8 a 20 segundos. O perfil
 compacto aceita somente fala direta de Jesus, iniciada imediatamente após o hook, e termina com a
-referência fora das aspas; em 15 segundos, a citação vai de 2 a 12,3 segundos e a referência de 12,3
-a 15 segundos. Vídeos longos
+referência fora das aspas; em 15 segundos, o hook vai de 0 a 3,5, a citação de 3,5 a 12,3 segundos e
+a referência de 12,3 a 15 segundos. Vídeos longos
 mantêm o alvo de 0,8 a 1,2 citação por minuto, primeira âncora até 75 segundos, intervalo máximo
 de 105 segundos e no máximo 120 segundos entre a última citação e o fim.
+
+O catálogo combinado contém 557 candidatos. O segmento `compact_jesus` acrescenta 120 falas
+diretas curadas, com hook específico, valor da mensagem e potencial de replay persistidos; há ao
+menos 20 combinações elegíveis para cada duração de 15 a 20 segundos. Os segmentos `general` e
+`long_form_anchor` acrescentam, respectivamente, 180 versos de uso amplo e 100 passagens para
+desenvolvimento longo. O seletor respeita `recommended_formats`, portanto uma âncora exclusiva de
+vídeo longo nunca é usada para preencher um Short.
+
+O segmento `narrative_story` acrescenta 81 histórias, 88 personagens ou grupos indexados e 324
+excertos verificados. Ele só é elegível quando há um personagem solicitado explicitamente. Cada
+pacote inclui uma âncora, o intervalo completo do relato e passagens relacionadas classificadas por
+função narrativa. Um pedido desse tipo usa `character_portrait` por padrão e nunca invade o perfil
+compacto de 15 a 44 segundos. Fragmentos narrativos, portanto, ficam disponíveis para histórias como
+a mulher cananeia, Judas, Pedro ou José, mas permanecem fora dos devocionais compactos.
 
 ## Embalagem editorial
 

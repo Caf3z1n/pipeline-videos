@@ -1,8 +1,10 @@
 import subprocess
+from collections import Counter
 from datetime import date
 
 import pytest
 
+from pipeline_videos.creative_direction import hook_matches_family
 from pipeline_videos.models import (
     USER_SIX_HOOK_FAMILIES,
     ApprovalStatus,
@@ -14,13 +16,18 @@ from pipeline_videos.models import (
     VerseUsageIndex,
     VerseUsageRecord,
 )
+from pipeline_videos.project import compact_narration_word_range, short_literal_verse_word_limit
 from pipeline_videos.shorts_script import spoken_biblical_reference
 from pipeline_videos.storage import read_json, read_model, write_json
 from pipeline_videos.utils import tokenize_words
 from pipeline_videos.verse_selection import (
+    DEFAULT_CURATED_VERSE_BANK,
+    DEFAULT_NARRATIVE_CHARACTER_BANK,
     build_usage_index,
     catalog_capacity_summary,
+    compact_package_word_count,
     create_auto_short,
+    create_auto_video,
     eligible_main_candidate_ids,
     load_verse_catalog,
     reference_tokens,
@@ -93,6 +100,12 @@ def test_reference_normalization_expands_ranges_and_chapters() -> None:
     assert references_overlap("Salmos 56", "Salmo 56:3")
     assert references_overlap("Josué 1:1-9", "Josue 1:9")
     assert not references_overlap("João 14:27", "João 8:12")
+    assert reference_tokens("Levítico 19:18") == {"levitico|19|18"}
+    assert reference_tokens("2 Crônicas 20:12-13") == {
+        "2-cronicas|20|12",
+        "2-cronicas|20|13",
+    }
+    assert reference_tokens("3 João 1:4") == {"3-joao|1|4"}
 
 
 def test_auto_short_reserves_different_verses_and_populates_verified_source(tmp_path) -> None:
@@ -133,7 +146,9 @@ def test_auto_short_reserves_different_verses_and_populates_verified_source(tmp_
     assert manifest.approvals["briefing"].status == ApprovalStatus.PENDING
     assert manifest.config.shorts_script.narrative_standard == "creative_retention_v3"
     assert manifest.config.youtube_growth.title_standard == "creative_pipe_passage_v3"
-    assert manifest.config.images.visual_standard_id == "cinematic-family-3d-v1"
+    assert manifest.config.images.visual_standard_id == "biblical-midcentury-gouache-v1"
+    assert manifest.config.images.scene_planning_standard == "narration_block_visual_v1"
+    assert manifest.config.youtube_growth.thumbnail_generation_mode == "youtube_auto_frame_v1"
     assert (tmp_path / "verse-usage.json").is_file()
     assert first.root != second.root
 
@@ -151,8 +166,17 @@ def test_auto_micro_short_selects_a_verse_that_fits_fifteen_seconds(tmp_path) ->
     assert config.duration_profile == "adaptive_compact_v1"
     assert len(candidate.verse_text.split()) <= config.max_literal_verse_words
     assert candidate.spoken_by == "jesus"
+    assert candidate.candidate_id != "bpm-lucas-6-31"
+    assert config.min_words <= compact_package_word_count(candidate) <= config.max_words
+    assert candidate.compact_hook
+    assert candidate.compact_hook_strength_score >= config.minimum_hook_strength_score
+    assert candidate.compact_message_value_score >= config.minimum_message_value_score
+    assert candidate.compact_rewatch_value_score >= config.minimum_rewatch_value_score
     assert source.excerpt == candidate.verse_text
+    assert source.passage == candidate.reference
+    assert source.context_passage == candidate.context_reference
     assert source.spoken_by == "jesus"
+    assert source.compact_hook == candidate.compact_hook
     assert briefing.creative_mode in {"devotional_application", "pastoral_encouragement"}
     assert briefing.hook_family == "emotional_interruption"
     assert briefing.hook_contract == "cinematic_interruption_v1"
@@ -171,9 +195,13 @@ def test_compact_catalog_contains_clean_direct_speech_that_fits_the_contract(tmp
         for candidate in load_verse_catalog().candidates
         if candidate.spoken_by == "jesus"
         and len(tokenize_words(candidate.verse_text)) <= config.max_literal_verse_words
+        and candidate.compact_hook_strength_score >= config.minimum_hook_strength_score
+        and candidate.compact_message_value_score >= config.minimum_message_value_score
+        and candidate.compact_rewatch_value_score >= config.minimum_rewatch_value_score
+        and config.min_words <= compact_package_word_count(candidate) <= config.max_words
     ]
 
-    assert len(direct_speech) >= 12
+    assert len(direct_speech) >= 4
     for candidate in direct_speech:
         assert not candidate.verse_text.startswith(("“", '"'))
         assert not candidate.verse_text.endswith(("”", '"'))
@@ -181,10 +209,17 @@ def test_compact_catalog_contains_clean_direct_speech_that_fits_the_contract(tmp
             ("jesus lhe disse", "jesus lhes falou", "novamente, portanto, jesus")
         )
         narration = (
-            f"Olhe para mim. “{candidate.verse_text}” "
+            f"{candidate.compact_hook} “{candidate.verse_text}” "
             f"{spoken_biblical_reference(candidate.reference)}."
         )
         assert config.min_words <= len(tokenize_words(narration)) <= config.max_words
+
+    lucas = next(
+        candidate
+        for candidate in load_verse_catalog().candidates
+        if candidate.candidate_id == "bpm-lucas-6-31"
+    )
+    assert compact_package_word_count(lucas) < config.min_words
 
 
 def test_selector_prefers_short_familiar_clear_verse_when_other_factors_match() -> None:
@@ -244,6 +279,182 @@ def test_expansion_bank_is_loaded_with_verified_unique_candidates() -> None:
     )
     assert all(candidate.verse_text.strip() for candidate in catalog.candidates)
     assert all("Domínio público" in candidate.rights_note for candidate in catalog.candidates)
+
+
+def test_curated_multiformat_bank_has_the_promised_400_candidates() -> None:
+    bank = read_model(DEFAULT_CURATED_VERSE_BANK, VerseCatalog)
+    counts = Counter(candidate.catalog_segment for candidate in bank.candidates)
+
+    assert len(bank.candidates) == 400
+    assert counts == {
+        "compact_jesus": 120,
+        "general": 180,
+        "long_form_anchor": 100,
+    }
+    assert len({candidate.candidate_id for candidate in bank.candidates}) == 400
+    assert len(bank.source_artifact_sha256) == 64
+    assert bank.source_revision == "2026-04-25"
+    assert {candidate.testament for candidate in bank.candidates} == {"old", "new"}
+
+    compact = [
+        candidate for candidate in bank.candidates if candidate.catalog_segment == "compact_jesus"
+    ]
+    assert all(candidate.spoken_by == "jesus" for candidate in compact)
+    assert all(candidate.source_text_scope == "direct_speech_excerpt" for candidate in compact)
+    assert all(not candidate.reference.startswith("João 17:") for candidate in compact)
+    assert all(candidate.themes[0] != "kingdom" for candidate in compact)
+    assert all(10 <= len(tokenize_words(candidate.compact_hook)) <= 12 for candidate in compact)
+    assert all(
+        hook_matches_family(candidate.compact_hook, "emotional_interruption")
+        for candidate in compact
+    )
+    assert all(candidate.compact_hook_strength_score >= 0.9 for candidate in compact)
+    assert all(candidate.compact_message_value_score >= 0.9 for candidate in compact)
+    assert all(candidate.compact_rewatch_value_score >= 0.88 for candidate in compact)
+    assert all("short" in candidate.recommended_formats for candidate in compact)
+    assert all(
+        compact_package_word_count(candidate)
+        == len(
+            tokenize_words(
+                f"{candidate.compact_hook} {candidate.verse_text} "
+                f"{spoken_biblical_reference(candidate.reference)}"
+            )
+        )
+        for candidate in compact
+    )
+    blocked_fragments = (
+        "raça de víboras",
+        "espírito imundo",
+        "ranger de dentes",
+        "um homem, dono de uma casa",
+    )
+    assert all(
+        not any(fragment in candidate.verse_text.casefold() for fragment in blocked_fragments)
+        for candidate in compact
+    )
+
+    long_form = [
+        candidate
+        for candidate in bank.candidates
+        if candidate.catalog_segment == "long_form_anchor"
+    ]
+    assert all(candidate.recommended_formats == ["long"] for candidate in long_form)
+    assert len({candidate.book for candidate in long_form}) >= 60
+    assert len({candidate.book for candidate in bank.candidates}) == 66
+
+
+def test_narrative_character_bank_has_verified_story_packages() -> None:
+    bank = read_model(DEFAULT_NARRATIVE_CHARACTER_BANK, VerseCatalog)
+
+    assert len(bank.candidates) == 81
+    assert len({character for item in bank.candidates for character in item.characters}) == 88
+    assert sum(1 + len(item.related_passages) for item in bank.candidates) == 324
+    assert len(bank.source_artifact_sha256) == 64
+    assert bank.source_revision == "2026-04-25"
+    assert all(item.catalog_segment == "narrative_story" for item in bank.candidates)
+    assert all(item.source_text_scope == "pericope_excerpt" for item in bank.candidates)
+    assert all(item.recommended_formats == ["short", "long"] for item in bank.candidates)
+    assert all(len(item.related_passages) >= 3 for item in bank.candidates)
+    assert all(
+        passage.verse_text.strip() and passage.source_url.startswith("https://ebible.org/")
+        for item in bank.candidates
+        for passage in item.related_passages
+    )
+
+
+def test_narrative_candidates_are_opt_in_and_aliases_select_the_story() -> None:
+    catalog = load_verse_catalog()
+    usage = VerseUsageIndex(generated_at="2026-07-21T00:00:00Z")
+    default_ids = eligible_main_candidate_ids(catalog, usage, video_format="landscape")
+    narrative_ids = {
+        item.candidate_id
+        for item in catalog.candidates
+        if item.catalog_segment == "narrative_story"
+    }
+
+    assert len(narrative_ids) == 81
+    assert default_ids.isdisjoint(narrative_ids)
+
+    selected, _ = select_unused_verse(
+        catalog,
+        usage,
+        video_format="landscape",
+        requested_character="mulher siro-fenícia",
+    )
+
+    assert selected.candidate_id == "bpm-narrative-mulher-cananeia"
+    assert selected.context_reference == "Mateus 15:21-28"
+    assert {item.reference for item in selected.related_passages} == {
+        "Mateus 15:24-28",
+        "Marcos 7:24-26",
+        "Marcos 7:27-30",
+    }
+
+
+def test_character_project_receives_related_sources_and_portrait_mode(tmp_path) -> None:
+    layout, candidate, _ = create_auto_video(
+        projects_dir=tmp_path,
+        target_duration_seconds=540,
+        video_format="landscape",
+        project_date=date(2026, 7, 21),
+        requested_character="Judas",
+    )
+    briefing = read_model(layout.briefing, Briefing)
+    sources = read_model(layout.sources, SourceLibrary)
+
+    assert candidate.candidate_id == "bpm-narrative-judas-iscariotes"
+    assert briefing.creative_mode == "character_portrait"
+    assert briefing.main_passage == "Mateus 26:14-16"
+    assert briefing.complementary_references == [
+        "João 13:21-30",
+        "Mateus 26:47-50",
+        "Mateus 27:3-5",
+    ]
+    assert len(sources.entries) == 4
+    assert all(source.verified and source.excerpt for source in sources.entries)
+
+
+def test_compact_short_rejects_character_story_before_selection(tmp_path) -> None:
+    with pytest.raises(ValueError, match="não entram no perfil compacto"):
+        create_auto_short(
+            projects_dir=tmp_path,
+            target_duration_seconds=20,
+            requested_character="Pedro",
+        )
+
+
+def test_compact_bank_covers_every_duration_from_15_to_20_seconds() -> None:
+    candidates = [
+        candidate
+        for candidate in load_verse_catalog().candidates
+        if candidate.catalog_segment == "compact_jesus"
+    ]
+
+    for duration in range(15, 21):
+        minimum, maximum = compact_narration_word_range(duration)
+        verse_limit = short_literal_verse_word_limit(duration)
+        assert verse_limit is not None
+        eligible = [
+            candidate
+            for candidate in candidates
+            if minimum <= compact_package_word_count(candidate) <= maximum
+            and len(tokenize_words(candidate.verse_text)) <= verse_limit
+        ]
+        assert len(eligible) >= 20, duration
+
+
+def test_long_only_candidates_are_not_eligible_as_short_main_passages() -> None:
+    catalog = load_verse_catalog()
+    usage = VerseUsageIndex(generated_at="2026-07-20T00:00:00Z")
+    short_ids = eligible_main_candidate_ids(catalog, usage, video_format="short")
+    long_only_ids = {
+        candidate.candidate_id
+        for candidate in catalog.candidates
+        if candidate.recommended_formats == ["long"]
+    }
+
+    assert long_only_ids
+    assert short_ids.isdisjoint(long_only_ids)
 
 
 def test_main_passage_eligibility_is_scoped_by_format_and_ignores_supporting_refs() -> None:

@@ -11,6 +11,7 @@ import pytest
 from pipeline_videos.audio import (
     _elevenlabs_source_spec,
     _request_elevenlabs,
+    _validate_compact_narration_audio,
     _validate_tts_text,
     character_alignment_to_words,
     generate_audio,
@@ -25,6 +26,7 @@ from pipeline_videos.models import (
     Scene,
     SceneManifest,
     StageStatus,
+    WordTiming,
     default_elevenlabs_model_id,
     elevenlabs_voice_id_for_variant,
     normalize_elevenlabs_voice_variant,
@@ -200,6 +202,235 @@ def test_audio_inserts_one_second_of_silence_after_quoted_comment_response(
         assert narration.getnframes() == 156_000
 
 
+def test_compact_short_never_inserts_silence_to_match_target_duration(
+    tmp_path: Path,
+) -> None:
+    layout = create_project(
+        "compact-audio",
+        "Short compacto",
+        projects_dir=tmp_path,
+        target_duration_seconds=15,
+        video_format="short",
+    )
+    project = layout.load_manifest()
+    project.config.audio.provider = "mock"
+    layout.save_manifest(project)
+    scenes = [
+        _scene("scene-001", 1, "Olhe para mim"),
+        _scene("scene-002", 2, "Façam assim a elas"),
+        _scene("scene-003", 3, "Lucas capítulo seis versículo trinta e um"),
+    ]
+    scenes[0].section_id = "opening"
+    scenes[1].section_id = "scripture"
+    scenes[2].section_id = "reference"
+    write_json(
+        layout.scenes,
+        SceneManifest(
+            script_version=1,
+            style_profile_id="style",
+            palette_id="palette",
+            total_estimated_duration_seconds=15,
+            scenes=scenes,
+        ),
+    )
+
+    audio = generate_audio(layout)
+
+    first_reference_word = next(word for word in audio.words if word.scene_id == "scene-003")
+    assert first_reference_word.start == pytest.approx(2.625, abs=1 / 48_000)
+    assert audio.duration == 5.25
+    assert all(
+        not any("adaptive_compact" in key for key in segment.usage) for segment in audio.segments
+    )
+    with wave.open(str(layout.narration_audio), "rb") as narration:
+        assert narration.getnframes() == round(audio.duration * 48_000)
+
+    repeated = generate_audio(layout)
+    assert repeated == audio
+    assert not list(layout.audio_segments.glob("*-v002.wav"))
+
+
+def test_compact_narration_is_synthesized_once_and_split_without_sample_loss(
+    tmp_path: Path,
+) -> None:
+    layout = create_project(
+        "continuous-compact-audio",
+        "Short compacto contínuo",
+        projects_dir=tmp_path,
+        target_duration_seconds=15,
+        video_format="short",
+    )
+    project = layout.load_manifest()
+    project.config.audio.provider = "mock"
+    layout.save_manifest(project)
+    scenes = [
+        _scene("scene-001", 1, "Olhe para mim."),
+        _scene("scene-002", 2, "Eu sou a videira verdadeira."),
+        _scene("scene-003", 3, "Todo ramo que dá fruto,"),
+        _scene("scene-004", 4, "ele limpa para que dê mais fruto."),
+        _scene("scene-005", 5, "João capítulo quinze versículos um e dois."),
+    ]
+    for scene, section_id in zip(
+        scenes,
+        ("opening", "scripture", "scripture", "scripture", "reference"),
+        strict=True,
+    ):
+        scene.section_id = section_id
+    write_json(
+        layout.scenes,
+        SceneManifest(
+            script_version=1,
+            style_profile_id="style",
+            palette_id="palette",
+            total_estimated_duration_seconds=15,
+            scenes=scenes,
+        ),
+    )
+
+    audio = generate_audio(layout)
+
+    source_path = next(layout.audio_segments.glob("continuous-group-001-full-narration-v*.wav"))
+    with wave.open(str(source_path), "rb") as source:
+        source_pcm = source.readframes(source.getnframes())
+    derived_pcm: list[bytes] = []
+    for segment in audio.segments:
+        with wave.open(str(layout.root / segment.path), "rb") as derived:
+            derived_pcm.append(derived.readframes(derived.getnframes()))
+
+    assert b"".join(derived_pcm) == source_pcm
+    assert [segment.text for segment in audio.segments[1:4]] == [
+        "Eu sou a videira verdadeira.",
+        "Todo ramo que dá fruto,",
+        "ele limpa para que dê mais fruto.",
+    ]
+    stage = layout.load_manifest().stages["audio"]
+    assert stage.usage["synthesis_segmentation"] == "continuous_narration_v1"
+    assert stage.usage["tts_requests"] == 1
+    assert stage.usage["generated_segments"] == 5
+
+
+def test_compact_audio_quality_gate_rejects_short_narration_and_large_gap(tmp_path: Path) -> None:
+    layout = create_project(
+        "compact-audio-gate",
+        "Short compacto",
+        projects_dir=tmp_path,
+        target_duration_seconds=15,
+        video_format="short",
+    )
+    project = layout.load_manifest()
+    continuous_words = [
+        WordTiming(
+            index=index,
+            word=f"palavra-{index}",
+            start=index * 0.4,
+            end=index * 0.4 + 0.3,
+            scene_id="scene-001",
+        )
+        for index in range(20)
+    ]
+
+    with pytest.raises(ValueError, match="hook ou versículo mais longo"):
+        _validate_compact_narration_audio(
+            project,
+            provider="elevenlabs",
+            duration=9.0,
+            words=continuous_words,
+        )
+
+    words_with_gap = [
+        WordTiming(index=0, word="antes", start=0.0, end=0.5, scene_id="scene-001"),
+        WordTiming(index=1, word="depois", start=6.0, end=6.5, scene_id="scene-002"),
+        WordTiming(index=2, word="fim", start=14.0, end=14.5, scene_id="scene-003"),
+    ]
+    project.config.production.validation_policy = "strict_v1"
+    with pytest.raises(ValueError, match="mensagem, não por silêncio"):
+        _validate_compact_narration_audio(
+            project,
+            provider="elevenlabs",
+            duration=15.0,
+            words=words_with_gap,
+        )
+
+    project.config.production.validation_policy = "completion_first_v1"
+    _validate_compact_narration_audio(
+        project,
+        provider="elevenlabs",
+        duration=15.0,
+        words=words_with_gap,
+    )
+
+
+def test_adaptive_duration_accepts_real_audio_in_range_and_persists_it(tmp_path: Path) -> None:
+    layout = create_project(
+        "compact-audio-range",
+        "Short compacto em faixa",
+        projects_dir=tmp_path,
+        target_duration_seconds=18,
+        duration_min_seconds=15,
+        duration_max_seconds=20,
+        video_format="short",
+    )
+    project = layout.load_manifest()
+    project.config.audio.provider = "mock"
+    layout.save_manifest(project)
+    narration = " ".join(f"palavra{index}" for index in range(44))
+    write_json(
+        layout.scenes,
+        SceneManifest(
+            script_version=1,
+            style_profile_id="style",
+            palette_id="palette",
+            total_estimated_duration_seconds=18,
+            scenes=[_scene("scene-001", 1, narration)],
+        ),
+    )
+
+    audio = generate_audio(layout)
+
+    assert audio.duration == pytest.approx(16.5)
+    manifest = layout.load_manifest()
+    assert manifest.effective_duration_seconds == pytest.approx(16.5)
+    assert any(
+        '"event": "adaptive_duration_settled"' in line
+        for line in layout.events.read_text(encoding="utf-8").splitlines()
+    )
+
+
+def test_content_cache_reuses_segments_when_scene_ids_change(tmp_path: Path) -> None:
+    layout = _project(tmp_path)
+    first = generate_audio(layout)
+    original_bytes = [(layout.root / segment.path).read_bytes() for segment in first.segments]
+    write_json(
+        layout.scenes,
+        SceneManifest(
+            script_version=2,
+            style_profile_id="minimalist-cinematic-flat-vector",
+            palette_id="noite-azul-dourada",
+            total_estimated_duration_seconds=2,
+            scenes=[
+                _scene("renamed-001", 1, "No princípio"),
+                _scene("renamed-002", 2, "havia luz"),
+            ],
+        ),
+    )
+
+    recovered = generate_audio(layout)
+
+    assert [segment.scene_id for segment in recovered.segments] == [
+        "renamed-001",
+        "renamed-002",
+    ]
+    assert [
+        (layout.root / segment.path).read_bytes() for segment in recovered.segments
+    ] == original_bytes
+    assert all(
+        segment.usage.get("recovered_from_content_cache") == 1 for segment in recovered.segments
+    )
+    stage = layout.load_manifest().stages["audio"]
+    assert stage.usage["generated_segments"] == 0
+    assert stage.usage["recovered_segments"] == 2
+
+
 def test_elevenlabs_requires_explicit_external_permission(tmp_path: Path) -> None:
     layout = _project(tmp_path, provider="elevenlabs")
 
@@ -339,6 +570,12 @@ def test_elevenlabs_source_spec_supports_encoded_and_raw_formats() -> None:
 
 def test_legacy_sapi_config_migrates_to_elevenlabs() -> None:
     assert AudioConfig.model_validate({"provider": "sapi"}).provider == "elevenlabs"
+    assert (
+        AudioConfig.model_validate(
+            {"synthesis_segmentation": "continuous_section_v1"}
+        ).synthesis_segmentation
+        == "continuous_section_v1"
+    )
 
 
 def test_elevenlabs_defaults_and_named_voice_variants(

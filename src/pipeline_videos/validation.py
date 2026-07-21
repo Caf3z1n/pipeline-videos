@@ -43,6 +43,18 @@ from pipeline_videos.utils import (
 
 VALIDATION_ALGORITHM_VERSION = "6"
 
+_COMPLETION_FIRST_ADVISORY_PATTERNS = (
+    "O contrato criativo",
+    "contrato criativo marcou hook",
+    "pontos de reengajamento",
+    "A narração compacta é curta demais",
+    "A narração compacta contém uma pausa",
+    "O Short compacto termina com silêncio",
+    "A legenda não cobre a mesma quantidade",
+    "O manifesto de legendas registra uma validação",
+    "títulos distintos",
+)
+
 
 @dataclass
 class ValidationReport:
@@ -66,6 +78,22 @@ class ValidationReport:
             "warnings": self.warnings,
             "checks": self.checks,
         }
+
+
+def _apply_completion_first_policy(report: ValidationReport) -> None:
+    """Demote heuristics while preserving integrity, biblical and publication blockers."""
+
+    retained: list[str] = []
+    for error in report.errors:
+        if any(
+            pattern.casefold() in error.casefold()
+            for pattern in _COMPLETION_FIRST_ADVISORY_PATTERNS
+        ):
+            report.warnings.append(f"[entrega primeiro] {error}")
+        else:
+            retained.append(error)
+    report.errors = retained
+    report.warnings = list(dict.fromkeys(report.warnings))
 
 
 def _canonical_words(text_or_words: str | list[str]) -> list[str]:
@@ -335,6 +363,60 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
             report.warnings.append(
                 "Há mais de dois segundos entre a última palavra e o fim do áudio."
             )
+        shorts_config = manifest.config.shorts_script
+        if (
+            manifest.video_format == "short"
+            and shorts_config.compact_narrative_standard == "cinematic_jesus_devotional_v1"
+        ):
+            narration_ratio = audio.duration / manifest.target_duration_seconds
+            largest_gap = max(
+                (
+                    current.start - previous.end
+                    for previous, current in zip(audio.words, audio.words[1:], strict=False)
+                ),
+                default=0.0,
+            )
+            terminal_silence = audio.duration - audio.words[-1].end
+            report.checks["compact_narration_duration_ratio"] = round(narration_ratio, 4)
+            report.checks["compact_largest_narration_gap_seconds"] = round(largest_gap, 4)
+            report.checks["compact_terminal_silence_seconds"] = round(terminal_silence, 4)
+            if manifest.duration_policy == "adaptive_range_v1":
+                assert manifest.requested_duration_min_seconds is not None
+                assert manifest.requested_duration_max_seconds is not None
+                report.checks["requested_duration_min_seconds"] = (
+                    manifest.requested_duration_min_seconds
+                )
+                report.checks["requested_duration_max_seconds"] = (
+                    manifest.requested_duration_max_seconds
+                )
+                report.checks["effective_duration_seconds"] = audio.duration
+                if not (
+                    manifest.requested_duration_min_seconds
+                    <= audio.duration
+                    <= manifest.requested_duration_max_seconds
+                ):
+                    report.errors.append(
+                        "A duração real da narração ficou fora da faixa solicitada para o Short."
+                    )
+                if (
+                    manifest.effective_duration_seconds is not None
+                    and abs(manifest.effective_duration_seconds - audio.duration) > 0.01
+                ):
+                    report.errors.append(
+                        "A duração efetiva registrada diverge do manifesto de áudio."
+                    )
+            elif narration_ratio < shorts_config.minimum_audio_duration_ratio:
+                report.errors.append(
+                    "A narração compacta é curta demais para a duração-alvo; use hook ou "
+                    "versículo mais longo, sem preenchimento por silêncio."
+                )
+            if largest_gap > shorts_config.maximum_narration_gap_seconds:
+                report.errors.append(
+                    "A narração compacta contém uma pausa longa demais; a mensagem deve "
+                    "preencher a duração do Short."
+                )
+            if terminal_silence > shorts_config.maximum_terminal_silence_seconds:
+                report.errors.append("O Short compacto termina com silêncio excessivo.")
 
         render_mix = manifest.config.render
         report.checks["audio_mix_standard"] = render_mix.audio_mix_standard
@@ -433,18 +515,28 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                         )
                     if manifest.video_format == "short":
                         report.checks["short_cover_timestamp_seconds"] = (
-                            strategy.short_cover_timestamp_seconds or 0.0
+                            strategy.short_cover_timestamp_seconds
                         )
         if manifest.video_format != "short" and (
             not metadata.chapters or re.match(r"^0{1,2}:00(?:\s|$)", metadata.chapters[0]) is None
         ):
             report.warnings.append("Os capítulos do YouTube não começam em 0:00.")
-        if not layout.thumbnail.is_file():
+        youtube_auto_frame = (
+            manifest.video_format == "short"
+            and manifest.config.youtube_growth.thumbnail_generation_mode == "youtube_auto_frame_v1"
+        )
+        report.checks["youtube_thumbnail_mode"] = "auto_frame" if youtube_auto_frame else "custom"
+        if youtube_auto_frame:
+            if manifest.config.render.short_cover_enabled:
+                report.errors.append(
+                    "O modo de frame automático do YouTube não pode inserir capa no render."
+                )
+        elif not layout.thumbnail.is_file():
             if not require_render:
                 report.warnings.append("A thumbnail ainda não foi gerada.")
             else:
                 report.errors.append("A thumbnail está ausente.")
-        else:
+        elif layout.thumbnail.is_file():
             with Image.open(layout.thumbnail) as thumbnail:
                 width, height = thumbnail.size
             report.checks["thumbnail_resolution"] = f"{width}x{height}"
@@ -484,6 +576,17 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
             if layout.final_video.exists():
                 final_data = ffprobe_json(layout.final_video)
                 video_duration = float(final_data.get("format", {}).get("duration", 0))
+                if manifest.duration_policy == "adaptive_range_v1":
+                    assert manifest.requested_duration_min_seconds is not None
+                    assert manifest.requested_duration_max_seconds is not None
+                    if not (
+                        manifest.requested_duration_min_seconds
+                        <= video_duration
+                        <= manifest.requested_duration_max_seconds
+                    ):
+                        report.errors.append(
+                            "A duração do vídeo final ficou fora da faixa solicitada."
+                        )
                 tolerance = max(1 / manifest.config.render.fps, 0.08)
                 report.checks["av_duration_delta"] = round(abs(video_duration - audio.duration), 3)
                 if abs(video_duration - audio.duration) > tolerance:
@@ -499,6 +602,9 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                         height=render_config.height,
                     )
 
+        if manifest.config.production.validation_policy == "completion_first_v1":
+            _apply_completion_first_policy(report)
+            report.checks["validation_policy"] = "completion_first_v1"
         write_json(report_path, report.as_dict())
         lines = [
             "# Relatório de validação",

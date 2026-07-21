@@ -15,6 +15,7 @@ from pipeline_videos.models import (
     DEFAULT_ELEVENLABS_VOICE_ID,
     ELEVENLABS_VOICE_VARIANTS,
     Briefing,
+    SourceLibrary,
 )
 from pipeline_videos.remote_jobs import (
     CodexPhaseSpec,
@@ -85,6 +86,8 @@ def test_remote_request_applies_safe_defaults_and_requires_explicit_external_aut
         _request(duration_seconds=15, creative_mode="character_portrait")
     with pytest.raises(ValueError, match="hook emocional de interrupção"):
         _request(duration_seconds=15, hook_family="nobody_talks_but")
+    with pytest.raises(ValueError, match="Histórias de personagens exigem"):
+        _request(duration_seconds=15, character="Pedro")
     with pytest.raises(ValueError, match="Vídeos longos precisam"):
         _request(video_format="long", duration_seconds=15)
 
@@ -149,7 +152,7 @@ def test_prepare_job_project_enables_local_specialists_without_human_approval(tm
     assert manifest.config.youtube_growth.use_specialist_subagent is True
     assert manifest.config.youtube_growth.title_standard == "creative_pipe_passage_v3"
     assert manifest.config.youtube_growth.title_variants == 1
-    assert manifest.config.youtube_growth.thumbnail_variants == 1
+    assert manifest.config.youtube_growth.thumbnail_variants == 0
     assert manifest.config.audio.voice_id == DEFAULT_ELEVENLABS_VOICE_ID
     assert manifest.config.audio.model_id == DEFAULT_ELEVENLABS_MODEL_ID
     assert manifest.config.youtube_publication.allow_automated_private_review_upload is True
@@ -160,7 +163,7 @@ def test_prepare_job_project_enables_local_specialists_without_human_approval(tm
     assert "crie exatamente os subagentes" in prompt.casefold()
 
 
-def test_prepare_remote_micro_short_preserves_one_image_worker_profile(tmp_path) -> None:
+def test_prepare_remote_micro_short_uses_two_parallel_image_workers(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Confiança", duration_seconds=15))
 
@@ -169,7 +172,11 @@ def test_prepare_remote_micro_short_preserves_one_image_worker_profile(tmp_path)
 
     assert manifest.target_duration_seconds == 15
     assert manifest.config.shorts_script.duration_profile == "adaptive_compact_v1"
-    assert manifest.config.production.image_workers == 1
+    assert manifest.config.production.image_workers == 2
+    assert manifest.config.shorts_script.generation_mode == ("deterministic_compact_visual_plan_v1")
+    assert manifest.config.shorts_script.biblical_review_mode == (
+        "deterministic_verified_compact_v1"
+    )
     assert manifest.config.music.library_profile == "adaptive_compact_devotional_v1"
     briefing = read_model(layout.briefing, Briefing)
     assert briefing.creative_mode == "pastoral_encouragement"
@@ -188,6 +195,20 @@ def test_remote_job_can_select_second_jesus_voice(tmp_path) -> None:
     assert manifest.config.audio.voice_id == ELEVENLABS_VOICE_VARIANTS["jesus_2"]
     decisions = layout.decisions.read_text(encoding="utf-8")
     assert '"voice_variant": "jesus_2"' in decisions
+
+
+def test_remote_character_request_bootstraps_verified_portrait_sources(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(character="Judas", duration_seconds=60))
+
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+    briefing = read_model(layout.briefing, Briefing)
+    sources = read_model(layout.sources, SourceLibrary)
+
+    assert briefing.creative_mode == "character_portrait"
+    assert briefing.main_passage == "Mateus 26:14-16"
+    assert len(sources.entries) == 4
+    assert all(source.verified for source in sources.entries)
 
 
 def test_long_script_phase_declares_one_functional_pacing_contract(tmp_path) -> None:
@@ -543,7 +564,7 @@ def test_remote_biblical_review_uses_one_isolated_high_reasoning_reviewer(tmp_pa
     assert spec.expected_outputs == (layout.shorts_biblical_review_staging_file,)
 
 
-def test_shorts_correction_allows_two_checkpoints_in_the_persistent_session(tmp_path) -> None:
+def test_shorts_correction_allows_one_checkpoint_then_fallback(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Esperança"))
     correction_run = RemoteCodexRun(
@@ -556,15 +577,14 @@ def test_shorts_correction_allows_two_checkpoints_in_the_persistent_session(tmp_
         exit_code=0,
     )
 
-    one_correction = job.model_copy(update={"attempts": 1, "codex_runs": [correction_run]})
-    two_corrections = one_correction.model_copy(
-        update={"codex_runs": [correction_run, correction_run]}
-    )
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+    no_correction = job.model_copy(update={"attempts": 1})
+    one_correction = no_correction.model_copy(update={"codex_runs": [correction_run]})
 
-    assert _shorts_script_correction_is_available(one_correction) is True
-    assert _shorts_script_correction_is_available(two_corrections) is False
-    next_attempt = two_corrections.model_copy(update={"attempts": 2})
-    assert _shorts_script_correction_is_available(next_attempt) is True
+    assert _shorts_script_correction_is_available(no_correction, layout) is True
+    assert _shorts_script_correction_is_available(one_correction, layout) is False
+    next_attempt = one_correction.model_copy(update={"attempts": 2})
+    assert _shorts_script_correction_is_available(next_attempt, layout) is True
 
 
 def test_growth_correction_is_one_checkpoint_per_job_attempt(tmp_path) -> None:

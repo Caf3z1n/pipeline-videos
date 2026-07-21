@@ -106,7 +106,7 @@ def test_manifest_and_codex_queue_are_idempotent_and_can_target_one_scene(
     assert queue["items"][0]["expected_path"] == "images/assets/scene-002/v001.png"
     assert queue["items"][0]["staging_path"] == "images/staging/scene-002-v001.png"
     assert queue["items"][0]["worker_id"] == "image-worker-1"
-    assert queue["schema_version"] == "1.6"
+    assert queue["schema_version"] == "1.7"
     retry_policy = queue["generation_retry_policy"]
     assert retry_policy["max_attempts_per_item"] == 3
     assert retry_policy["same_prompt_attempts"] == 2
@@ -114,10 +114,8 @@ def test_manifest_and_codex_queue_are_idempotent_and_can_target_one_scene(
     assert "apparent_age" in retry_policy["immutable_on_alternative"]
     assert queue["visual_standard"]["id"] == "cinematic-family-3d-v1"
     assert queue["visual_standard"]["enforced"] is True
-    assert any(
-        "animação 3D cinematográfica" in instruction for instruction in queue["instructions"]
-    )
-    assert any("boneco de plástico" in instruction for instruction in queue["instructions"])
+    assert any("cinematic-family-3d-v1" in instruction for instruction in queue["instructions"])
+    assert any("restrições negativas" in instruction for instruction in queue["instructions"])
     assert any(
         "uma única composição contínua" in instruction for instruction in queue["instructions"]
     )

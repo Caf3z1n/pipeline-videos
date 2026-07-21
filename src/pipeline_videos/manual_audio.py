@@ -58,7 +58,14 @@ def _queue_hash(scene_manifest: SceneManifest, scenes: Sequence[Scene]) -> str:
     return sha256_value(
         {
             "script_version": scene_manifest.script_version,
-            "scenes": [{"scene_id": scene.scene_id, "text": scene.narration} for scene in scenes],
+            "scenes": [
+                {
+                    "scene_id": scene.scene_id,
+                    "narration_block_id": scene.narration_block_id,
+                    "text": scene.narration,
+                }
+                for scene in scenes
+            ],
             "provider": "local_manual",
             "aligner": LOCAL_ALIGNER_VERSION,
         }
@@ -306,6 +313,7 @@ def import_manual_audio(
             segments.append(
                 AudioSegment(
                     scene_id=scene.scene_id,
+                    narration_block_id=scene.narration_block_id,
                     version=1,
                     text=scene.narration,
                     input_hash=sha256_value({"audio": input_hash, "scene": scene.scene_id}),

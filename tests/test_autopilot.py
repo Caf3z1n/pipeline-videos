@@ -10,6 +10,7 @@ from pipeline_videos import cli
 from pipeline_videos.autopilot import (
     AutopilotResult,
     collect_external_waits,
+    prepare_local_coordinator_job,
     wait_until_external_ready,
 )
 from pipeline_videos.models import StageStatus
@@ -75,6 +76,28 @@ def test_external_waits_become_ready_without_model_rounds(tmp_path) -> None:
 
     ready = wait_until_external_ready(layout, timeout_seconds=1, poll_seconds=0.01)
     assert ready[0]["ready"] is True
+
+
+def test_local_coordinator_job_is_isolated_and_completion_first(tmp_path) -> None:
+    layout = create_project(
+        "coordenador-compacto",
+        "Coordenador compacto",
+        projects_dir=tmp_path,
+        target_duration_seconds=18,
+        duration_min_seconds=15,
+        duration_max_seconds=20,
+        video_format="short",
+        project_date=date(2026, 7, 21),
+    )
+
+    job = prepare_local_coordinator_job(layout)
+
+    assert job["orchestration"]["coordinator_role"] == "local_video_coordinator"
+    assert job["orchestration"]["fork_turns"] == "none"
+    assert job["external_roles"]["image_workers"]["maximum_parallel"] == 2
+    assert job["policies"]["validation_policy"] == "completion_first_v1"
+    assert job["policies"]["token_budget_behavior"] == "fallback_then_continue"
+    assert layout.coordinator_job.is_file()
 
 
 def test_autopilot_cli_reports_compact_external_pause(tmp_path, monkeypatch) -> None:

@@ -42,8 +42,8 @@ def test_music_stage_randomly_selects_copies_and_reuses_track(tmp_path) -> None:
     assert selected.path == "audio/music/segunda.wav"
     assert selected.mix_standard == "voice_music_loudness_v1"
     assert selected.narration_target_lufs == -18.0
-    assert selected.background_music_target_lufs == -34.0
-    assert selected.background_music_gap_lu == 16.0
+    assert selected.background_music_target_lufs == -31.0
+    assert selected.background_music_gap_lu == 13.0
     assert (layout.root / selected.path).read_bytes() == b"segunda-faixa"
     manifest = layout.load_manifest()
     assert manifest.config.render.background_music_path == selected.path

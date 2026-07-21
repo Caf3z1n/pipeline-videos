@@ -13,7 +13,7 @@ from pipeline_videos.models import (
     StageStatus,
     StyleProfile,
 )
-from pipeline_videos.project import create_project
+from pipeline_videos.project import DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_PATH, create_project
 from pipeline_videos.review import approve_briefing
 from pipeline_videos.state import set_approval
 from pipeline_videos.storage import read_json, read_model, resolve_project, write_json
@@ -171,7 +171,7 @@ def test_missing_versioned_config_keeps_legacy_script_contracts() -> None:
     assert config.youtube_growth.title_standard == "passage_pipe_topic_v1"
 
 
-def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> None:
+def test_new_short_project_uses_painterly_block_profile_without_custom_cover(tmp_path) -> None:
     layout = create_project(
         "davi-golias-short",
         "Davi e Golias em 1 minuto",
@@ -198,12 +198,12 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.render.background_music_path is None
     assert manifest.config.render.audio_mix_standard == "voice_music_loudness_v1"
     assert manifest.config.render.narration_target_lufs == -18.0
-    assert manifest.config.render.background_music_gap_lu == 16.0
+    assert manifest.config.render.background_music_gap_lu == 13.0
     assert manifest.config.render.narration_true_peak_dbfs == -2.0
     assert manifest.config.render.background_music_true_peak_dbfs == -9.0
     assert manifest.config.render.narration_gain_db == 0.0
     assert manifest.config.render.background_music_gain_db == 0.0
-    assert manifest.config.render.short_cover_enabled is True
+    assert manifest.config.render.short_cover_enabled is False
     assert manifest.config.render.short_cover_duration_seconds == pytest.approx(1 / 30)
     assert manifest.config.render.background_blur_profile == "functional_caption_focus_v1"
     assert manifest.config.render.background_blur_opening_sigma == 8.0
@@ -213,20 +213,28 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.render.background_blur_closing_sigma == 8.0
     assert manifest.config.render.caption_focus_blur_extra_sigma == 0.0
     assert manifest.config.youtube_growth.title_variants == 1
-    assert manifest.config.youtube_growth.thumbnail_variants == 1
+    assert manifest.config.youtube_growth.thumbnail_variants == 0
     assert manifest.config.youtube_growth.description_standard == "search_first_unique_v2"
-    assert manifest.config.youtube_growth.thumbnail_reference_mode == "opening_scene_edit_v1"
+    assert manifest.config.youtube_growth.thumbnail_generation_mode == "youtube_auto_frame_v1"
+    assert manifest.config.youtube_growth.thumbnail_reference_mode == "none_v1"
+    assert manifest.config.youtube_growth.thumbnail_standard == "youtube_auto_frame_v1"
     assert manifest.config.youtube_growth.title_standard == "creative_pipe_passage_v3"
-    assert manifest.config.youtube_growth.thumbnail_typography_standard == (
-        "integrated_extruded_3d_v1"
-    )
+    assert manifest.config.youtube_growth.thumbnail_typography_standard == "no_text_v1"
     assert manifest.config.youtube_publication.category_id == "22"
     assert manifest.config.images.height > manifest.config.images.width
-    assert manifest.config.images.visual_standard_id == "cinematic-family-3d-v1"
+    assert manifest.config.images.visual_standard_id == "biblical-midcentury-gouache-v1"
     assert manifest.config.images.enforce_visual_standard is True
+    assert manifest.config.images.scene_planning_standard == "narration_block_visual_v1"
+    assert manifest.config.images.composition_safety_mode == "unrestricted_scene_v1"
+    assert manifest.config.images.spoken_reference_image_mode == "fixed_profile_asset_v1"
+    assert (
+        manifest.config.images.spoken_reference_image_path
+        == DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_PATH
+    )
+    assert (layout.root / DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_PATH).is_file()
     style = read_model(layout.style_profile, StyleProfile)
-    assert style.visual_standard_id == "cinematic-family-3d-v1"
-    assert "Animação 3D Bíblica Cinematográfica" in style.name
+    assert style.visual_standard_id == "biblical-midcentury-gouache-v1"
+    assert "guache" in style.name.casefold()
     assert manifest.config.captions.font_file == ("visual/fonts/files/Montserrat-ExtraBold.ttf")
     assert manifest.config.captions.margin_bottom == 310
     assert manifest.config.captions.vertical_position == "center"
@@ -238,6 +246,29 @@ def test_new_short_project_uses_vertical_render_and_safe_captions(tmp_path) -> N
     assert manifest.config.captions.max_words_per_line == 3
     assert manifest.config.captions.highlight_card_radius == 24
     assert manifest.config.captions.word_arrival_animation is True
+
+
+def test_short_can_explicitly_use_the_legacy_3d_thumbnail_profile(tmp_path) -> None:
+    layout = create_project(
+        "short-3d-regressao",
+        "Short 3D",
+        projects_dir=tmp_path,
+        target_duration_seconds=60,
+        video_format="short",
+        style_id="cinematic-family-3d-animation",
+        project_date=date(2026, 7, 14),
+    )
+
+    manifest = layout.load_manifest()
+    assert manifest.config.images.visual_standard_id == "cinematic-family-3d-v1"
+    assert manifest.config.images.scene_planning_standard == "section_visual_direction_v1"
+    assert manifest.config.images.composition_safety_mode == "caption_safe_area_v1"
+    assert manifest.config.images.spoken_reference_image_mode == "generated"
+    assert manifest.config.images.spoken_reference_image_path is None
+    assert manifest.config.render.short_cover_enabled is True
+    assert manifest.config.youtube_growth.thumbnail_variants == 1
+    assert manifest.config.youtube_growth.thumbnail_generation_mode == "integrated_imagegen_v1"
+    assert manifest.config.youtube_growth.thumbnail_reference_mode == "opening_scene_edit_v1"
     assert manifest.config.audio.voice_id == DEFAULT_ELEVENLABS_VOICE_ID
     assert manifest.config.audio.model_id == DEFAULT_ELEVENLABS_MODEL_ID
     assert (layout.root / manifest.config.captions.font_file).is_file()
@@ -290,17 +321,36 @@ def test_fifteen_second_short_uses_compact_duration_profile(tmp_path) -> None:
     assert config.require_emotional_interruption_hook is True
     assert config.require_reference_after_quote is True
     assert config.require_no_cta is True
-    assert (config.min_words, config.max_words) == (17, 44)
-    assert (config.retention_target_min_seconds, config.retention_target_max_seconds) == (13, 15)
+    assert (config.min_words, config.max_words) == (41, 46)
+    assert (config.retention_target_min_seconds, config.retention_target_max_seconds) == (14.1, 15)
     assert (
         config.scripture_citation_min_start_seconds,
         config.scripture_citation_max_end_seconds,
-    ) == (2, 12.3)
+    ) == (3.5, 12.3)
+    assert (config.hook_min_words, config.hook_max_words) == (10, 12)
+    assert config.hook_target_seconds == 3.5
+    assert config.estimated_narration_wpm == 170
+    assert config.minimum_estimated_duration_ratio == 0.92
+    assert config.minimum_audio_duration_ratio == 0.94
+    assert config.maximum_narration_gap_seconds == 1.0
+    assert config.minimum_hook_strength_score == 0.9
+    assert config.minimum_message_value_score == 0.9
+    assert config.minimum_rewatch_value_score == 0.88
     assert config.max_literal_verse_words == 28
+    assert config.allow_contiguous_multi_verse_citations is True
+    assert config.multi_verse_citation_policy == "when_necessary_or_beneficial_for_continuity"
     assert (config.minimum_sections, config.minimum_retention_beats) == (3, 3)
-    assert (config.target_scene_min, config.target_scene_max) == (3, 4)
+    assert (config.target_scene_min, config.target_scene_max) == (5, 6)
     assert manifest.config.music.library_profile == "adaptive_compact_devotional_v1"
-    assert manifest.config.production.image_workers == 1
+    assert manifest.config.production.image_workers == 2
+    assert config.generation_mode == "deterministic_compact_visual_plan_v1"
+    assert config.biblical_review_mode == "deterministic_verified_compact_v1"
+    assert config.require_independent_biblical_review is False
+    assert manifest.config.youtube_growth.generation_mode == "compact_metadata_draft_v1"
+    assert manifest.config.youtube_growth.validation_mode == "advisory_seo_v1"
+    assert manifest.config.production.validation_policy == "completion_first_v1"
+    assert manifest.config.production.token_budget_behavior == "fallback_then_continue"
+    assert manifest.config.production.max_model_repairs_per_stage == 1
     briefing = read_model(layout.briefing, Briefing)
     assert briefing.creative_mode == "pastoral_encouragement"
     assert briefing.interpretive_stance == "devotional"
@@ -316,3 +366,40 @@ def test_fifteen_second_short_uses_compact_duration_profile(tmp_path) -> None:
             target_duration_seconds=15,
             video_format="landscape",
         )
+
+
+def test_twenty_second_short_scales_literal_quote_limit_without_padding(tmp_path) -> None:
+    layout = create_project(
+        "micro-short-vinte",
+        "Short de vinte segundos",
+        projects_dir=tmp_path,
+        target_duration_seconds=20,
+        video_format="short",
+        project_date=date(2026, 7, 20),
+    )
+
+    config = layout.load_manifest().config.shorts_script
+    assert (config.min_words, config.max_words) == (55, 62)
+    assert config.max_literal_verse_words == 47
+    assert config.minimum_audio_duration_ratio == 0.94
+
+
+def test_compact_short_can_persist_an_adaptive_duration_range(tmp_path) -> None:
+    layout = create_project(
+        "micro-short-faixa",
+        "Short entre quinze e vinte segundos",
+        projects_dir=tmp_path,
+        target_duration_seconds=18,
+        duration_min_seconds=15,
+        duration_max_seconds=20,
+        video_format="short",
+        project_date=date(2026, 7, 21),
+    )
+
+    manifest = layout.load_manifest()
+
+    assert manifest.duration_policy == "adaptive_range_v1"
+    assert manifest.requested_duration_min_seconds == 15
+    assert manifest.requested_duration_max_seconds == 20
+    assert manifest.target_duration_seconds == 18
+    assert manifest.effective_duration_seconds is None

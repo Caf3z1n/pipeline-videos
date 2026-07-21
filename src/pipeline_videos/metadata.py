@@ -425,10 +425,15 @@ def approve_metadata(layout: ProjectLayout, *, decided_by: str, note: str | None
     metadata = read_model(layout.metadata, YouTubeMetadata)
     if not metadata.title.strip() or not metadata.description.strip():
         raise ValueError("Título e descrição precisam estar completos antes da aprovação.")
-    if not layout.thumbnail.is_file():
+    project = layout.load_manifest()
+    youtube_auto_frame = (
+        project.video_format == "short"
+        and project.config.youtube_growth.thumbnail_generation_mode == "youtube_auto_frame_v1"
+    )
+    if not youtube_auto_frame and not layout.thumbnail.is_file():
         raise FileNotFoundError("Importe ou gere uma thumbnail antes de aprovar os metadados.")
     thumbnail_manifest = layout.thumbnail.parent / "thumbnail-manifest.json"
-    if thumbnail_manifest.is_file():
+    if thumbnail_manifest.is_file() and not youtube_auto_frame:
         thumbnail_state = read_json(thumbnail_manifest)
         thumbnail_state.update(
             {
@@ -449,7 +454,7 @@ def approve_metadata(layout: ProjectLayout, *, decided_by: str, note: str | None
             {
                 "metadata": sha256_file(layout.metadata),
                 "description": sha256_file(layout.description),
-                "thumbnail": sha256_file(layout.thumbnail),
+                "thumbnail": None if youtube_auto_frame else sha256_file(layout.thumbnail),
             }
         ),
     )

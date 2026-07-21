@@ -4,10 +4,12 @@ import json
 import os
 import re
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageOps
+from pydantic import ValidationError
 
 from pipeline_videos.analytics import compact_metric_learning
 from pipeline_videos.imagegen_retry import (
@@ -19,13 +21,16 @@ from pipeline_videos.models import (
     ApprovalStatus,
     AudioManifest,
     Briefing,
+    CompactGrowthDraft,
     ImageManifest,
     SceneManifest,
     ScriptDocument,
     SourceLibrary,
     StageStatus,
     YouTubeGrowthPackage,
+    YouTubeGrowthStrategy,
     YouTubeMetadata,
+    YouTubePromiseMatch,
     YouTubeThumbnailDesign,
 )
 from pipeline_videos.script import ensure_creative_contract
@@ -45,8 +50,9 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-GROWTH_QUEUE_SCHEMA_VERSION = "1.15"
-GROWTH_ALGORITHM_VERSION = "1.15"
+GROWTH_QUEUE_SCHEMA_VERSION = "1.16"
+GROWTH_ALGORITHM_VERSION = "1.16"
+YOUTUBE_AUTO_FRAME_CONCEPT = "O YouTube selecionará automaticamente um frame do vídeo."
 SHORT_TITLE_MAX_CHARACTERS = 70
 SHORT_DESCRIPTION_MAX_CHARACTERS = 600
 SHORT_DESCRIPTION_MIN_CHARACTERS = 260
@@ -77,6 +83,21 @@ SEO_REQUIRED_GUIDELINES = frozenset(
         "https://support.google.com/youtube/answer/146402",
     }
 )
+
+
+@dataclass(frozen=True)
+class GrowthStagingCheck:
+    valid: bool
+    errors: tuple[str, ...]
+    warnings: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "valid": self.valid,
+            "errors": list(self.errors),
+            "warnings": list(self.warnings),
+        }
+
 
 _GENERIC_DESCRIPTION_CTA_PATTERNS = (
     r"\bcompartilhe esta mensagem\b",
@@ -227,6 +248,7 @@ def _growth_context_payload(layout: ProjectLayout) -> dict[str, Any]:
                     "principles",
                     "negative_constraints",
                     "visual_standard_id",
+                    "reference_note",
                 )
             },
             "palette": {key: palette.get(key) for key in ("palette_id", "name", "mood", "colors")},
@@ -269,6 +291,147 @@ def _active_scene_image_source(layout: ProjectLayout, scene_id: str) -> Path:
     return source
 
 
+def _compact_growth_context(full_context: dict[str, Any]) -> dict[str, Any]:
+    contract = full_context["creative_contract"]
+    return {
+        "schema_version": "1.0",
+        "project": {
+            "project_id": full_context["project"]["project_id"],
+            "title": full_context["project"]["title"],
+            "video_format": full_context["project"]["video_format"],
+        },
+        "main_passage": contract["main_passage"],
+        "target_viewer": contract["target_viewer"],
+        "content_promise": contract["content_promise"],
+        "opening_hook": contract["opening_hook"],
+        "viewer_takeaway": contract["viewer_takeaway"],
+        "source_ids": contract["source_ids"],
+        "section_ids": [item["section_id"] for item in full_context["script_outline"]["sections"]],
+        "sources": full_context["sources"],
+        "requirements": {
+            "title": "Enfoque concreto | Passagem, com até 70 caracteres.",
+            "description": "Direta, única, natural e sem falar do próprio Short.",
+            "topics": "Tags relevantes sem #; qualidade é preferível a preenchimento mecânico.",
+            "thumbnail": "Nenhuma; o YouTube selecionará um frame do vídeo.",
+        },
+    }
+
+
+def _prepare_compact_growth_queue(
+    layout: ProjectLayout,
+    *,
+    input_hash: str,
+    job_id: str,
+    full_context: dict[str, Any],
+) -> dict[str, Any]:
+    project = layout.load_manifest()
+    config = project.config.youtube_growth
+    context = _compact_growth_context(full_context)
+    write_json(layout.growth_context, context)
+    payload: dict[str, Any] = {
+        "schema_version": GROWTH_QUEUE_SCHEMA_VERSION,
+        "generated_at": utc_now(),
+        "project_id": project.project_id,
+        "job_id": job_id,
+        "input_hash": input_hash,
+        "generation_mode": "compact_metadata_draft_v1",
+        "validation_mode": "advisory_seo_v1",
+        "contract_guard": {
+            "input_hash": full_context["creative_contract"]["input_hash"],
+            "content_promise": full_context["creative_contract"]["content_promise"],
+            "opening_hook": full_context["creative_contract"]["opening_hook"],
+            "hook_used": full_context["creative_contract"].get("hook_used", True),
+            "opening_scene_id": full_context["opening_scene"]["scene_id"],
+        },
+        "status": StageStatus.WAITING_EXTERNAL.value,
+        "role": config.specialist_role,
+        "orchestration": {
+            "mode": "subagent",
+            "worker_id": "youtube-growth-specialist",
+            "single_writer": True,
+            "may_modify_project_state": False,
+            "may_publish": False,
+            "reasoning_effort": "medium",
+            "recommended_model": "gpt-5.6-sol",
+            "context_policy": "metadata_draft_only",
+            "fork_turns": "none",
+        },
+        "inputs": {
+            "compact_context": relative_posix(layout.growth_context, layout.root),
+            "thumbnail_visual_reference_scene_id": None,
+            "thumbnail_visual_reference_path": None,
+            "thumbnail_theme": None,
+            "thumbnail_prompt": None,
+        },
+        "outputs": {
+            "package": relative_posix(layout.growth_package_staging, layout.root),
+            "title_count": 1,
+            "thumbnails": [],
+            "thumbnail_count": 0,
+            "thumbnail_design_count": 0,
+            "thumbnail_source_mode": "youtube_auto_frame",
+            "thumbnail_reference_mode": "none_v1",
+            "thumbnail_size": [project.config.render.width, project.config.render.height],
+            "thumbnail_role": "youtube_selected_frame",
+            "external_image_generation_required": False,
+            "text_overlay_required": False,
+            "imagegen_text_authority": False,
+            "text_forbidden": True,
+            "title_standard": config.title_standard,
+            "description_standard": config.description_standard,
+            "thumbnail_standard": config.thumbnail_standard,
+            "thumbnail_typography_standard": config.thumbnail_typography_standard,
+            "title_thumbnail_pairing_standard": config.title_thumbnail_pairing_standard,
+        },
+        "schemas": {
+            "package": compact_json_schema(CompactGrowthDraft.model_json_schema()),
+        },
+        "preflight": {
+            "read_only": True,
+            "command": (
+                f'uv run pipeline-videos metadata growth-check-staging "{project.project_id}"'
+            ),
+            "success_condition": "valid=true",
+            "returns_all_detectable_errors": True,
+            "max_model_repairs": project.config.production.max_model_repairs_per_stage,
+            "fallback_command": (
+                f'uv run pipeline-videos metadata growth-fallback "{project.project_id}"'
+            ),
+        },
+        "instructions": [
+            "Leia somente inputs.compact_context.",
+            "Crie um único título, descrição, palavras-chave, tags e comentário fixado.",
+            "Não crie thumbnail, prompt visual, designs, testes A/B ou variações.",
+            "Trate SEO como hipótese e não invente volume de busca, CTR ou alcance.",
+            "Repita job_id e input_hash exatamente e grave somente outputs.package.",
+            (
+                "Execute preflight.command; se houver erros, faça no máximo uma correção "
+                "agregada. Persistindo erro, execute preflight.fallback_command e encerre."
+            ),
+            "Não altere arquivos fora do staging e não publique.",
+        ],
+    }
+    invalidate(
+        layout,
+        stages=("metadata", "thumbnail", "validation"),
+        approvals=("metadata", "final_render"),
+        note="Um novo rascunho compacto de metadados foi solicitado.",
+    )
+    start_stage(layout, "youtube_growth", input_hash, provider="compact-metadata-draft")
+    write_json(layout.growth_queue, payload)
+    wait_stage(
+        layout,
+        "youtube_growth",
+        input_hash,
+        "Aguardando somente o rascunho compacto de metadados.",
+        [
+            relative_posix(layout.growth_queue, layout.root),
+            relative_posix(layout.growth_context, layout.root),
+        ],
+    )
+    return payload
+
+
 def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[str, Any]:
     project = layout.load_manifest()
     config = project.config.youtube_growth
@@ -292,6 +455,13 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         )
 
     is_short = project.video_format == "short"
+    auto_frame_short = (
+        is_short
+        and config.thumbnail_generation_mode == "youtube_auto_frame_v1"
+        and config.thumbnail_reference_mode == "none_v1"
+        and config.thumbnail_standard == "youtube_auto_frame_v1"
+        and config.thumbnail_variants == 0
+    )
     is_theme_based_long = (
         not is_short
         and config.thumbnail_generation_mode == "theme_prompt_imagegen_v1"
@@ -300,7 +470,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         and config.thumbnail_typography_standard == "no_text_v1"
     )
     single_agent_mode = not config.use_specialist_subagent
-    requires_opening_reference = not is_theme_based_long
+    requires_opening_reference = not is_theme_based_long and not auto_frame_short
     thumbnail_count = config.thumbnail_variants
     thumbnail_size = (
         [project.config.render.width, project.config.render.height] if is_short else [1280, 720]
@@ -325,6 +495,17 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
     )
     write_json(layout.growth_context, growth_context)
     job_id = f"youtube-growth-{input_hash[:16]}"
+    if (
+        auto_frame_short
+        and config.generation_mode == "compact_metadata_draft_v1"
+        and config.title_variants == 1
+    ):
+        return _prepare_compact_growth_queue(
+            layout,
+            input_hash=input_hash,
+            job_id=job_id,
+            full_context=growth_context,
+        )
     pair_count_label = (
         "um par editorial completo"
         if config.title_variants == 1
@@ -369,7 +550,9 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         "inputs": {
             "compact_context": relative_posix(layout.growth_context, layout.root),
             "thumbnail_visual_reference_scene_id": (
-                None if is_theme_based_long else growth_context["opening_scene"]["scene_id"]
+                None
+                if is_theme_based_long or auto_frame_short
+                else growth_context["opening_scene"]["scene_id"]
             ),
             "thumbnail_visual_reference_path": (
                 relative_posix(opening_reference, layout.root) if opening_reference else None
@@ -382,13 +565,17 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         "visual_standard": {
             "id": project.config.images.visual_standard_id,
             "enforced": project.config.images.enforce_visual_standard,
-            "thumbnail_must_match_scene_images": not is_theme_based_long,
+            "thumbnail_must_match_scene_images": not is_theme_based_long and not auto_frame_short,
             "reference_policy": (
-                "theme_only_no_reference" if is_theme_based_long else "required_opening_scene_image"
+                "youtube_auto_frame"
+                if auto_frame_short
+                else "theme_only_no_reference"
+                if is_theme_based_long
+                else "required_opening_scene_image"
             ),
             "required_prompt_markers": [
                 project.config.images.visual_standard_id,
-                "animação 3D cinematográfica familiar premium",
+                str(growth_context["visual_system"]["style"].get("medium") or ""),
             ],
             "required_typography_prompt_markers": (
                 []
@@ -406,20 +593,31 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
         },
         "outputs": {
             "package": relative_posix(layout.growth_package_staging, layout.root),
+            "title_count": config.title_variants,
             "thumbnails": thumbnail_paths,
             "thumbnail_count": thumbnail_count,
-            "thumbnail_design_count": config.title_variants,
+            "thumbnail_design_count": 0 if auto_frame_short else config.title_variants,
             "thumbnail_source_mode": (
-                "generated_theme_art" if is_theme_based_long else "generated_integrated_art"
+                "youtube_auto_frame"
+                if auto_frame_short
+                else "generated_theme_art"
+                if is_theme_based_long
+                else "generated_integrated_art"
             ),
             "thumbnail_reference_mode": config.thumbnail_reference_mode,
             "thumbnail_size": thumbnail_size,
-            "thumbnail_role": "short_first_frame" if is_short else "custom_thumbnail",
+            "thumbnail_role": (
+                "youtube_selected_frame"
+                if auto_frame_short
+                else "short_first_frame"
+                if is_short
+                else "custom_thumbnail"
+            ),
             "base_art_without_text": is_theme_based_long,
-            "external_image_generation_required": True,
+            "external_image_generation_required": not auto_frame_short,
             "text_overlay_required": False,
-            "imagegen_text_authority": not is_theme_based_long,
-            "text_forbidden": is_theme_based_long,
+            "imagegen_text_authority": not is_theme_based_long and not auto_frame_short,
+            "text_forbidden": is_theme_based_long or auto_frame_short,
             "title_standard": config.title_standard,
             "description_standard": config.description_standard,
             "thumbnail_standard": config.thumbnail_standard,
@@ -450,6 +648,14 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
             },
             "design_contract": (
                 {
+                    "custom_thumbnail_required": False,
+                    "thumbnail_designs_required": 0,
+                    "youtube_selects_frame": True,
+                    "text_must_be_baked_into_bitmap": False,
+                    "paired_variants_required": False,
+                }
+                if auto_frame_short
+                else {
                     "text_word_count": [0, 0],
                     "maximum_lines": 0,
                     "allowed_text_colors": [],
@@ -517,9 +723,19 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
             "Trate SEO, CTR e alcance como hipóteses; nunca prometa viralização ou invente "
             "métricas.",
             "Use somente metric_learning quando houver dados; nunca invente volume de busca.",
-            "Faça título e thumbnail se complementarem sem repetir mecanicamente a mesma frase.",
-            "Associe título e thumbnail pelo mesmo índice: a primeira imagem acompanha o título "
-            "principal.",
+            (
+                "Não crie conceito, prompt, design ou arquivo de thumbnail; o YouTube escolherá "
+                "um frame do próprio vídeo."
+                if auto_frame_short
+                else "Faça título e thumbnail se complementarem sem repetir mecanicamente a "
+                "mesma frase."
+            ),
+            (
+                "Entregue somente as variações de título configuradas, sem pareamento visual."
+                if auto_frame_short
+                else "Associe título e thumbnail pelo mesmo índice: a primeira imagem acompanha "
+                "o título principal."
+            ),
             "Evite clickbait enganoso, excesso de elementos, choque gratuito e violações "
             "das políticas.",
             "Preencha package.json no schema fornecido, repetindo job_id e input_hash da fila.",
@@ -581,7 +797,26 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 ),
             ]
         )
-    if is_theme_based_long:
+    if auto_frame_short:
+        payload["instructions"].extend(
+            [
+                (
+                    "Mantenha metadata.thumbnail_concept exatamente como: "
+                    f"'{YOUTUBE_AUTO_FRAME_CONCEPT}'"
+                ),
+                (
+                    "Deixe metadata.thumbnail_prompt vazio, metadata.thumbnail_alternatives "
+                    "vazio, strategy.thumbnail_designs vazio e "
+                    "strategy.short_cover_timestamp_seconds nulo."
+                ),
+                (
+                    "Em thumbnail_rationale e title_thumbnail_complement, registre apenas que "
+                    "não existe capa personalizada neste perfil e que a seleção do frame cabe ao "
+                    "YouTube. Não chame imagegen e não crie PNG no staging."
+                ),
+            ]
+        )
+    elif is_theme_based_long:
         payload["instructions"].extend(
             [
                 (
@@ -682,7 +917,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                 ),
             ]
         )
-    if is_short:
+    if is_short and not auto_frame_short:
         payload["outputs"]["design_contract"]["top_text_safe_margin_ratio"] = 0.10
         payload["instructions"].append(
             "Somente para esta thumbnail vertical de Short, reserve os 10% superiores do "
@@ -728,7 +963,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                     "exatamente a parte do título antes da barra. Em thumbnail_delivery, copie "
                     + (
                         "metadata.thumbnail_concept."
-                        if is_theme_based_long
+                        if is_theme_based_long or auto_frame_short
                         else "exatamente o texto do primeiro thumbnail_design."
                     )
                 ),
@@ -754,7 +989,7 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
                     "exatamente a parte do título antes da barra. Em thumbnail_delivery, copie "
                     + (
                         "metadata.thumbnail_concept."
-                        if is_theme_based_long
+                        if is_theme_based_long or auto_frame_short
                         else "exatamente o texto do primeiro thumbnail_design."
                     )
                 ),
@@ -1130,6 +1365,321 @@ def _title_repeats_thumbnail(
     return overlap >= 0.8
 
 
+def _load_compact_growth_draft(
+    layout: ProjectLayout,
+    queue: dict[str, Any],
+) -> CompactGrowthDraft:
+    path = _safe_staging_file(layout, queue["outputs"]["package"])
+    draft = CompactGrowthDraft.model_validate(read_json(path))
+    errors: list[str] = []
+    if draft.job_id != queue.get("job_id"):
+        errors.append("job_id não corresponde à fila de crescimento atual.")
+    if draft.input_hash != queue.get("input_hash"):
+        errors.append("input_hash não corresponde à fila de crescimento atual.")
+    if not draft.title.strip():
+        errors.append("O título não pode ficar vazio.")
+    if not draft.description.strip():
+        errors.append("A descrição não pode ficar vazia.")
+    if errors:
+        raise ValueError(" ".join(errors))
+    return draft
+
+
+def _fit_compact_title(title: str, passage: str, fallback: str) -> str:
+    passage = passage.strip()
+    suffix = f" | {passage}" if passage else ""
+    raw = title.strip() or fallback.strip() or "Uma palavra de Jesus"
+    left = raw.split("|", 1)[0].strip()
+    if passage:
+        left = re.sub(re.escape(passage), "", left, flags=re.IGNORECASE)
+    left = left.strip(" -|:;,.!?")
+    if not left:
+        left = fallback.strip() or "Uma palavra de Jesus"
+    maximum_left = max(1, SHORT_TITLE_MAX_CHARACTERS - len(suffix))
+    if len(left) > maximum_left:
+        shortened = left[:maximum_left].rsplit(" ", 1)[0].strip()
+        left = shortened or left[:maximum_left].strip()
+    return f"{left}{suffix}"
+
+
+def _compact_topics(
+    draft: CompactGrowthDraft,
+    *,
+    passage: str,
+    book: str,
+) -> list[str]:
+    candidates = [
+        draft.primary_keyword,
+        passage,
+        book,
+        *draft.secondary_keywords,
+        *draft.topics,
+        "Jesus",
+        "Bíblia",
+        "palavra de Jesus",
+    ]
+    topics: list[str] = []
+    normalized: set[str] = set()
+    for candidate in candidates:
+        value = candidate.replace("#", "").strip(" ,")
+        key = _normalized_search_text(value)
+        if not key or key in normalized:
+            continue
+        proposed = [*topics, value]
+        if len(",".join(proposed)) > 450 or len(proposed) > SEO_TAG_MAX_COUNT:
+            continue
+        topics.append(value)
+        normalized.add(key)
+    return topics
+
+
+def _build_compact_growth_package(
+    layout: ProjectLayout,
+    queue: dict[str, Any],
+    draft: CompactGrowthDraft,
+) -> YouTubeGrowthPackage:
+    briefing = read_model(layout.briefing, Briefing)
+    script = read_model(layout.script, ScriptDocument)
+    context = read_json(layout.growth_context)
+    contract_guard = queue["contract_guard"]
+    passage = briefing.main_passage.strip()
+    title = _fit_compact_title(
+        draft.title,
+        passage,
+        briefing.title or layout.load_manifest().title,
+    )
+    description = draft.description.strip()[:5000]
+    primary_keyword = draft.primary_keyword.strip()
+    book = passage.split()[0] if passage else "Bíblia"
+    topics = _compact_topics(draft, passage=passage, book=book)
+    pinned_comment = draft.pinned_comment.strip() or (
+        f"Qual parte da fala de Jesus em {passage} mais alcançou você?"
+    )
+    title_delivery = title.removesuffix(f" | {passage}").strip()
+    metadata = YouTubeMetadata(
+        status="draft",
+        title=title,
+        alternative_titles=[],
+        description=description,
+        chapters=[],
+        topics=topics,
+        pinned_comment=pinned_comment,
+        thumbnail_concept=YOUTUBE_AUTO_FRAME_CONCEPT,
+        thumbnail_prompt="",
+        thumbnail_alternatives=[],
+        publication_visibility="private",
+    )
+    source_ids = [str(item) for item in context.get("source_ids", [])]
+    section_ids = [str(item) for item in context.get("section_ids", [])]
+    strategy = YouTubeGrowthStrategy(
+        format="short",
+        target_viewer=str(context.get("target_viewer") or "público interessado na passagem"),
+        search_intent=f"Compreender e encontrar uma mensagem sobre {primary_keyword}.",
+        primary_keyword=primary_keyword,
+        secondary_keywords=draft.secondary_keywords,
+        content_promise=str(contract_guard["content_promise"]),
+        opening_hook=str(contract_guard["opening_hook"]),
+        title_rationale=(
+            draft.title_rationale.strip()
+            or "Enfoque concreto seguido da passagem bíblica uma única vez."
+        ),
+        description_rationale=(
+            draft.description_rationale.strip()
+            or "Descrição direta orientada ao assunto e à passagem."
+        ),
+        tag_strategy=(
+            draft.tag_strategy.strip()
+            or "Combinar enfoque, passagem, livro e variações diretamente relevantes."
+        ),
+        discovery_hypothesis=(
+            draft.discovery_hypothesis.strip()
+            or "Clareza temática pode ajudar a escolha de assistir sem prometer distribuição."
+        ),
+        thumbnail_rationale="O YouTube selecionará um frame do próprio vídeo.",
+        title_thumbnail_complement="O título informa o enfoque; o frame preserva a cena narrativa.",
+        promise_match=YouTubePromiseMatch(
+            content_promise=str(contract_guard["content_promise"]),
+            opening_line=str(contract_guard["opening_hook"]),
+            opening_scene_id=str(contract_guard["opening_scene_id"]),
+            title_delivery=title_delivery,
+            thumbnail_delivery=YOUTUBE_AUTO_FRAME_CONCEPT,
+        ),
+        source_ids=source_ids,
+        section_ids=section_ids or [item.section_id for item in script.sections],
+        thumbnail_designs=[],
+        short_cover_timestamp_seconds=None,
+        experiment_plan=[],
+        compliance_checks=[
+            "Sem promessa de viralização ou alcance.",
+            "Sem thumbnail personalizada para o Short.",
+        ],
+        official_guidelines=sorted(SEO_REQUIRED_GUIDELINES),
+    )
+    return YouTubeGrowthPackage(
+        job_id=queue["job_id"],
+        input_hash=queue["input_hash"],
+        metadata=metadata,
+        strategy=strategy,
+    )
+
+
+def _compact_growth_advisories(
+    layout: ProjectLayout,
+    package: YouTubeGrowthPackage,
+) -> list[str]:
+    warnings: list[str] = []
+    metadata = package.metadata
+    strategy = package.strategy
+    briefing = read_model(layout.briefing, Briefing)
+    description = metadata.description.strip()
+    if not SHORT_DESCRIPTION_MIN_CHARACTERS <= len(description) <= SHORT_DESCRIPTION_MAX_CHARACTERS:
+        warnings.append("Descrição fora da faixa editorial recomendada de 260 a 600 caracteres.")
+    if "\n\n" not in description:
+        warnings.append("Descrição sem dois parágrafos distintos.")
+    opening = _normalized_search_text(description[:DESCRIPTION_SEARCH_WINDOW])
+    primary = _normalized_search_text(strategy.primary_keyword)
+    passage = _normalized_search_text(briefing.main_passage)
+    if primary and primary not in opening:
+        warnings.append("Palavra-chave principal ausente da abertura da descrição.")
+    if passage and passage not in opening:
+        warnings.append("Passagem principal ausente da abertura da descrição.")
+    if primary and primary not in _normalized_search_text(metadata.title[:55]):
+        warnings.append(
+            "Palavra-chave principal não aparece nos primeiros 55 caracteres do título."
+        )
+    normalized_description = _normalized_search_text(description)
+    if any(
+        re.search(pattern, normalized_description) for pattern in _GENERIC_DESCRIPTION_CTA_PATTERNS
+    ):
+        warnings.append("Descrição contém CTA genérico.")
+    if any(
+        re.search(pattern, normalized_description)
+        for pattern in _SELF_REFERENTIAL_DESCRIPTION_PATTERNS
+    ):
+        warnings.append("Descrição se refere ao próprio vídeo ou Short.")
+    tags = [item.strip() for item in metadata.topics if item.strip()]
+    normalized_tags = [_normalized_search_text(item) for item in tags]
+    if not SEO_TAG_MIN_COUNT <= len(tags) <= SEO_TAG_MAX_COUNT:
+        warnings.append("Quantidade de tags fora da recomendação de 8 a 15.")
+    if len(set(normalized_tags)) != len(normalized_tags):
+        warnings.append("Há tags repetidas.")
+    if len(",".join(tags)) > SEO_TAG_MAX_CHARACTERS:
+        warnings.append("Tags excedem o limite editorial recomendado de 350 caracteres.")
+    if primary and primary not in normalized_tags:
+        warnings.append("Palavra-chave principal ausente das tags.")
+    if passage and passage not in normalized_tags:
+        warnings.append("Passagem principal ausente das tags.")
+    if "?" not in metadata.pinned_comment:
+        warnings.append("Comentário fixado não formula uma pergunta.")
+    return list(dict.fromkeys(warnings))
+
+
+def _validate_compact_growth_package(
+    layout: ProjectLayout,
+    package: YouTubeGrowthPackage,
+    queue: dict[str, Any],
+) -> None:
+    if package.job_id != queue.get("job_id") or package.input_hash != queue.get("input_hash"):
+        raise RuntimeError("O rascunho de metadados pertence a uma fila antiga.")
+    if package.strategy.format != "short":
+        raise ValueError("O rascunho compacto precisa permanecer no formato Short.")
+    if not package.metadata.title.strip() or len(package.metadata.title) > 100:
+        raise ValueError("O título final precisa ter de 1 a 100 caracteres.")
+    if not package.metadata.description.strip() or len(package.metadata.description) > 5000:
+        raise ValueError("A descrição final precisa ter de 1 a 5000 caracteres.")
+    if package.strategy.content_promise != queue["contract_guard"]["content_promise"]:
+        raise ValueError("A promessa editorial foi alterada.")
+    if package.strategy.opening_hook != queue["contract_guard"]["opening_hook"]:
+        raise ValueError("A primeira fala contratada foi alterada.")
+    if package.strategy.thumbnail_designs:
+        raise ValueError("O modo automático do YouTube não aceita thumbnail_designs.")
+    if (
+        package.metadata.thumbnail_concept != YOUTUBE_AUTO_FRAME_CONCEPT
+        or package.metadata.thumbnail_prompt.strip()
+        or package.metadata.thumbnail_alternatives
+    ):
+        raise ValueError("O Short compacto precisa manter a seleção automática de frame.")
+    sources = read_model(layout.sources, SourceLibrary)
+    script = read_model(layout.script, ScriptDocument)
+    if not set(package.strategy.source_ids).issubset({item.source_id for item in sources.entries}):
+        raise ValueError("A estratégia referencia source_id inexistente.")
+    if not set(package.strategy.section_ids).issubset(
+        {item.section_id for item in script.sections}
+    ):
+        raise ValueError("A estratégia referencia section_id inexistente.")
+
+
+def check_growth_package_staging(layout: ProjectLayout) -> GrowthStagingCheck:
+    try:
+        if not layout.growth_queue.is_file():
+            raise FileNotFoundError(f"Fila do especialista ausente: {layout.growth_queue}")
+        queue = read_json(layout.growth_queue)
+        if queue.get("generation_mode") == "compact_metadata_draft_v1":
+            draft = _load_compact_growth_draft(layout, queue)
+            package = _build_compact_growth_package(layout, queue, draft)
+            _validate_compact_growth_package(layout, package, queue)
+            warnings = tuple(_compact_growth_advisories(layout, package))
+            return GrowthStagingCheck(True, (), warnings)
+        package_path = _safe_staging_file(layout, queue["outputs"]["package"])
+        package = read_model(package_path, YouTubeGrowthPackage)
+        _validate_package(layout, package, queue)
+        return GrowthStagingCheck(True, (), ())
+    except ValidationError as exc:
+        return GrowthStagingCheck(
+            False,
+            tuple(
+                f"{'.'.join(str(item) for item in error['loc'])}: {error['msg']}"
+                for error in exc.errors()
+            ),
+        )
+    except (FileNotFoundError, KeyError, RuntimeError, TypeError, ValueError) as exc:
+        return GrowthStagingCheck(False, (str(exc),))
+
+
+def materialize_compact_growth_fallback(layout: ProjectLayout) -> CompactGrowthDraft:
+    if not layout.growth_queue.is_file():
+        raise FileNotFoundError(f"Fila de crescimento ausente: {layout.growth_queue}")
+    queue = read_json(layout.growth_queue)
+    if queue.get("generation_mode") != "compact_metadata_draft_v1":
+        raise RuntimeError("A fila atual não usa o rascunho compacto de metadados.")
+    context = read_json(layout.growth_context)
+    briefing = read_model(layout.briefing, Briefing)
+    theme = briefing.central_theme.strip() or briefing.title.strip() or "Uma palavra de Jesus"
+    passage = briefing.main_passage.strip()
+    promise = str(context.get("content_promise") or theme)
+    description = (
+        f"{theme} em {passage}: {promise.rstrip('.')} com uma fala direta e verificada de Jesus. "
+        "A passagem preserva a citação literal e encerra com sua referência bíblica exata.\n\n"
+        f"{passage} apresenta a resposta de Jesus sem comentário adicional, convite genérico ou "
+        "promessa de resultado. A mensagem mantém o foco no sentido bíblico e na experiência "
+        "humana indicada pelo próprio trecho."
+    )
+    draft = CompactGrowthDraft(
+        job_id=queue["job_id"],
+        input_hash=queue["input_hash"],
+        title=theme[:100],
+        description=description,
+        primary_keyword=theme[:80],
+        secondary_keywords=[passage, "fala de Jesus", "mensagem bíblica"],
+        topics=[theme, passage, "Jesus", "Bíblia", "palavra de Jesus"],
+        pinned_comment=f"Qual frase de {passage} você quer guardar hoje?",
+        title_rationale="Enfoque concreto seguido da passagem.",
+        description_rationale="Resumo direto do assunto e da fonte bíblica.",
+        tag_strategy="Tema, passagem, livro e busca diretamente relacionada.",
+        discovery_hypothesis=(
+            "Clareza pode facilitar a escolha de assistir, sem garantia de alcance."
+        ),
+    )
+    write_json(layout.growth_package_staging, draft)
+    layout.append_event(
+        {
+            "event": "compact_growth_fallback_materialized",
+            "job_id": queue["job_id"],
+        }
+    )
+    return draft
+
+
 def _validate_search_first_seo(
     layout: ProjectLayout,
     package: YouTubeGrowthPackage,
@@ -1231,6 +1781,9 @@ def _validate_search_first_seo(
 def _validate_package(
     layout: ProjectLayout, package: YouTubeGrowthPackage, queue: dict[str, Any]
 ) -> None:
+    if queue.get("generation_mode") == "compact_metadata_draft_v1":
+        _validate_compact_growth_package(layout, package, queue)
+        return
     if queue.get("schema_version") != GROWTH_QUEUE_SCHEMA_VERSION:
         raise ValueError("A versão da fila de crescimento não é mais suportada.")
     if package.job_id != queue.get("job_id") or package.input_hash != queue.get("input_hash"):
@@ -1245,8 +1798,9 @@ def _validate_package(
         raise ValueError(f"O pacote precisa de exatamente {required_titles} títulos distintos.")
     outputs = queue.get("outputs", {})
     expected_designs = int(outputs.get("thumbnail_design_count", 0))
-    if not expected_designs:
-        raise ValueError("A fila precisa declarar thumbnail_design_count.")
+    auto_frame_short = outputs.get("thumbnail_source_mode") == "youtube_auto_frame"
+    if expected_designs < 0:
+        raise ValueError("A fila declarou thumbnail_design_count inválido.")
     if len(titles) < expected_designs:
         raise ValueError("Cada thumbnail precisa de um título correspondente no mesmo índice.")
     if any(len(title) > 100 for title in titles):
@@ -1328,8 +1882,12 @@ def _validate_package(
             if not (design.narrative_element_target or "").strip():
                 raise ValueError("O elemento narrativo da thumbnail precisa declarar seu alvo.")
     source_mode = outputs.get("thumbnail_source_mode")
-    if source_mode not in {"generated_integrated_art", "generated_theme_art"}:
-        raise ValueError("A fila precisa usar thumbnail gerada pelo modelo.")
+    if source_mode not in {
+        "generated_integrated_art",
+        "generated_theme_art",
+        "youtube_auto_frame",
+    }:
+        raise ValueError("A fila declarou uma política de thumbnail desconhecida.")
     declared_paths = outputs.get("thumbnails", [])
     if len(declared_paths) != int(outputs.get("thumbnail_count", 0)):
         raise ValueError("A fila integrada precisa declarar um arquivo por thumbnail.")
@@ -1337,6 +1895,15 @@ def _validate_package(
         raise ValueError("O pacote de uma única thumbnail não pode declarar alternativas.")
     if outputs.get("text_overlay_required") is not False:
         raise ValueError("A fila integrada não pode solicitar overlay local de texto.")
+    if source_mode == "youtube_auto_frame":
+        if declared_paths or int(outputs.get("thumbnail_count", 0)) != 0:
+            raise ValueError("O modo automático do YouTube não pode declarar arquivos de capa.")
+        if package.strategy.thumbnail_designs:
+            raise ValueError("O modo automático do YouTube não aceita thumbnail_designs.")
+        if metadata.thumbnail_concept != YOUTUBE_AUTO_FRAME_CONCEPT:
+            raise ValueError("O pacote não registrou corretamente a seleção automática de frame.")
+        if metadata.thumbnail_prompt.strip() or metadata.thumbnail_alternatives:
+            raise ValueError("O modo automático do YouTube não aceita prompt ou alternativas.")
     if (
         source_mode == "generated_integrated_art"
         and outputs.get("imagegen_text_authority") is not True
@@ -1372,7 +1939,10 @@ def _validate_package(
             raise ValueError(
                 "Ao menos uma opção de título do Short precisa conter a passagem principal."
             )
-        if package.strategy.short_cover_timestamp_seconds != 0:
+        if auto_frame_short:
+            if package.strategy.short_cover_timestamp_seconds is not None:
+                raise ValueError("O Short sem capa não pode declarar timestamp de primeiro frame.")
+        elif package.strategy.short_cover_timestamp_seconds != 0:
             raise ValueError("A capa do Short precisa ocupar o frame zero.")
     if outputs.get("title_standard") == "passage_pipe_topic_v1":
         briefing = read_model(layout.briefing, Briefing)
@@ -1418,7 +1988,7 @@ def _validate_package(
             raise ValueError("title_delivery precisa copiar o enfoque antes da barra.")
         expected_thumbnail_delivery = (
             metadata.thumbnail_concept
-            if typography_standard == "no_text_v1"
+            if typography_standard == "no_text_v1" or auto_frame_short
             else package.strategy.thumbnail_designs[0].text
         )
         if promise_match.thumbnail_delivery != expected_thumbnail_delivery:
@@ -1706,37 +2276,57 @@ def import_growth_package(
         raise RuntimeError("Os metadados estão aprovados; use --force para importar nova versão.")
 
     package_path = _safe_staging_file(layout, queue["outputs"]["package"])
-    package = read_model(package_path, YouTubeGrowthPackage)
+    compact_draft_mode = queue.get("generation_mode") == "compact_metadata_draft_v1"
+    if compact_draft_mode:
+        draft = _load_compact_growth_draft(layout, queue)
+        package = _build_compact_growth_package(layout, queue, draft)
+    else:
+        package = read_model(package_path, YouTubeGrowthPackage)
     _validate_package(layout, package, queue)
+    growth_warnings = _compact_growth_advisories(layout, package) if compact_draft_mode else []
+    write_json(
+        layout.growth_warnings,
+        {
+            "generated_at": utc_now(),
+            "validation_mode": ("advisory_seo_v1" if compact_draft_mode else "strict_v1"),
+            "warnings": growth_warnings,
+        },
+    )
     audio = read_model(layout.audio, AudioManifest) if layout.audio.is_file() else None
     scenes = read_model(layout.scenes, SceneManifest)
     source_mode = queue["outputs"].get("thumbnail_source_mode")
-    if source_mode not in {"generated_integrated_art", "generated_theme_art"}:
-        raise ValueError("Apenas thumbnails geradas pelo modelo são suportadas.")
+    if source_mode not in {
+        "generated_integrated_art",
+        "generated_theme_art",
+        "youtube_auto_frame",
+    }:
+        raise ValueError("A política de thumbnail da fila não é suportada.")
+    auto_frame_short = source_mode == "youtube_auto_frame"
     clean_theme_art = source_mode == "generated_theme_art"
     thumbnail_paths = [
         _safe_staging_file(layout, path) for path in queue["outputs"].get("thumbnails", [])
     ]
-    if not thumbnail_paths:
+    if not auto_frame_short and not thumbnail_paths:
         raise ValueError("A fila não declarou fonte de thumbnail para importação.")
-    _validate_thumbnail_sources(thumbnail_paths)
+    if thumbnail_paths:
+        _validate_thumbnail_sources(thumbnail_paths)
 
     metadata = package.metadata.model_copy(
         update={"chapters": _chapters_for_project(layout, scenes, audio)}
     )
-    if project.video_format == "short" and audio:
+    if project.video_format == "short" and audio and not auto_frame_short:
         timestamp = package.strategy.short_cover_timestamp_seconds
         if timestamp is None or timestamp > audio.duration:
             raise ValueError("O timestamp da capa do Short está fora da duração do vídeo.")
 
     size_values = queue["outputs"].get("thumbnail_size", [])
-    if not (
+    if not auto_frame_short and not (
         isinstance(size_values, list)
         and len(size_values) == 2
         and all(isinstance(value, int) and value > 0 for value in size_values)
     ):
         raise ValueError("A fila não definiu dimensões válidas para as thumbnails.")
-    size = (size_values[0], size_values[1])
+    size = (size_values[0], size_values[1]) if not auto_frame_short else None
     first_version = _next_thumbnail_version(layout)
     version_paths = [
         layout.thumbnail.parent / f"thumbnail-v{first_version + index:03d}.png"
@@ -1746,12 +2336,13 @@ def import_growth_package(
     if len(candidate_designs) != len(thumbnail_paths):
         raise ValueError("Cada thumbnail integrada precisa de um design editorial correspondente.")
     for source, destination in zip(thumbnail_paths, version_paths, strict=True):
+        assert size is not None
         _normalize_thumbnail(source, destination, size)
 
-    first_design = candidate_designs[0]
-    first_text = None if clean_theme_art else first_design.text
-    first_accent = None if clean_theme_art else first_design.accent_word
-    first_position = None if clean_theme_art else first_design.text_position
+    first_design = candidate_designs[0] if candidate_designs else None
+    first_text = None if clean_theme_art or first_design is None else first_design.text
+    first_accent = None if clean_theme_art or first_design is None else first_design.accent_word
+    first_position = None if clean_theme_art or first_design is None else first_design.text_position
 
     write_json(layout.metadata, metadata)
     write_json(layout.growth_strategy, package.strategy)
@@ -1761,12 +2352,14 @@ def import_growth_package(
         layout.thumbnail_prompt,
         {
             "schema_version": "2.0",
-            "status": "completed",
+            "status": "skipped" if auto_frame_short else "completed",
             "concept": metadata.thumbnail_concept,
             "prompt": metadata.thumbnail_prompt,
             "alternatives": metadata.thumbnail_alternatives,
             "format_note": (
-                "Capa vertical composta e incorporada ao início do Short."
+                "Sem thumbnail personalizada; o YouTube selecionará um frame do vídeo."
+                if auto_frame_short
+                else "Capa vertical composta e incorporada ao início do Short."
                 if project.video_format == "short"
                 else "Thumbnail horizontal sem texto gerada a partir do tema do vídeo."
             ),
@@ -1777,13 +2370,14 @@ def import_growth_package(
         },
     )
     write_text(layout.description, _description_document(metadata))
-    shutil.copy2(version_paths[0], layout.thumbnail)
+    if version_paths:
+        shutil.copy2(version_paths[0], layout.thumbnail)
     thumbnail_hashes = [sha256_file(path) for path in version_paths]
     write_json(
         layout.thumbnail.parent / "thumbnail-manifest.json",
         {
-            "active_path": relative_posix(version_paths[0], layout.root),
-            "active_hash": thumbnail_hashes[0],
+            "active_path": relative_posix(version_paths[0], layout.root) if version_paths else None,
+            "active_hash": thumbnail_hashes[0] if thumbnail_hashes else None,
             "candidates": [
                 {
                     "path": relative_posix(path, layout.root),
@@ -1801,12 +2395,14 @@ def import_growth_package(
             "approved": False,
             "updated_at": utc_now(),
             "provider": (
-                "imagegen-theme+youtube-growth-specialist"
+                "youtube-auto-frame"
+                if auto_frame_short
+                else "imagegen-theme+youtube-growth-specialist"
                 if clean_theme_art
                 else "imagegen-integrated+youtube-growth-specialist"
             ),
             "text_baked_into_bitmap": not clean_theme_art,
-            "text_forbidden": clean_theme_art,
+            "text_forbidden": clean_theme_art or auto_frame_short,
             "text_overlay": first_text,
             "accent_word": first_accent,
             "text_position": first_position,
@@ -1838,6 +2434,7 @@ def import_growth_package(
             relative_posix(layout.growth_context, layout.root),
             relative_posix(layout.growth_package, layout.root),
             relative_posix(layout.growth_strategy, layout.root),
+            relative_posix(layout.growth_warnings, layout.root),
         ],
         provider="youtube-growth-specialist",
         usage={
@@ -1846,6 +2443,7 @@ def import_growth_package(
             "schema_bytes": len(
                 json.dumps(queue["schemas"]["package"], ensure_ascii=False).encode("utf-8")
             ),
+            "advisory_warnings": len(growth_warnings),
         },
         note="Pacote estratégico do YouTube importado; aprovação humana ainda pendente.",
     )
@@ -1870,18 +2468,15 @@ def import_growth_package(
     )
     thumbnail_hash = sha256_value(thumbnail_hashes)
     thumbnail_artifacts = [relative_posix(path, layout.root) for path in version_paths]
-    thumbnail_artifacts.extend(
-        [
-            relative_posix(layout.thumbnail, layout.root),
-            "youtube/thumbnail-manifest.json",
-        ]
-    )
+    if version_paths:
+        thumbnail_artifacts.append(relative_posix(layout.thumbnail, layout.root))
+    thumbnail_artifacts.append("youtube/thumbnail-manifest.json")
     complete_stage(
         layout,
         "thumbnail",
         thumbnail_hash,
         thumbnail_artifacts,
-        provider="youtube-growth-specialist",
+        provider="youtube-auto-frame" if auto_frame_short else "youtube-growth-specialist",
         usage={
             "candidates": len(version_paths),
             "external_image_generations": len(version_paths),
@@ -1889,7 +2484,9 @@ def import_growth_package(
             "clean_image_generations": len(version_paths) if clean_theme_art else 0,
         },
         note=(
-            "Imagem do versículo reutilizada na capa e composta no primeiro frame do Short."
+            "Thumbnail personalizada desativada; o YouTube selecionará um frame do vídeo."
+            if auto_frame_short
+            else "Imagem do versículo reutilizada na capa e composta no primeiro frame do Short."
             if project.video_format == "short"
             else "Thumbnail temática sem texto pronta para publicação."
         ),
@@ -1899,6 +2496,7 @@ def import_growth_package(
             "event": "youtube_growth_package_imported",
             "job_id": package.job_id,
             "thumbnail_candidates": len(version_paths),
+            "thumbnail_source_mode": source_mode,
             "format": project.video_format,
         }
     )

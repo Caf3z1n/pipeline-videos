@@ -17,24 +17,25 @@ para `short` e `landscape`. Somente outra passagem principal do mesmo formato pa
 de repetição; citações de apoio de vídeos longos podem reaparecer e continuam disponíveis como tema
 principal de Short. O catálogo base é ampliado pelo banco curado BPM antes da seleção. Ao completar
 todo o conjunto, um novo ciclo começa pela menor frequência de uso, preservando reservas ativas.
+O banco `narrative_story` é uma camada opt-in: nomes e aliases filtram a história principal e expandem
+seu pacote de fontes verificadas, sem colocar fragmentos narrativos na rotação automática comum ou
+no perfil compacto.
 
 ```mermaid
 flowchart LR
-    B["Briefing e fontes"] --> S["Roteiro versionado"]
-    S --> R["Revisão bíblica"]
-    R --> C["Cenas e prompts"]
+    B["Briefing e catálogo verificado"] --> S["Locução compacta determinística"]
+    S --> R["Revisão bíblica determinística"]
+    R --> C["Planejamento visual por blocos"]
     C --> I["Até 2 image workers"]
     C --> A["Lane principal: áudio, legendas e música"]
-    C --> G["Especialista YouTube em staging"]
+    C --> G["Rascunho compacto de metadados"]
     A --> L["Alinhamento e legendas"]
     I --> V["Base visual em cache"]
-    I --> T["Short: arte da abertura reutilizável"]
     L --> F["Composição final"]
     V --> F
-    G --> Y["Título, descrição, SEO e thumbnails compostas"]
-    T --> Y
+    G --> Y["Pacote YouTube determinístico e avisos SEO"]
     F --> Y
-    F --> Q["Validação FFprobe e contratos"]
+    F --> Q["Guards técnicos, bíblicos e de publicação"]
     Q --> U["Upload privado ou não listado"]
     U --> P["Publicação ou agendamento explícito"]
 ```
@@ -79,7 +80,10 @@ em qualidade V4 e não registra aprovação humana automaticamente.
 - `AudioManifest`: segmentos, provider, uso e timestamps globais por palavra.
 - `CaptionManifest`: blocos, índices cobertos, caminhos e validação.
 - `YouTubeMetadata`: rascunho, alternativas, capítulos e visibilidade segura.
-- `YouTubeGrowthPackage`: handoff imutável do subagente, vinculado ao hash da fila.
+- `YouTubeGrowthPackage`: pacote final imutável, vinculado ao hash da fila e construído pelo Python
+  a partir do rascunho compacto quando esse modo estiver ativo.
+- `CompactVisualPlan` e `CompactGrowthDraft`: handoffs mínimos; o Python reconstrói os contratos
+  completos e possui os fallbacks seguros.
 - `YouTubeGrowthStrategy`: intenção de busca, palavras-chave, promessa, hipóteses e fontes oficiais.
 - `ExperimentMemory`: hipótese, mudança, vídeos, período, métricas e conclusão cautelosa.
 - `YouTubePublicationRecord`: ID remoto, canal, visibilidade e hashes dos ativos enviados.
@@ -108,21 +112,21 @@ do termo ativo muda. A mudança de cena não interfere na timeline da legenda.
 
 ## Handoffs econômicos
 
-Os especialistas recebem contextos derivados e compactos, mas a importação continua validando o
-pacote contra os modelos Pydantic completos e os arquivos-fonte do projeto:
+Os especialistas recebem contextos derivados e compactos. No perfil compacto, a importação valida o
+handoff mínimo e reconstrói o pacote completo contra os arquivos-fonte do projeto:
 
-- `script/shorts-context.json` reúne briefing, fontes, decisões recentes e versões anteriores;
-- `youtube/growth-context.json` reúne contrato criativo, outline, revisão compacta, abertura visual e
-  no máximo seis experimentos relevantes, sem repetir locução ou prompt montado;
+- `script/shorts-context.json` reúne somente IDs dos blocos, trechos narrados e direção necessária
+  para escolher cenas; o modelo não recebe autoridade para reescrever a locução;
+- `youtube/growth-context.json` reúne somente promessa, passagem e contexto mínimo de busca;
 - `images/jobs/image-worker-N.json` entrega a cada trabalhador somente seus próprios jobs e prompts;
 - os JSON Schemas enviados às filas removem somente metadados de apresentação, preservando tipos,
   enums, referências e campos obrigatórios;
 - os subagentes partem com `fork_turns=none`, evitando herdar o histórico inteiro da conversa;
-- em projetos novos, a fila declara um único bitmap final de thumbnail. Em Shorts, o especialista
-  edita a imagem ativa da abertura e incorpora texto e símbolos com imagegen. Em longos, gera uma
-  imagem horizontal limpa baseada somente no tema central. O importador não cria overlays locais;
-- reutilização de cena e composição Pillow permanecem apenas como compatibilidade para projetos
-  legados. Em Shorts, a candidata integrada é usada no frame zero.
+- no perfil pintado de Shorts, não há bitmap de thumbnail nem frame zero artificial; o YouTube
+  seleciona uma cena. O perfil 3D legado mantém a edição da abertura, e longos geram uma imagem
+  horizontal limpa baseada somente no tema central;
+- prompts de imagem armazenam o prefixo compartilhado uma vez e apenas o delta de cada cena;
+- cada etapa de modelo admite uma correção agregada; persistindo erro, usa fallback determinístico.
 
 ## Autopilot retomável
 

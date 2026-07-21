@@ -15,6 +15,9 @@ output/
 dist/
 *.egg-info/
 
+# Exportações locais não fazem parte do código-fonte.
+exports/
+
 # Projetos reais e artefatos pesados ficam fora do Git por padrão.
 projects/*
 !projects/.gitkeep

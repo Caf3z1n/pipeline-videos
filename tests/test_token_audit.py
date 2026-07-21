@@ -118,6 +118,9 @@ def test_local_token_audit_discovers_stage_roles_and_persists_effective_cost(tmp
     assert payload["codex"]["by_stage"]["coordinator"]["fresh_plus_output_tokens"] == 280
     assert payload["codex"]["by_stage"]["script"]["fresh_plus_output_tokens"] == 150
     assert payload["codex"]["usage"]["fresh_plus_output_tokens"] == 430
+    assert payload["production"]["elapsed_seconds"] >= 0
+    assert payload["production"]["token_budget_behavior"] == "audit_only"
+    assert payload["production"]["fallback_counts"] == {}
     assert (layout.root / "audit/production-metrics.json").is_file()
     report_text = report_path.read_text(encoding="utf-8")
     assert "Análise humana preservada." in report_text

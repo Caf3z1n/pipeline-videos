@@ -25,6 +25,7 @@ from pipeline_videos.models import (
     DEFAULT_ELEVENLABS_VOICE_ID,
     AudioManifest,
     AudioSegment,
+    ProjectManifest,
     Scene,
     SceneManifest,
     StageStatus,
@@ -45,6 +46,7 @@ ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
 ELEVENLABS_ENDPOINT = "https://api.elevenlabs.io/v1/text-to-speech"
 ELEVENLABS_RETRYABLE_STATUSES = frozenset({429, 500, 503})
 ELEVENLABS_MAX_RETRIES = 3
+AUDIO_ALGORITHM_VERSION = "2.1"
 
 _MOCK_WORD_FRAMES = 18_000  # 375 ms at 48 kHz
 _MOCK_SPOKEN_FRAMES = 14_400  # 300 ms at 48 kHz
@@ -86,6 +88,17 @@ class ElevenLabsResponse:
     audio: bytes
     alignment: Mapping[str, Any] | None
     usage: dict[str, int | float | str | None]
+
+
+@dataclass(frozen=True)
+class NarrationGroup:
+    group_id: str
+    section_id: str
+    scenes: tuple[Scene, ...]
+
+    @property
+    def text(self) -> str:
+        return " ".join(scene.narration.strip() for scene in self.scenes)
 
 
 def _validate_tts_text(text: str) -> None:
@@ -228,6 +241,104 @@ def _latest_segment(layout: ProjectLayout, scene_id: str) -> tuple[int, Path] | 
 
 def _segment_destination(layout: ProjectLayout, scene_id: str, version: int) -> Path:
     return layout.audio_segments / f"{_safe_scene_id(scene_id)}-v{version:03d}.wav"
+
+
+def _segment_cache_path(path: Path) -> Path:
+    return path.with_suffix(".cache.json")
+
+
+def _write_segment_cache(
+    path: Path,
+    *,
+    input_hash: str,
+    provider: str,
+    result: SynthesisResult,
+) -> None:
+    """Persist aligned TTS output before project-wide validation runs."""
+
+    write_json(
+        _segment_cache_path(path),
+        {
+            "schema_version": "1.0",
+            "input_hash": input_hash,
+            "provider": provider,
+            "duration_frames": result.duration_frames,
+            "alignment_source": result.alignment_source,
+            "usage": result.usage,
+            "model_id": result.model_id,
+            "voice_id": result.voice_id,
+            "words": [
+                {"word": item.word, "start": item.start, "end": item.end} for item in result.words
+            ],
+        },
+    )
+
+
+def _read_segment_cache(
+    path: Path,
+    *,
+    expected_hash: str,
+    expected_provider: str,
+) -> SynthesisResult | None:
+    cache_path = _segment_cache_path(path)
+    if not path.is_file() or not cache_path.is_file():
+        return None
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        if (
+            payload.get("input_hash") != expected_hash
+            or payload.get("provider") != expected_provider
+        ):
+            return None
+        frames = _validated_wav_frames(path)
+        if int(payload.get("duration_frames", -1)) != frames:
+            return None
+        alignment_source = payload.get("alignment_source")
+        if alignment_source not in {"provider", "simulated"}:
+            return None
+        words = [
+            LocalWord(
+                word=str(item["word"]),
+                start=float(item["start"]),
+                end=float(item["end"]),
+            )
+            for item in payload.get("words", [])
+        ]
+        usage = payload.get("usage")
+        if not isinstance(usage, dict):
+            usage = {}
+        return SynthesisResult(
+            words=_clamp_words(words, frames / TARGET_SAMPLE_RATE),
+            duration_frames=frames,
+            alignment_source=alignment_source,
+            usage={**usage, "recovered_from_content_cache": 1},
+            model_id=payload.get("model_id"),
+            voice_id=payload.get("voice_id"),
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _find_cached_segment(
+    layout: ProjectLayout,
+    *,
+    input_hash: str,
+    provider: str,
+) -> tuple[int, Path, SynthesisResult] | None:
+    candidates: list[tuple[int, Path, SynthesisResult]] = []
+    for cache_path in layout.audio_segments.glob("*-v*.cache.json"):
+        wav_path = cache_path.with_suffix("").with_suffix(".wav")
+        match = _VERSION_RE.search(wav_path.name)
+        if match is None:
+            continue
+        result = _read_segment_cache(
+            wav_path,
+            expected_hash=input_hash,
+            expected_provider=provider,
+        )
+        if result is not None:
+            candidates.append((int(match.group("version")), wav_path, result))
+    return max(candidates, key=lambda item: (item[0], item[1].name)) if candidates else None
 
 
 def _resolve_artifact(layout: ProjectLayout, relative_path: str) -> Path:
@@ -696,7 +807,7 @@ def _scene_input_hash(
 ) -> str:
     return sha256_value(
         {
-            "scene_id": scene.scene_id,
+            "algorithm_version": AUDIO_ALGORITHM_VERSION,
             "text": scene.narration,
             "previous_text": (
                 previous_scene.narration
@@ -718,6 +829,86 @@ def _scene_input_hash(
             "use_speaker_boost": config.use_speaker_boost,
             "output_format": config.output_format if provider == "elevenlabs" else "wav",
             "sample_rate": TARGET_SAMPLE_RATE,
+            "synthesis_segmentation": config.synthesis_segmentation,
+            "comment_response_silence_seconds": config.comment_response_silence_seconds,
+            "mock_contract": 1 if provider == "mock" else None,
+        }
+    )
+
+
+def _continuous_narration_groups(
+    scenes: Sequence[Scene],
+    *,
+    segmentation: str,
+) -> list[NarrationGroup]:
+    if segmentation == "continuous_narration_v1":
+        return [
+            NarrationGroup(
+                group_id="group-001-full-narration",
+                section_id="full-narration",
+                scenes=tuple(scenes),
+            )
+        ]
+    groups: list[NarrationGroup] = []
+    current: list[Scene] = []
+    current_section: str | None = None
+    for scene in scenes:
+        if current and scene.section_id != current_section:
+            groups.append(
+                NarrationGroup(
+                    group_id=f"group-{len(groups) + 1:03d}-{current_section}",
+                    section_id=current_section or "unknown",
+                    scenes=tuple(current),
+                )
+            )
+            current = []
+        current_section = scene.section_id
+        current.append(scene)
+    if current:
+        groups.append(
+            NarrationGroup(
+                group_id=f"group-{len(groups) + 1:03d}-{current_section}",
+                section_id=current_section or "unknown",
+                scenes=tuple(current),
+            )
+        )
+    return groups
+
+
+def _continuous_group_input_hash(
+    group: NarrationGroup,
+    *,
+    previous_group: NarrationGroup | None,
+    next_group: NarrationGroup | None,
+    provider: str,
+    config: Any,
+    voice_id: str | None,
+    model_id: str | None,
+    segmentation: str,
+) -> str:
+    return sha256_value(
+        {
+            "algorithm_version": AUDIO_ALGORITHM_VERSION,
+            "text": group.text,
+            "previous_text": (
+                previous_group.text
+                if provider == "elevenlabs" and previous_group is not None
+                else None
+            ),
+            "next_text": (
+                next_group.text if provider == "elevenlabs" and next_group is not None else None
+            ),
+            "provider": provider,
+            "voice_id": voice_id,
+            "model_id": model_id,
+            "language_code": config.language_code,
+            "stability": config.stability,
+            "similarity_boost": config.similarity_boost,
+            "style": config.style,
+            "use_speaker_boost": config.use_speaker_boost,
+            "output_format": config.output_format if provider == "elevenlabs" else "wav",
+            "sample_rate": TARGET_SAMPLE_RATE,
+            "synthesis_segmentation": segmentation,
             "comment_response_silence_seconds": config.comment_response_silence_seconds,
             "mock_contract": 1 if provider == "mock" else None,
         }
@@ -736,6 +927,107 @@ def _existing_local_words(segment: AudioSegment, duration: float) -> list[LocalW
     return _clamp_words(words, duration)
 
 
+def _validate_compact_narration_audio(
+    project: ProjectManifest,
+    *,
+    provider: str,
+    duration: float,
+    words: Sequence[WordTiming],
+) -> None:
+    shorts = project.config.shorts_script
+    if (
+        provider == "mock"
+        or project.video_format != "short"
+        or shorts.compact_narrative_standard != "cinematic_jesus_devotional_v1"
+    ):
+        return
+    if not words:
+        raise ValueError("O áudio compacto não possui palavras alinhadas.")
+    if project.duration_policy == "adaptive_range_v1":
+        assert project.requested_duration_min_seconds is not None
+        assert project.requested_duration_max_seconds is not None
+        minimum_duration = project.requested_duration_min_seconds
+        maximum_duration = project.requested_duration_max_seconds
+    else:
+        minimum_duration = project.target_duration_seconds * shorts.minimum_audio_duration_ratio
+        maximum_duration = None
+    if duration < minimum_duration:
+        raise ValueError(
+            f"A narração compacta ficou em {duration:.2f}s; precisa chegar a pelo menos "
+            f"{minimum_duration:.2f}s com um hook ou versículo mais longo. O pipeline não "
+            "preencherá a duração restante com silêncio."
+        )
+    if maximum_duration is not None and duration > maximum_duration:
+        raise ValueError(
+            f"A narração compacta ficou em {duration:.2f}s; o limite solicitado é "
+            f"{maximum_duration:.2f}s."
+        )
+    if project.config.production.validation_policy == "completion_first_v1":
+        return
+    largest_gap = max(
+        (current.start - previous.end for previous, current in zip(words, words[1:], strict=False)),
+        default=0.0,
+    )
+    if largest_gap > shorts.maximum_narration_gap_seconds:
+        raise ValueError(
+            f"A narração compacta contém uma pausa de {largest_gap:.2f}s; o máximo é "
+            f"{shorts.maximum_narration_gap_seconds:.2f}s. A duração deve ser preenchida por "
+            "mensagem, não por silêncio."
+        )
+    terminal_silence = duration - words[-1].end
+    if terminal_silence > shorts.maximum_terminal_silence_seconds:
+        raise ValueError(
+            f"A narração compacta termina com {terminal_silence:.2f}s de silêncio; o máximo é "
+            f"{shorts.maximum_terminal_silence_seconds:.2f}s."
+        )
+
+
+def _synthesize_text(
+    *,
+    text: str,
+    previous_text: str | None,
+    next_text: str | None,
+    destination: Path,
+    provider: str,
+    config: Any,
+    voice_id: str | None,
+    model_id: str | None,
+    http_client: HttpPoster | None,
+    sleep: Callable[[float], None],
+    jitter: Callable[[], float],
+) -> SynthesisResult:
+    if provider == "mock":
+        return _synthesize_mock(text, destination)
+    if provider == "elevenlabs":
+        api_key = os.getenv("ELEVENLABS_API_KEY")
+        if not api_key:
+            raise RuntimeError("Defina ELEVENLABS_API_KEY para usar o provedor ElevenLabs.")
+        if not voice_id:
+            raise RuntimeError(
+                "Configure audio.voice_id no projeto ou ELEVENLABS_VOICE_ID no ambiente."
+            )
+        assert model_id is not None
+        return _synthesize_elevenlabs(
+            text,
+            destination,
+            api_key=api_key,
+            voice_id=voice_id,
+            model_id=model_id,
+            output_format=config.output_format,
+            language_code=config.language_code,
+            stability=config.stability,
+            similarity_boost=config.similarity_boost,
+            style=config.style,
+            use_speaker_boost=config.use_speaker_boost,
+            previous_text=previous_text,
+            next_text=next_text,
+            client=http_client,
+            sleep=sleep,
+            jitter=jitter,
+        )
+    raise ValueError(f"Provedor de áudio desconhecido: {provider}")
+
+
 def _synthesize_scene(
     *,
     scene: Scene,
@@ -750,36 +1042,299 @@ def _synthesize_scene(
     sleep: Callable[[float], None],
     jitter: Callable[[], float],
 ) -> SynthesisResult:
-    if provider == "mock":
-        return _synthesize_mock(scene.narration, destination)
-    if provider == "elevenlabs":
-        api_key = os.getenv("ELEVENLABS_API_KEY")
-        if not api_key:
-            raise RuntimeError("Defina ELEVENLABS_API_KEY para usar o provedor ElevenLabs.")
-        if not voice_id:
-            raise RuntimeError(
-                "Configure audio.voice_id no projeto ou ELEVENLABS_VOICE_ID no ambiente."
-            )
-        assert model_id is not None
-        return _synthesize_elevenlabs(
-            scene.narration,
-            destination,
-            api_key=api_key,
-            voice_id=voice_id,
-            model_id=model_id,
-            output_format=config.output_format,
-            language_code=config.language_code,
-            stability=config.stability,
-            similarity_boost=config.similarity_boost,
-            style=config.style,
-            use_speaker_boost=config.use_speaker_boost,
-            previous_text=previous_scene.narration if previous_scene else None,
-            next_text=next_scene.narration if next_scene else None,
-            client=http_client,
-            sleep=sleep,
-            jitter=jitter,
+    return _synthesize_text(
+        text=scene.narration,
+        previous_text=previous_scene.narration if previous_scene else None,
+        next_text=next_scene.narration if next_scene else None,
+        destination=destination,
+        provider=provider,
+        config=config,
+        voice_id=voice_id,
+        model_id=model_id,
+        http_client=http_client,
+        sleep=sleep,
+        jitter=jitter,
+    )
+
+
+def _read_pcm16(path: Path) -> bytes:
+    _validated_wav_frames(path)
+    with wave.open(str(path), "rb") as source:
+        return source.readframes(source.getnframes())
+
+
+def _write_pcm16(path: Path, pcm: bytes) -> None:
+    if len(pcm) % 2:
+        raise ValueError("O recorte PCM precisa conter amostras completas de 16 bits.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.unlink(missing_ok=True)
+    try:
+        with wave.open(str(temporary), "wb") as output:
+            output.setnchannels(1)
+            output.setsampwidth(2)
+            output.setframerate(TARGET_SAMPLE_RATE)
+            output.writeframesraw(pcm)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _split_continuous_group_source(
+    layout: ProjectLayout,
+    *,
+    group: NarrationGroup,
+    source_path: Path,
+    source_result: SynthesisResult,
+    scene_hashes: Mapping[str, str],
+    provider: str,
+    segmentation: str,
+) -> list[tuple[Scene, int, str, Path, SynthesisResult]]:
+    expected_by_scene = [
+        [match.group(0) for match in _WORD_RE.finditer(scene.narration)] for scene in group.scenes
+    ]
+    expected = [token for scene_tokens in expected_by_scene for token in scene_tokens]
+    aligned = [word.word for word in source_result.words]
+    if len(expected) != len(aligned) or [_spoken_token(token) for token in expected] != [
+        _spoken_token(token) for token in aligned
+    ]:
+        raise ValueError(
+            "O alinhamento do áudio contínuo não corresponde literalmente aos blocos de "
+            f"{group.section_id}; o pipeline não fará recortes aproximados."
         )
-    raise ValueError(f"Provedor de áudio desconhecido: {provider}")
+
+    boundaries = [0]
+    cumulative_words = 0
+    for scene_tokens in expected_by_scene[:-1]:
+        cumulative_words += len(scene_tokens)
+        left_end = round(source_result.words[cumulative_words - 1].end * TARGET_SAMPLE_RATE)
+        right_start = round(source_result.words[cumulative_words].start * TARGET_SAMPLE_RATE)
+        boundary = round((left_end + right_start) / 2)
+        boundaries.append(min(max(boundaries[-1], boundary), source_result.duration_frames))
+    boundaries.append(source_result.duration_frames)
+
+    pcm = _read_pcm16(source_path)
+    if len(pcm) // 2 != source_result.duration_frames:
+        raise RuntimeError("A fonte contínua diverge da duração informada pelo sintetizador.")
+
+    rows: list[tuple[Scene, int, str, Path, SynthesisResult]] = []
+    word_cursor = 0
+    reconstructed: list[bytes] = []
+    for index, (scene, scene_tokens) in enumerate(
+        zip(group.scenes, expected_by_scene, strict=True)
+    ):
+        start_frame = boundaries[index]
+        end_frame = boundaries[index + 1]
+        scene_pcm = pcm[start_frame * 2 : end_frame * 2]
+        reconstructed.append(scene_pcm)
+        version = _next_segment_version(layout, scene.scene_id)
+        path = _segment_destination(layout, scene.scene_id, version)
+        _write_pcm16(path, scene_pcm)
+
+        local_words = [
+            LocalWord(
+                word=word.word,
+                start=round(word.start - start_frame / TARGET_SAMPLE_RATE, 6),
+                end=round(word.end - start_frame / TARGET_SAMPLE_RATE, 6),
+            )
+            for word in source_result.words[word_cursor : word_cursor + len(scene_tokens)]
+        ]
+        duration_frames = end_frame - start_frame
+        duration = duration_frames / TARGET_SAMPLE_RATE
+        usage = (
+            dict(source_result.usage)
+            if index == 0
+            else {
+                "characters": len(scene.narration),
+                "words": len(scene_tokens),
+            }
+        )
+        usage.update(
+            {
+                "continuous_source": 1,
+                "continuous_group_id": group.group_id,
+                "synthesis_segmentation": segmentation,
+                "derived_without_resynthesis": 1,
+                "source_start_frame": start_frame,
+                "source_end_frame": end_frame,
+            }
+        )
+        result = SynthesisResult(
+            words=_clamp_words(local_words, duration),
+            duration_frames=duration_frames,
+            alignment_source=source_result.alignment_source,
+            usage=usage,
+            model_id=source_result.model_id,
+            voice_id=source_result.voice_id,
+        )
+        _write_segment_cache(
+            path,
+            input_hash=scene_hashes[scene.scene_id],
+            provider=provider,
+            result=result,
+        )
+        rows.append((scene, version, scene_hashes[scene.scene_id], path, result))
+        word_cursor += len(scene_tokens)
+
+    if b"".join(reconstructed) != pcm:
+        raise RuntimeError(
+            "Os recortes do áudio contínuo não reconstroem a fonte sem perda de amostras."
+        )
+    return rows
+
+
+def _existing_audio_row(
+    layout: ProjectLayout,
+    *,
+    scene: Scene,
+    segment: AudioSegment,
+) -> tuple[Scene, int, str, Path, SynthesisResult] | None:
+    path = _resolve_artifact(layout, segment.path)
+    if not path.is_file():
+        return None
+    frames = _validated_wav_frames(path)
+    duration = frames / TARGET_SAMPLE_RATE
+    words = _existing_local_words(segment, duration)
+    if not words:
+        words = _proportional_words(scene.narration, duration)
+    return (
+        scene,
+        segment.version,
+        segment.input_hash,
+        path,
+        SynthesisResult(
+            words=words,
+            duration_frames=frames,
+            alignment_source=segment.alignment_source,
+            usage=segment.usage,
+            model_id=segment.model_id,
+            voice_id=segment.voice_id,
+        ),
+    )
+
+
+def _generate_continuous_section_rows(
+    layout: ProjectLayout,
+    *,
+    groups: Sequence[NarrationGroup],
+    group_hashes: Mapping[str, str],
+    scene_hashes: Mapping[str, str],
+    existing_by_scene: Mapping[str, AudioSegment],
+    selected_scene_id: str | None,
+    force: bool,
+    provider: str,
+    config: Any,
+    voice_id: str | None,
+    model_id: str | None,
+    http_client: HttpPoster | None,
+    sleep: Callable[[float], None],
+    jitter: Callable[[], float],
+) -> tuple[
+    list[tuple[Scene, int, str, Path, SynthesisResult]],
+    int,
+    int,
+    int,
+    int,
+    list[Path],
+]:
+    local_rows: list[tuple[Scene, int, str, Path, SynthesisResult]] = []
+    generated_segments = 0
+    reused_segments = 0
+    recovered_segments = 0
+    tts_requests = 0
+    source_artifacts: list[Path] = []
+
+    for group_index, group in enumerate(groups):
+        force_group = force and (
+            selected_scene_id is None
+            or any(scene.scene_id == selected_scene_id for scene in group.scenes)
+        )
+        reusable_rows: list[tuple[Scene, int, str, Path, SynthesisResult]] = []
+        if not force_group:
+            for scene in group.scenes:
+                current = existing_by_scene.get(scene.scene_id)
+                if (
+                    current is None
+                    or current.input_hash != scene_hashes[scene.scene_id]
+                    or current.provider != provider
+                ):
+                    reusable_rows = []
+                    break
+                row = _existing_audio_row(layout, scene=scene, segment=current)
+                if row is None:
+                    reusable_rows = []
+                    break
+                reusable_rows.append(row)
+        if len(reusable_rows) == len(group.scenes):
+            local_rows.extend(reusable_rows)
+            reused_segments += len(reusable_rows)
+            continue
+
+        source_hash = group_hashes[group.group_id]
+        cached = (
+            None
+            if force_group
+            else _find_cached_segment(
+                layout,
+                input_hash=source_hash,
+                provider=provider,
+            )
+        )
+        if cached is not None:
+            _source_version, source_path, source_result = cached
+            recovered_segments += len(group.scenes)
+        else:
+            source_id = f"continuous-{group.group_id}"
+            source_version = _next_segment_version(layout, source_id)
+            source_path = _segment_destination(layout, source_id, source_version)
+            source_result = _synthesize_text(
+                text=group.text,
+                previous_text=groups[group_index - 1].text if group_index > 0 else None,
+                next_text=(groups[group_index + 1].text if group_index + 1 < len(groups) else None),
+                destination=source_path,
+                provider=provider,
+                config=config,
+                voice_id=voice_id,
+                model_id=model_id,
+                http_client=http_client,
+                sleep=sleep,
+                jitter=jitter,
+            )
+            composite_scene = group.scenes[0].model_copy(update={"narration": group.text})
+            source_result = _apply_comment_response_pause(
+                composite_scene,
+                source_result,
+                source_path,
+                config.comment_response_silence_seconds,
+            )
+            _write_segment_cache(
+                source_path,
+                input_hash=source_hash,
+                provider=provider,
+                result=source_result,
+            )
+            tts_requests += 1
+        source_artifacts.extend([source_path, _segment_cache_path(source_path)])
+        derived_rows = _split_continuous_group_source(
+            layout,
+            group=group,
+            source_path=source_path,
+            source_result=source_result,
+            scene_hashes=scene_hashes,
+            provider=provider,
+            segmentation=config.synthesis_segmentation,
+        )
+        local_rows.extend(derived_rows)
+        generated_segments += len(derived_rows)
+
+    return (
+        local_rows,
+        generated_segments,
+        reused_segments,
+        recovered_segments,
+        tts_requests,
+        source_artifacts,
+    )
 
 
 def generate_audio(
@@ -825,23 +1380,61 @@ def generate_audio(
     else:
         voice_id, model_id = None, "mock-deterministic-v1"
 
+    continuous_groups: list[NarrationGroup] = []
+    group_hashes: dict[str, str] = {}
     hashes: dict[str, str] = {}
-    for index, scene in enumerate(scenes):
-        hashes[scene.scene_id] = _scene_input_hash(
-            scene,
-            previous_scene=scenes[index - 1] if index > 0 else None,
-            next_scene=scenes[index + 1] if index + 1 < len(scenes) else None,
-            provider=selected_provider,
-            config=config,
-            voice_id=voice_id,
-            model_id=model_id,
+    if config.synthesis_segmentation in {
+        "continuous_section_v1",
+        "continuous_narration_v1",
+    }:
+        continuous_groups = _continuous_narration_groups(
+            scenes,
+            segmentation=config.synthesis_segmentation,
         )
+        for index, group in enumerate(continuous_groups):
+            group_hash = _continuous_group_input_hash(
+                group,
+                previous_group=continuous_groups[index - 1] if index > 0 else None,
+                next_group=(
+                    continuous_groups[index + 1] if index + 1 < len(continuous_groups) else None
+                ),
+                provider=selected_provider,
+                config=config,
+                voice_id=voice_id,
+                model_id=model_id,
+                segmentation=config.synthesis_segmentation,
+            )
+            group_hashes[group.group_id] = group_hash
+            for scene_index, scene in enumerate(group.scenes):
+                hashes[scene.scene_id] = sha256_value(
+                    {
+                        "synthesis_segmentation": config.synthesis_segmentation,
+                        "group_hash": group_hash,
+                        "scene_index": scene_index,
+                        "text": scene.narration,
+                    }
+                )
+    else:
+        for index, scene in enumerate(scenes):
+            hashes[scene.scene_id] = _scene_input_hash(
+                scene,
+                previous_scene=scenes[index - 1] if index > 0 else None,
+                next_scene=scenes[index + 1] if index + 1 < len(scenes) else None,
+                provider=selected_provider,
+                config=config,
+                voice_id=voice_id,
+                model_id=model_id,
+            )
     input_hash = sha256_value(
         {
-            "script_version": scene_manifest.script_version,
             "provider": selected_provider,
+            "synthesis_segmentation": config.synthesis_segmentation,
             "scenes": [
-                {"scene_id": scene.scene_id, "order": scene.order, "hash": hashes[scene.scene_id]}
+                {
+                    "scene_id": scene.scene_id,
+                    "order": scene.order,
+                    "content_hash": hashes[scene.scene_id],
+                }
                 for scene in scenes
             ],
         }
@@ -868,6 +1461,8 @@ def generate_audio(
     generated_count = 0
     reused_count = 0
     recovered_count = 0
+    tts_requests = 0
+    source_artifacts: list[Path] = []
     recover_failed_attempt = (
         selected_provider == "elevenlabs"
         and not force
@@ -877,69 +1472,25 @@ def generate_audio(
     )
     try:
         local_rows: list[tuple[Scene, int, str, Path, SynthesisResult]] = []
-        for index, scene in enumerate(scenes):
-            previous = scenes[index - 1] if index > 0 else None
-            following = scenes[index + 1] if index + 1 < len(scenes) else None
-            current = existing_by_scene.get(scene.scene_id)
-            should_force = force and (scene_id is None or scene.scene_id == scene_id)
-            can_reuse = (
-                not should_force
-                and current is not None
-                and current.input_hash == hashes[scene.scene_id]
-                and current.provider == selected_provider
-            )
-            if can_reuse:
-                current_path = _resolve_artifact(layout, current.path)
-                can_reuse = current_path.is_file()
-            if can_reuse and current is not None:
-                path = _resolve_artifact(layout, current.path)
-                frames = _validated_wav_frames(path)
-                duration = frames / TARGET_SAMPLE_RATE
-                words = _existing_local_words(current, duration)
-                if not words:
-                    words = _proportional_words(scene.narration, duration)
-                result = SynthesisResult(
-                    words=words,
-                    duration_frames=frames,
-                    alignment_source=current.alignment_source,
-                    usage=current.usage,
-                    model_id=current.model_id,
-                    voice_id=current.voice_id,
-                )
-                local_rows.append((scene, current.version, current.input_hash, path, result))
-                reused_count += 1
-                continue
-
-            if recover_failed_attempt and current is None and not should_force:
-                orphan = _latest_segment(layout, scene.scene_id)
-                if orphan is not None:
-                    version, path = orphan
-                    try:
-                        frames = _validated_wav_frames(path)
-                    except ValueError:
-                        pass
-                    else:
-                        duration = frames / TARGET_SAMPLE_RATE
-                        result = SynthesisResult(
-                            words=_proportional_words(scene.narration, duration),
-                            duration_frames=frames,
-                            alignment_source="simulated",
-                            usage={"recovered_from_failed_attempt": 1},
-                            model_id=model_id,
-                            voice_id=voice_id,
-                        )
-                        local_rows.append((scene, version, hashes[scene.scene_id], path, result))
-                        reused_count += 1
-                        recovered_count += 1
-                        continue
-
-            version = _next_segment_version(layout, scene.scene_id)
-            path = _segment_destination(layout, scene.scene_id, version)
-            result = _synthesize_scene(
-                scene=scene,
-                previous_scene=previous,
-                next_scene=following,
-                destination=path,
+        if config.synthesis_segmentation in {
+            "continuous_section_v1",
+            "continuous_narration_v1",
+        }:
+            (
+                local_rows,
+                generated_count,
+                reused_count,
+                recovered_count,
+                tts_requests,
+                source_artifacts,
+            ) = _generate_continuous_section_rows(
+                layout,
+                groups=continuous_groups,
+                group_hashes=group_hashes,
+                scene_hashes=hashes,
+                existing_by_scene=existing_by_scene,
+                selected_scene_id=scene_id,
+                force=force,
                 provider=selected_provider,
                 config=config,
                 voice_id=voice_id,
@@ -948,14 +1499,108 @@ def generate_audio(
                 sleep=sleep,
                 jitter=jitter,
             )
-            result = _apply_comment_response_pause(
-                scene,
-                result,
-                path,
-                config.comment_response_silence_seconds,
-            )
-            local_rows.append((scene, version, hashes[scene.scene_id], path, result))
-            generated_count += 1
+        else:
+            for index, scene in enumerate(scenes):
+                previous = scenes[index - 1] if index > 0 else None
+                following = scenes[index + 1] if index + 1 < len(scenes) else None
+                current = existing_by_scene.get(scene.scene_id)
+                should_force = force and (scene_id is None or scene.scene_id == scene_id)
+                can_reuse = (
+                    not should_force
+                    and current is not None
+                    and current.input_hash == hashes[scene.scene_id]
+                    and current.provider == selected_provider
+                )
+                if can_reuse:
+                    current_path = _resolve_artifact(layout, current.path)
+                    can_reuse = current_path.is_file()
+                if can_reuse and current is not None:
+                    path = _resolve_artifact(layout, current.path)
+                    frames = _validated_wav_frames(path)
+                    duration = frames / TARGET_SAMPLE_RATE
+                    words = _existing_local_words(current, duration)
+                    if not words:
+                        words = _proportional_words(scene.narration, duration)
+                    result = SynthesisResult(
+                        words=words,
+                        duration_frames=frames,
+                        alignment_source=current.alignment_source,
+                        usage=current.usage,
+                        model_id=current.model_id,
+                        voice_id=current.voice_id,
+                    )
+                    local_rows.append((scene, current.version, current.input_hash, path, result))
+                    reused_count += 1
+                    continue
+
+                if not should_force:
+                    cached = _find_cached_segment(
+                        layout,
+                        input_hash=hashes[scene.scene_id],
+                        provider=selected_provider,
+                    )
+                    if cached is not None:
+                        version, path, result = cached
+                        local_rows.append((scene, version, hashes[scene.scene_id], path, result))
+                        reused_count += 1
+                        recovered_count += 1
+                        continue
+
+                if recover_failed_attempt and current is None and not should_force:
+                    orphan = _latest_segment(layout, scene.scene_id)
+                    if orphan is not None:
+                        version, path = orphan
+                        try:
+                            frames = _validated_wav_frames(path)
+                        except ValueError:
+                            pass
+                        else:
+                            duration = frames / TARGET_SAMPLE_RATE
+                            result = SynthesisResult(
+                                words=_proportional_words(scene.narration, duration),
+                                duration_frames=frames,
+                                alignment_source="simulated",
+                                usage={"recovered_from_failed_attempt": 1},
+                                model_id=model_id,
+                                voice_id=voice_id,
+                            )
+                            local_rows.append(
+                                (scene, version, hashes[scene.scene_id], path, result)
+                            )
+                            reused_count += 1
+                            recovered_count += 1
+                            continue
+
+                version = _next_segment_version(layout, scene.scene_id)
+                path = _segment_destination(layout, scene.scene_id, version)
+                result = _synthesize_scene(
+                    scene=scene,
+                    previous_scene=previous,
+                    next_scene=following,
+                    destination=path,
+                    provider=selected_provider,
+                    config=config,
+                    voice_id=voice_id,
+                    model_id=model_id,
+                    http_client=http_client,
+                    sleep=sleep,
+                    jitter=jitter,
+                )
+                result = _apply_comment_response_pause(
+                    scene,
+                    result,
+                    path,
+                    config.comment_response_silence_seconds,
+                )
+                _write_segment_cache(
+                    path,
+                    input_hash=hashes[scene.scene_id],
+                    provider=selected_provider,
+                    result=result,
+                )
+                local_rows.append((scene, version, hashes[scene.scene_id], path, result))
+                generated_count += 1
+                tts_requests += 1
 
         segments: list[AudioSegment] = []
         global_words: list[WordTiming] = []
@@ -978,6 +1623,7 @@ def generate_audio(
             segments.append(
                 AudioSegment(
                     scene_id=scene.scene_id,
+                    narration_block_id=scene.narration_block_id,
                     version=version,
                     text=scene.narration,
                     input_hash=segment_hash,
@@ -994,6 +1640,13 @@ def generate_audio(
                 )
             )
             offset_frames += result.duration_frames
+
+        _validate_compact_narration_audio(
+            project,
+            provider=selected_provider,
+            duration=offset_frames / TARGET_SAMPLE_RATE,
+            words=global_words,
+        )
 
         narration_frames = _concatenate_wavs(
             [path for _scene, _version, _hash, path, _result in local_rows],
@@ -1015,6 +1668,15 @@ def generate_audio(
             relative_posix(layout.audio, layout.root),
             relative_posix(layout.narration_audio, layout.root),
             *(item.path for item in segments),
+            *(relative_posix(path, layout.root) for path in source_artifacts if path.is_file()),
+            *(
+                relative_posix(
+                    _segment_cache_path(_resolve_artifact(layout, item.path)),
+                    layout.root,
+                )
+                for item in segments
+                if _segment_cache_path(_resolve_artifact(layout, item.path)).is_file()
+            ),
         ]
         character_cost = sum(
             float(item.usage.get("character-cost", 0) or 0)
@@ -1032,6 +1694,8 @@ def generate_audio(
                 "generated_segments": generated_count,
                 "reused_segments": reused_count,
                 "recovered_segments": recovered_count,
+                "tts_requests": tts_requests,
+                "synthesis_segmentation": config.synthesis_segmentation,
                 "words": len(global_words),
                 "character_cost": character_cost,
             },
@@ -1040,6 +1704,21 @@ def generate_audio(
                 f"incluindo {recovered_count} recuperado(s) de tentativa interrompida."
             ),
         )
+        if project.duration_policy == "adaptive_range_v1":
+            effective_duration = round(audio_manifest.duration, 6)
+            current_project = layout.load_manifest()
+            if current_project.effective_duration_seconds != effective_duration:
+                current_project.effective_duration_seconds = effective_duration
+                layout.save_manifest(current_project)
+                layout.append_event(
+                    {
+                        "event": "adaptive_duration_settled",
+                        "preferred_seconds": project.target_duration_seconds,
+                        "effective_seconds": effective_duration,
+                        "minimum_seconds": project.requested_duration_min_seconds,
+                        "maximum_seconds": project.requested_duration_max_seconds,
+                    }
+                )
         return audio_manifest
     except Exception as exc:
         fail_stage(layout, "audio", exc)

@@ -20,6 +20,7 @@ from pipeline_videos.models import (
     COMPACT_SHORT_THRESHOLD_SECONDS,
     DEFAULT_ELEVENLABS_MODEL_ID,
     DEFAULT_ELEVENLABS_VOICE_ID,
+    MIN_LONG_DURATION_SECONDS,
     MIN_SHORT_DURATION_SECONDS,
     USER_SIX_HOOK_FAMILIES,
     ApprovalStatus,
@@ -33,6 +34,8 @@ from pipeline_videos.models import (
 )
 from pipeline_videos.project import (
     DEFAULT_PALETTE,
+    DEFAULT_SHORT_PALETTE,
+    DEFAULT_SHORT_STYLE,
     DEFAULT_STYLE,
     create_project,
     load_palette,
@@ -57,7 +60,7 @@ from pipeline_videos.storage import (
     resolve_project,
     write_json,
 )
-from pipeline_videos.verse_selection import create_auto_short, sync_shared_usage
+from pipeline_videos.verse_selection import create_auto_short, create_auto_video, sync_shared_usage
 
 load_dotenv()
 console = Console()
@@ -604,8 +607,8 @@ def new_project(
     project_id: Annotated[str, typer.Argument(help="Identificador curto do vídeo.")],
     title: Annotated[str, typer.Option("--title", "-t", help="Título editorial inicial.")],
     duration: Annotated[int, typer.Option("--duration", help="Duração-alvo em segundos.")] = 540,
-    style: Annotated[str, typer.Option("--style")] = DEFAULT_STYLE,
-    palette: Annotated[str, typer.Option("--palette")] = DEFAULT_PALETTE,
+    style: Annotated[str | None, typer.Option("--style")] = None,
+    palette: Annotated[str | None, typer.Option("--palette")] = None,
     video_format: Annotated[
         str, typer.Option("--format", help="Formato do vídeo: landscape ou short.")
     ] = "landscape",
@@ -672,6 +675,14 @@ def new_short(
             max=180,
         ),
     ] = 50,
+    duration_min: Annotated[
+        float | None,
+        typer.Option("--duration-min", help="Limite mínimo aceito para a duração real."),
+    ] = None,
+    duration_max: Annotated[
+        float | None,
+        typer.Option("--duration-max", help="Limite máximo aceito para a duração real."),
+    ] = None,
     creative_mode: Annotated[str, typer.Option("--creative-mode")] = "auto",
     hook_family: Annotated[str, typer.Option("--hook-family")] = "auto",
     voice_variant: Annotated[str, typer.Option("--voice-variant")] = "jesus_1",
@@ -690,6 +701,8 @@ def new_short(
     layout, candidate, score = create_auto_short(
         projects_dir=projects_dir,
         target_duration_seconds=duration,
+        duration_min_seconds=duration_min,
+        duration_max_seconds=duration_max,
         creative_mode_override=mode,
         hook_family_override=family,
     )
@@ -707,6 +720,9 @@ def new_short(
                     "project_id": layout.load_manifest().project_id,
                     "project_path": str(layout.root),
                     "passage": candidate.reference,
+                    "duration_policy": layout.load_manifest().duration_policy,
+                    "duration_min_seconds": layout.load_manifest().requested_duration_min_seconds,
+                    "duration_max_seconds": layout.load_manifest().requested_duration_max_seconds,
                     "creative_mode": read_model(layout.briefing, Briefing).creative_mode,
                     "hook_family": read_model(layout.briefing, Briefing).hook_family,
                     "hook_contract": read_model(layout.briefing, Briefing).hook_contract,
@@ -726,6 +742,84 @@ def new_short(
         "Briefing e fonte foram preenchidos automaticamente; a aprovação humana continua pendente."
     )
     console.print(f'Próximo passo: uv run pipeline-videos run "{layout.root}" --dry-run')
+
+
+@app.command("new-character-video")
+def new_character_video(
+    character: Annotated[str, typer.Argument(help="Personagem bíblico desejado.")],
+    video_format: Annotated[
+        str,
+        typer.Option("--format", help="Formato: short ou long."),
+    ] = "long",
+    duration: Annotated[
+        int | None,
+        typer.Option("--duration", help="Duração-alvo em segundos."),
+    ] = None,
+    voice_variant: Annotated[str, typer.Option("--voice-variant")] = "jesus_1",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
+) -> None:
+    """Cria um retrato de personagem com um pacote narrativo bíblico verificado."""
+    normalized_format = video_format.strip().casefold()
+    if normalized_format not in {"short", "long"}:
+        raise typer.BadParameter("--format precisa ser short ou long.")
+    target_duration = duration or (60 if normalized_format == "short" else 540)
+    if normalized_format == "short" and not (
+        COMPACT_SHORT_THRESHOLD_SECONDS <= target_duration <= 180
+    ):
+        raise typer.BadParameter(
+            "Retratos narrativos em Short exigem duração entre "
+            f"{COMPACT_SHORT_THRESHOLD_SECONDS} e 180 segundos."
+        )
+    if normalized_format == "long" and target_duration < MIN_LONG_DURATION_SECONDS:
+        raise typer.BadParameter(
+            f"Vídeos longos exigem ao menos {MIN_LONG_DURATION_SECONDS} segundos."
+        )
+    try:
+        variant = normalize_elevenlabs_voice_variant(voice_variant)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    layout, candidate, score = create_auto_video(
+        projects_dir=projects_dir,
+        target_duration_seconds=target_duration,
+        video_format="short" if normalized_format == "short" else "landscape",
+        creative_mode_override="character_portrait",
+        requested_character=character,
+    )
+    if normalized_format == "short":
+        _apply_short_bootstrap_settings(
+            layout,
+            creative_mode="character_portrait",
+            hook_family=None,
+            voice_variant=variant,
+            music_file=None,
+        )
+    else:
+        manifest = layout.load_manifest()
+        manifest.config.audio.voice_id = elevenlabs_voice_id_for_variant(variant)
+        layout.save_manifest(manifest)
+    payload = {
+        "project_id": layout.load_manifest().project_id,
+        "project_path": str(layout.root),
+        "character": character,
+        "story": candidate.title,
+        "main_passage": candidate.reference,
+        "related_passages": [item.reference for item in candidate.related_passages],
+        "creative_mode": "character_portrait",
+        "score": score,
+        "next_command": f'uv run pipeline-videos run "{layout.root}" --dry-run',
+    }
+    if json_output:
+        console.print_json(json.dumps(payload, ensure_ascii=False))
+        return
+    console.print(f"[green]Retrato de personagem criado:[/green] {layout.root}")
+    console.print(f"[bold]Personagem:[/bold] {', '.join(candidate.characters)}")
+    console.print(f"[bold]História principal:[/bold] {candidate.title}")
+    console.print(f"[bold]Passagem-âncora:[/bold] {candidate.reference}")
+    console.print(
+        f"[bold]Fontes relacionadas:[/bold] {len(candidate.related_passages)} passagens verificadas"
+    )
+    console.print(payload["next_command"])
 
 
 @app.command("new-short-audio-manual")
@@ -837,23 +931,27 @@ def resume_prompt(
         if manifest.video_format != "short"
         else ""
     )
+    from pipeline_videos.autopilot import prepare_local_coordinator_job
+
+    coordinator_job = prepare_local_coordinator_job(layout)
     prompt = f"""Retome o projeto em `{layout.root}`. Leia `AGENTS.md`,
-`docs/optimized-production.md`, `docs/creative-direction.md`, {script_standard} e depois
-`project.json`. Execute
-`uv run pipeline-videos status "{project}"` e retome com
-`uv run pipeline-videos autopilot "{project}"`
-{"sem --allow-external" if manual_audio else "com --allow-external"}. {audio_instruction}
+`docs/optimized-production.md`, {script_standard} e `{layout.coordinator_job}`. Crie exatamente um
+`local_video_coordinator` isolado, com `fork_turns=none`, modelo
+`{coordinator_job["orchestration"]["recommended_model"]}` e raciocínio
+`{coordinator_job["orchestration"]["reasoning_effort"]}`. Entregue a ele somente o caminho de
+`coordinator-job.json`; esse coordenador será o único escritor do estado compartilhado. O chat pai
+apenas acompanha e entrega o resultado final.
+
+O coordenador executa o comando declarado no job e cria somente os papéis que aparecerem nas filas,
+sempre com `fork_turns=none`: o planejador de cenas lê `script/shorts-queue.json`, até dois
+image_workers leem exclusivamente seus arquivos em `images/jobs/`, e o especialista de metadados lê
+`youtube/growth-queue.json`. Crie biblical_reviewer apenas se a própria fila exigir revisão
+independente; Shorts compactos verificados no catálogo não exigem esse modelo. Após uma única
+correção agregada, use o fallback determinístico declarado e continue. {audio_instruction}
 {long_script_instruction}
-Quando houver filas externas,
-crie apenas os papéis declarados, sempre com `fork_turns=none`: cada image_worker recebe somente
-seu `images/jobs/image-worker-N.json`, e o youtube_growth_specialist recebe somente
-`youtube/growth-queue.json`. Para Short completo, prepare antes o shorts_script_specialist usando
-somente `script/shorts-queue.json`; quando solicitado, crie o biblical_reviewer usando somente
-`reviews/shorts-review-queue.json` antes do único import. Não releia manifestos grandes, não
-importe por cena e não altere estado fora do agente principal. Depois de iniciar os workers,
-execute autopilot com
-`--wait-external` para importar, renderizar e validar automaticamente. Não publique nem registre
-aprovação humana."""
+Não releia manifestos grandes, não importe por cena, não publique e não registre aprovação humana.
+Entregue o único candidato final mesmo que existam alertas consultivos; somente bloqueios técnicos,
+bíblicos, de segurança ou de publicação podem impedir a conclusão."""
     console.print(Panel(prompt, title="Cole esta mensagem em uma conversa com o Codex"))
 
 
@@ -910,6 +1008,25 @@ def shorts_script_check_staging(project: str) -> None:
     console.print_json(json.dumps(result.as_dict(), ensure_ascii=False))
     if not result.valid:
         raise typer.Exit(code=1)
+
+
+@script_app.command("shorts-fallback")
+def shorts_script_fallback(project: str) -> None:
+    """Materializa o plano visual determinístico após a única correção permitida."""
+
+    from pipeline_videos.shorts_script import materialize_compact_visual_fallback
+
+    result = materialize_compact_visual_fallback(_project(project))
+    console.print_json(
+        json.dumps(
+            {
+                "fallback": "compact_visual_plan_v1",
+                "concepts": len(result.concepts),
+                "valid": True,
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 @script_app.command("shorts-review-prepare")
@@ -1298,6 +1415,33 @@ def metadata_growth_import(
 
     result = import_growth_package(_project(project), force=force)
     console.print(f"[green]Pacote do especialista importado:[/green] {result.metadata.title}")
+
+
+@metadata_app.command("growth-check-staging")
+def metadata_growth_check_staging(project: str) -> None:
+    """Valida de uma vez a estrutura e relata SEO somente como aviso no modo compacto."""
+
+    from pipeline_videos.growth import check_growth_package_staging
+
+    result = check_growth_package_staging(_project(project))
+    console.print_json(json.dumps(result.as_dict(), ensure_ascii=False))
+    if not result.valid:
+        raise typer.Exit(code=1)
+
+
+@metadata_app.command("growth-fallback")
+def metadata_growth_fallback(project: str) -> None:
+    """Materializa metadados seguros após a única correção do especialista."""
+
+    from pipeline_videos.growth import materialize_compact_growth_fallback
+
+    result = materialize_compact_growth_fallback(_project(project))
+    console.print_json(
+        json.dumps(
+            {"fallback": "compact_metadata_draft_v1", "title": result.title, "valid": True},
+            ensure_ascii=False,
+        )
+    )
 
 
 @metadata_app.command("integrated-thumbnails-import")
@@ -1876,20 +2020,54 @@ def set_style(project: str, style_id: str) -> None:
     layout = _project(project)
     style = load_style(style_id)
     manifest = layout.load_manifest()
-    enforce_standard = style.visual_standard_id == manifest.config.images.visual_standard_id
-    if (
-        layout.style_profile.exists()
-        and read_model(layout.style_profile, StyleProfile) == style
-        and manifest.config.images.enforce_visual_standard == enforce_standard
-    ):
+    previous_config = manifest.config.model_copy(deep=True)
+    enforce_standard = style.visual_standard_id is not None
+    profile_palette = None
+    manifest.config.images.enforce_visual_standard = enforce_standard
+    if style.visual_standard_id:
+        manifest.config.images.visual_standard_id = style.visual_standard_id
+    if manifest.video_format == "short" and style_id == DEFAULT_SHORT_STYLE:
+        profile_palette = load_palette(DEFAULT_SHORT_PALETTE)
+        manifest.config.images.scene_planning_standard = "narration_block_visual_v1"
+        manifest.config.images.composition_safety_mode = "unrestricted_scene_v1"
+        manifest.config.render.short_cover_enabled = False
+        manifest.config.youtube_growth.thumbnail_variants = 0
+        manifest.config.youtube_growth.thumbnail_generation_mode = "youtube_auto_frame_v1"
+        manifest.config.youtube_growth.thumbnail_reference_mode = "none_v1"
+        manifest.config.youtube_growth.thumbnail_standard = "youtube_auto_frame_v1"
+        manifest.config.youtube_growth.thumbnail_typography_standard = "no_text_v1"
+    elif manifest.video_format == "short" and style_id == DEFAULT_STYLE:
+        profile_palette = load_palette(DEFAULT_PALETTE)
+        manifest.config.images.scene_planning_standard = "section_visual_direction_v1"
+        manifest.config.images.composition_safety_mode = "caption_safe_area_v1"
+        manifest.config.render.short_cover_enabled = True
+        manifest.config.youtube_growth.thumbnail_variants = 1
+        manifest.config.youtube_growth.thumbnail_generation_mode = "integrated_imagegen_v1"
+        manifest.config.youtube_growth.thumbnail_reference_mode = "opening_scene_edit_v1"
+        manifest.config.youtube_growth.thumbnail_standard = "direct_conflict_red_v1"
+        manifest.config.youtube_growth.thumbnail_typography_standard = "integrated_extruded_3d_v1"
+    style_is_current = (
+        layout.style_profile.exists() and read_model(layout.style_profile, StyleProfile) == style
+    )
+    palette_is_current = profile_palette is None or (
+        layout.palette.exists() and read_model(layout.palette, Palette) == profile_palette
+    )
+    if style_is_current and palette_is_current and manifest.config == previous_config:
         console.print(f"[green]Estilo já estava ativo:[/green] {style.name}")
         return
-    manifest.config.images.enforce_visual_standard = enforce_standard
     layout.save_manifest(manifest)
     write_json(layout.style_profile, style)
+    if profile_palette is not None:
+        write_json(layout.palette, profile_palette)
+    refresh_visual_plan = (
+        previous_config.images.scene_planning_standard
+        != manifest.config.images.scene_planning_standard
+        and manifest.config.images.scene_planning_standard == "narration_block_visual_v1"
+    )
     invalidate(
         layout,
-        stages=(
+        stages=(("shorts_script",) if refresh_visual_plan else ())
+        + (
             "scenes",
             "image_manifest",
             "images",

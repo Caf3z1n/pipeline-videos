@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 import shutil
 from datetime import date, datetime
@@ -37,19 +38,44 @@ from pipeline_videos.utils import slugify, utc_now
 
 DEFAULT_STYLE = "cinematic-family-3d-animation"
 DEFAULT_PALETTE = "noite-azul-dourada"
+DEFAULT_SHORT_STYLE = "biblical-midcentury-gouache"
+DEFAULT_SHORT_PALETTE = "midcentury-devotional-print"
+DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_FILE = "biblical-midcentury-gouache-spoken-reference.png"
+DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_PATH = (
+    "visual/reference-images/biblical-midcentury-gouache-spoken-reference.png"
+)
 DEFAULT_FONT_FILE = "visual/fonts/files/Montserrat-ExtraBold.ttf"
 DEFAULT_FONT_LICENSE = "visual/fonts/OFL-Montserrat.txt"
 DATED_PROJECT_PATTERN = re.compile(r"^(\d{2}-\d{2}-\d{4})_(.+)$")
+COMPACT_NARRATION_WPM = 170
+COMPACT_MINIMUM_WORD_RATIO = 0.96
+COMPACT_MAXIMUM_WORD_RATIO = 1.08
+COMPACT_MINIMUM_HOOK_STRENGTH_SCORE = 0.9
+COMPACT_MINIMUM_MESSAGE_VALUE_SCORE = 0.9
+COMPACT_MINIMUM_REWATCH_VALUE_SCORE = 0.88
 
 
 def short_literal_verse_word_limit(duration_seconds: int) -> int | None:
     if duration_seconds >= COMPACT_SHORT_THRESHOLD_SECONDS:
         return None
-    if duration_seconds <= 20:
+    if duration_seconds <= 15:
         return 28
+    if duration_seconds <= 20:
+        # O limite de 28 palavras pertence ao contrato de 15 segundos. Entre
+        # 16 e 20 segundos, a fala cresce junto com a janela de narração.
+        return min(47, 28 + (duration_seconds - 15) * 4)
     if duration_seconds <= 30:
         return 48
     return 80
+
+
+def compact_narration_word_range(duration_seconds: int) -> tuple[int, int]:
+    """Return a narration-filled word range instead of reserving time for silence."""
+
+    target_words = duration_seconds * COMPACT_NARRATION_WPM / 60
+    minimum = math.ceil(target_words * COMPACT_MINIMUM_WORD_RATIO)
+    maximum = math.ceil(target_words * COMPACT_MAXIMUM_WORD_RATIO)
+    return minimum, maximum
 
 
 def configure_short_duration_profile(config: ProjectConfig, duration_seconds: int) -> None:
@@ -58,14 +84,14 @@ def configure_short_duration_profile(config: ProjectConfig, duration_seconds: in
     if duration_seconds >= COMPACT_SHORT_THRESHOLD_SECONDS:
         return
     shorts = config.shorts_script
-    scripture_start = 2.0
+    scripture_start = 3.5 if duration_seconds <= 20 else 3.0
     reference_seconds = min(3.0, max(2.0, round(duration_seconds * 0.18, 1)))
     scripture_end = duration_seconds - reference_seconds
     if duration_seconds <= 20:
-        target_scene_min, target_scene_max = 3, 4
-        config.production.image_workers = 1
-        config.production.coordinator_effective_token_budget = 90_000
-        config.production.total_effective_token_budget = 380_000
+        target_scene_min, target_scene_max = 5, 6
+        config.production.image_workers = 2
+        config.production.coordinator_effective_token_budget = 70_000
+        config.production.total_effective_token_budget = 300_000
     elif duration_seconds <= 30:
         target_scene_min, target_scene_max = 6, 8
         config.production.image_workers = 2
@@ -78,13 +104,25 @@ def configure_short_duration_profile(config: ProjectConfig, duration_seconds: in
     assert max_literal_verse_words is not None
     shorts.duration_profile = "adaptive_compact_v1"
     shorts.compact_narrative_standard = "cinematic_jesus_devotional_v1"
+    shorts.generation_mode = "deterministic_compact_visual_plan_v1"
+    shorts.biblical_review_mode = "deterministic_verified_compact_v1"
+    shorts.require_independent_biblical_review = False
     shorts.require_direct_jesus_speech = True
     shorts.require_emotional_interruption_hook = True
     shorts.require_reference_after_quote = True
     shorts.require_no_cta = True
-    shorts.min_words = 17
-    shorts.max_words = min(200, max_literal_verse_words + 16)
-    shorts.hook_max_words = 8
+    shorts.min_words, shorts.max_words = compact_narration_word_range(duration_seconds)
+    shorts.minimum_estimated_duration_ratio = 0.92
+    shorts.minimum_audio_duration_ratio = 0.94
+    shorts.maximum_narration_gap_seconds = 1.0
+    shorts.maximum_terminal_silence_seconds = 0.85
+    shorts.minimum_hook_strength_score = COMPACT_MINIMUM_HOOK_STRENGTH_SCORE
+    shorts.minimum_message_value_score = COMPACT_MINIMUM_MESSAGE_VALUE_SCORE
+    shorts.minimum_rewatch_value_score = COMPACT_MINIMUM_REWATCH_VALUE_SCORE
+    shorts.hook_min_words = 10
+    shorts.hook_max_words = 12
+    shorts.hook_target_seconds = scripture_start
+    shorts.estimated_narration_wpm = COMPACT_NARRATION_WPM
     shorts.scripture_citation_min_start_seconds = scripture_start
     shorts.scripture_citation_max_end_seconds = scripture_end
     shorts.verse_opening_max_seconds = min(15.0, scripture_end)
@@ -95,12 +133,21 @@ def configure_short_duration_profile(config: ProjectConfig, duration_seconds: in
     shorts.minimum_sections = 3
     shorts.target_scene_min = target_scene_min
     shorts.target_scene_max = target_scene_max
-    shorts.retention_target_min_seconds = max(10.0, duration_seconds - 2.0)
+    shorts.retention_target_min_seconds = max(
+        10.0,
+        round(duration_seconds * shorts.minimum_audio_duration_ratio, 1),
+    )
     shorts.retention_target_max_seconds = float(duration_seconds)
     shorts.cta_max_words = 4
     shorts.cta_max_seconds = 2.0
     shorts.duration_tolerance_seconds = 2.0
+    config.audio.synthesis_segmentation = "continuous_narration_v1"
     config.music.library_profile = "adaptive_compact_devotional_v1"
+    config.youtube_growth.generation_mode = "compact_metadata_draft_v1"
+    config.youtube_growth.validation_mode = "advisory_seo_v1"
+    config.production.validation_policy = "completion_first_v1"
+    config.production.token_budget_behavior = "fallback_then_continue"
+    config.production.max_model_repairs_per_stage = 1
 
 
 def project_topic_slug(topic: str) -> str:
@@ -126,6 +173,13 @@ def install_default_caption_assets(layout: ProjectLayout) -> None:
         destination = layout.root / destination_path
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(assets.joinpath(source_name).read_bytes())
+
+
+def install_default_short_visual_assets(layout: ProjectLayout) -> None:
+    assets = resources.files("pipeline_videos").joinpath("assets", "images")
+    destination = layout.root / DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_PATH
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(assets.joinpath(DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_FILE).read_bytes())
 
 
 def load_style(style_id: str) -> StyleProfile:
@@ -194,8 +248,10 @@ def create_project(
     *,
     projects_dir: Path | None = None,
     target_duration_seconds: int = 540,
-    style_id: str = DEFAULT_STYLE,
-    palette_id: str = DEFAULT_PALETTE,
+    duration_min_seconds: float | None = None,
+    duration_max_seconds: float | None = None,
+    style_id: str | None = None,
+    palette_id: str | None = None,
     demo: bool = False,
     video_format: Literal["landscape", "short"] = "landscape",
     project_date: date | None = None,
@@ -210,6 +266,27 @@ def create_project(
         raise ValueError(
             f"A duração-alvo de {video_format} deve ter pelo menos {minimum_duration} segundos."
         )
+    if (duration_min_seconds is None) != (duration_max_seconds is None):
+        raise ValueError("Informe juntos os limites mínimo e máximo de duração.")
+    duration_policy = "adaptive_range_v1" if duration_min_seconds is not None else "exact_target_v1"
+    requested_minimum = (
+        float(duration_min_seconds)
+        if duration_min_seconds is not None
+        else float(target_duration_seconds)
+    )
+    requested_maximum = (
+        float(duration_max_seconds)
+        if duration_max_seconds is not None
+        else float(target_duration_seconds)
+    )
+    if requested_minimum < minimum_duration:
+        raise ValueError(
+            f"A faixa de {video_format} deve começar em pelo menos {minimum_duration} segundos."
+        )
+    if requested_maximum < requested_minimum:
+        raise ValueError("O limite máximo de duração deve ser maior ou igual ao mínimo.")
+    if not requested_minimum <= target_duration_seconds <= requested_maximum:
+        raise ValueError("A duração preferencial precisa estar dentro da faixa solicitada.")
     category = SHORT_PROJECTS_DIRNAME if video_format == "short" else LONG_PROJECTS_DIRNAME
     root = (projects_dir or DEFAULT_PROJECTS_DIR).expanduser().resolve() / category / project_id
     if root.exists() and any(root.iterdir()):
@@ -218,12 +295,18 @@ def create_project(
     layout = ProjectLayout(root)
     layout.ensure_directories()
     now = utc_now()
+    selected_style_id = style_id or (
+        DEFAULT_SHORT_STYLE if video_format == "short" else DEFAULT_STYLE
+    )
+    selected_palette_id = palette_id or (
+        DEFAULT_SHORT_PALETTE if selected_style_id == DEFAULT_SHORT_STYLE else DEFAULT_PALETTE
+    )
     config = ProjectConfig()
     config.youtube_publication.category_id = "22" if video_format == "short" else "27"
     config.production.mode = production_mode
-    style = load_style(style_id)
-    if style.visual_standard_id != config.images.visual_standard_id:
-        config.images.enforce_visual_standard = False
+    style = load_style(selected_style_id)
+    if style.visual_standard_id:
+        config.images.visual_standard_id = style.visual_standard_id
     if video_format == "short":
         config.render = RenderConfig(
             width=1080,
@@ -236,6 +319,12 @@ def create_project(
         config.captions.margin_bottom = 310
         config.captions.vertical_position = "center"
         config.captions.context_labels_enabled = False
+        if selected_style_id == DEFAULT_SHORT_STYLE:
+            config.images.scene_planning_standard = "narration_block_visual_v1"
+            config.images.composition_safety_mode = "unrestricted_scene_v1"
+            config.images.spoken_reference_image_path = DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_PATH
+            config.images.spoken_reference_image_mode = "fixed_profile_asset_v1"
+            config.render.short_cover_enabled = False
     if demo:
         config.render = RenderConfig(
             width=1280,
@@ -277,7 +366,7 @@ def create_project(
         config.render.background_blur_profile = "functional_caption_focus_v1"
         config.render.audio_mix_standard = "voice_music_loudness_v1"
         config.render.narration_target_lufs = -18.0
-        config.render.background_music_gap_lu = 16.0
+        config.render.background_music_gap_lu = 13.0
         config.render.narration_true_peak_dbfs = -2.0
         config.render.background_music_true_peak_dbfs = -9.0
         config.render.audio_loudness_range_lu = 7.0
@@ -292,10 +381,19 @@ def create_project(
             config.shorts_script.narrative_standard = "creative_retention_v3"
             config.shorts_script.require_independent_biblical_review = True
             configure_short_duration_profile(config, target_duration_seconds)
-            config.youtube_growth.thumbnail_generation_mode = "integrated_imagegen_v1"
-            config.youtube_growth.thumbnail_reference_mode = "opening_scene_edit_v1"
-            config.youtube_growth.thumbnail_standard = "direct_conflict_red_v1"
-            config.youtube_growth.thumbnail_typography_standard = "integrated_extruded_3d_v1"
+            if selected_style_id == DEFAULT_SHORT_STYLE:
+                config.youtube_growth.thumbnail_variants = 0
+                config.youtube_growth.thumbnail_generation_mode = "youtube_auto_frame_v1"
+                config.youtube_growth.thumbnail_reference_mode = "none_v1"
+                config.youtube_growth.thumbnail_standard = "youtube_auto_frame_v1"
+                config.youtube_growth.thumbnail_typography_standard = "no_text_v1"
+            else:
+                config.youtube_growth.generation_mode = "specialist_full_package_v1"
+                config.youtube_growth.validation_mode = "strict_v1"
+                config.youtube_growth.thumbnail_generation_mode = "integrated_imagegen_v1"
+                config.youtube_growth.thumbnail_reference_mode = "opening_scene_edit_v1"
+                config.youtube_growth.thumbnail_standard = "direct_conflict_red_v1"
+                config.youtube_growth.thumbnail_typography_standard = "integrated_extruded_3d_v1"
         else:
             config.youtube_growth.thumbnail_generation_mode = "theme_prompt_imagegen_v1"
             config.youtube_growth.thumbnail_reference_mode = "theme_only_v1"
@@ -314,6 +412,9 @@ def create_project(
         created_at=now,
         updated_at=now,
         target_duration_seconds=target_duration_seconds,
+        duration_policy=duration_policy,
+        requested_duration_min_seconds=requested_minimum,
+        requested_duration_max_seconds=requested_maximum,
         demo=demo,
         video_format=video_format,
         config=config,
@@ -357,11 +458,17 @@ def create_project(
     )
 
     install_default_caption_assets(layout)
+    if (
+        video_format == "short"
+        and selected_style_id == DEFAULT_SHORT_STYLE
+        and config.images.spoken_reference_image_mode == "fixed_profile_asset_v1"
+    ):
+        install_default_short_visual_assets(layout)
     write_json(layout.manifest, manifest)
     write_json(layout.briefing, briefing)
     write_json(layout.sources, SourceLibrary())
     write_json(layout.style_profile, style)
-    write_json(layout.palette, load_palette(palette_id))
+    write_json(layout.palette, load_palette(selected_palette_id))
     write_json(layout.continuity, continuity)
     write_json(layout.render_config, config.render)
     write_json(layout.experiments, ExperimentMemory())

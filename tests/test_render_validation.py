@@ -27,6 +27,7 @@ from pipeline_videos.models import (
 from pipeline_videos.state import initial_approvals, initial_stage_records
 from pipeline_videos.storage import ProjectLayout, write_json
 from pipeline_videos.utils import sha256_value, utc_now
+from pipeline_videos.validation import ValidationReport, _apply_completion_first_policy
 
 
 def _probe_payload(
@@ -57,6 +58,24 @@ def _probe_payload(
         ],
         "format": {"duration": duration},
     }
+
+
+def test_completion_first_demotes_creative_checks_but_keeps_media_blockers() -> None:
+    report = ValidationReport(
+        project_id="short-teste",
+        generated_at=utc_now(),
+        errors=[
+            "A narração compacta contém uma pausa interna acima do alvo editorial.",
+            "O contrato criativo marcou hook_used=false.",
+            "Vídeo ausente: final.mp4",
+        ],
+    )
+
+    _apply_completion_first_policy(report)
+
+    assert report.errors == ["Vídeo ausente: final.mp4"]
+    assert len(report.warnings) == 2
+    assert all(item.startswith("[entrega primeiro]") for item in report.warnings)
 
 
 def test_ffprobe_validation_accepts_expected_h264_aac(monkeypatch, tmp_path) -> None:

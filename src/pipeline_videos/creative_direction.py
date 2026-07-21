@@ -443,20 +443,26 @@ def hook_matches_family(hook: str, family: str) -> bool:
     normalized = _plain(hook)
     if family == "emotional_interruption":
         words = normalized.split()
-        if not 2 <= len(words) <= 8 or "?" in hook:
+        if not 2 <= len(words) <= 12 or "?" in hook:
             return False
         interruption_starts = (
+            "antes ",
             "nao ",
             "olhe ",
+            "pare ",
+            "preste atencao ",
             "escute ",
             "respire ",
             "venha ",
             "fique ",
             "confie ",
+            "tudo ao redor ",
             "eu sei ",
             "eu estou ",
             "voce ainda ",
             "voce nao ",
+            "voce precisa ",
+            "voce esta ",
             "tenha bom animo",
         )
         return normalized.startswith(interruption_starts)

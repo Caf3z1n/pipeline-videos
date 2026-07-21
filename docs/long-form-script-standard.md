@@ -73,6 +73,12 @@ Use exatamente:
 A referência fica fora das aspas. Cada citação registra `biblical_basis`, classifica a afirmação
 como `biblical_text` e aponta para a fonte verificada correspondente em `scripture_anchors`.
 
+O segmento `long_form_anchor` acrescenta 100 passagens curadas, equilibradas entre Antigo e Novo
+Testamento e marcadas com `recommended_formats=["long"]`. Na fonte persistida, `passage` corresponde
+exatamente à referência do trecho literal usado na locução; `context_passage` preserva a janela
+maior para estudo e desenvolvimento. Essa separação impede que o validador confunda contexto com a
+citação e também evita que âncoras longas entrem na seleção automática de Shorts.
+
 ## Contrato estruturado
 
 `ScriptDocument.long_form_strategy` registra:

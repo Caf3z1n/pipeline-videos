@@ -4,20 +4,22 @@ Aplicação local, headless e orientada por arquivos para planejar, produzir, re
 vídeos bíblicos. O chat ajuda na criação; a pasta de cada vídeo é a fonte de verdade.
 
 O modo único é `final_candidate_one_shot`: o Codex produz diretamente um candidato final V4.
-Localmente e na VPS, cada vídeo usa um coordenador persistente e especialistas de roteiro, revisão
-bíblica, imagens e crescimento, todos em
-`gpt-5.6-sol` e com o raciocínio próprio da função. Shorts editam a imagem ativa da abertura;
-vídeos longos geram uma thumbnail horizontal nova, baseada somente no tema central.
+Localmente e na VPS, cada vídeo usa um coordenador isolado e especialistas apenas nas decisões
+criativas necessárias. No perfil compacto, o roteiro e a revisão bíblica são determinísticos; o
+modelo planeja somente os conceitos visuais, imagens e um pequeno rascunho de metadados. Shorts
+novos usam cenas pintadas por bloco de
+narração e deixam o YouTube selecionar um frame, sem thumbnail separada; vídeos longos geram uma
+thumbnail horizontal nova, baseada somente no tema central.
 
 O planejamento one-shot aparece em `run --dry-run` como cinco ondas. Depois do roteiro e das
 cenas, os trabalhadores de imagem rodam enquanto o agente principal produz áudio, música e
-legendas. Após o import das imagens, o especialista do YouTube recebe a abertura nos Shorts e o
-tema central nos vídeos longos.
+legendas. Após o import das imagens, o especialista do YouTube produz metadados; somente o perfil
+3D legado recebe a abertura para gerar capa. Vídeos longos recebem o tema central.
 O principal continua sendo o único escritor do estado e realiza as importações serialmente antes do
 ponto de junção do render.
 
-O MVP já prova o fluxo vertical sem serviços pagos: briefing → roteirista especialista de Shorts →
-revisão bíblica → cenas → imagens fixture → áudio simulado → música local → alinhamento por palavra
+O MVP já prova o fluxo vertical sem serviços pagos: briefing → contrato bíblico verificado → cenas
+→ imagens fixture → áudio simulado → música local → alinhamento por palavra
 → ASS/SRT/VTT → especialista YouTube → thumbnail final → MP4 final. O caminho de
 produção usa a geração de imagens embutida do Codex por uma fila de importação e ElevenLabs por um
 adaptador protegido pelo guard técnico `--allow-external`; Pedro já autorizou esse uso por padrão nas
@@ -25,21 +27,20 @@ produções que pedir neste pipeline.
 
 Projetos reais novos usam o perfil `token_optimized_v1`. O único render usa a qualidade V4 com CRF
 12, preset `slow` e supersampling 3. Trabalhadores recebem arquivos compactos em `images/jobs/`
-sem herdar o histórico. O gerador cria uma única thumbnail: Shorts recebem texto e símbolos
-incorporados; vídeos longos recebem uma imagem cinematográfica limpa, sem texto. Título e thumbnail
-formam uma única combinação complementar em todos os modos novos.
+sem herdar o histórico. No perfil padrão de Shorts não existe geração de thumbnail nem primeiro
+frame artificial. O perfil 3D legado preserva texto e símbolos incorporados, e vídeos longos
+recebem uma imagem cinematográfica limpa, sem texto.
 
 O padrão editorial mantém toda a locução em português e exige citações bíblicas literais
-verificadas por uma revisão independente antes do import. Projetos novos escolhem entre 16 modos criativos e usam
+verificadas antes do import. No compacto, a revisão determinística compara o texto, a atribuição e a
+fonte com o catálogo; outros perfis podem exigir revisão independente. Projetos novos escolhem entre 16 modos criativos e usam
 `Enfoque concreto | Passagem`, sem converter automaticamente a conclusão em aplicação
 motivacional. Shorts padrão começam exatamente com uma de seis estruturas de hook; o perfil
 compacto começa com uma interrupção emocional e longos usam hook adaptativo. Shorts padrão e
 longos encerram com CTA de uma única ação; o perfil compacto termina somente com a referência
 bíblica. Longos recebem também uma timeline bíblica iniciada por
-`00:00 - Abertura`. Nas capas de
-Shorts, a palavra de impacto e o elemento narrativo usam vermelho, com seta, X, sublinhado ou pincel
-apontando para algo real da cena. As capas longas preservam uma área limpa no lado oposto ao
-personagem.
+`00:00 - Abertura`. As regras de palavra vermelha e marcação narrativa permanecem apenas no perfil
+3D legado. As capas longas preservam uma área limpa no lado oposto ao personagem.
 
 Depois de roteiro e revisão, o caminho recomendado é:
 
@@ -107,31 +108,55 @@ Para um Short vertical 9:16, o fluxo recomendado agora não exige tema, título 
 uv run pipeline-videos new-short
 ```
 
+Esse comando usa `biblical-midcentury-gouache-v1`: ilustração editorial cristã em guache opaco e
+têmpera, com aparência de impressão offset limpa de aproximadamente 1955. O roteirista divide a
+locução em `strategy.visual_scenes`; cada item copia um bloco contíguo da narração e descreve uma
+cena concreta, distinta e `literal`, `contextual` ou `symbolic`. O mesmo bloco passa a identificar a
+cena, a imagem e o segmento de áudio. O perfil não reserva área para legendas nem evita rostos ou
+elementos nas bordas.
+
+No perfil compacto, a cena do último bloco — a referência bíblica falada — é fixa. Cada projeto
+recebe uma cópia portátil da ilustração de Bíblia aberta em `visual/reference-images/`; o manifesto
+ativa esse arquivo automaticamente e não envia esse bloco ao `imagegen`. Os demais blocos continuam
+recebendo cenas novas e específicas para a narração.
+
 Para pedir um Short de 15 segundos, informe a duração na criação:
 
 ```powershell
 uv run pipeline-videos new-short --duration 15
 ```
 
-Entre 15 e 44 segundos, o pipeline ativa `adaptive_compact_v1`, restrito aos modos
-`devotional_application` e `pastoral_encouragement`. O Short começa com uma interrupção emocional
-de até dois segundos, entra imediatamente em uma fala direta de Jesus entre aspas e termina com a
-referência bíblica falada, sem “lemos” e sem CTA. Em 15 segundos, usa de 17 a 44 palavras, três a
-quatro cenas, trecho literal de até 28 palavras e um único trabalhador de imagens. Revisão bíblica
-independente, qualidade visual, render final e validações de upload permanecem iguais ao perfil
-padrão.
-
-Quando tema, modo, hook, voz e música já forem conhecidos, configure tudo atomicamente na criação.
-Por exemplo, para um retrato de Judas com a segunda voz de Jesus:
+Para aceitar o melhor encaixe real entre 15 e 20 segundos, mantenha 18 como alvo preferencial e
+persista a faixa:
 
 ```powershell
-uv run pipeline-videos new judas --title "O preço da escolha de Judas" --duration 50 `
-  --format short --creative-mode character_portrait --hook-family nobody_talks_but `
-  --voice-variant jesus_2 --music-file "C:\Users\Pedro Henrique\Downloads\Leaning.mp3"
+uv run pipeline-videos new-short --duration 18 --duration-min 15 --duration-max 20
 ```
 
-As opções são validadas antes de criar a pasta ou reservar a passagem, evitando reconfigurações e
-imports intermediários.
+Entre 15 e 44 segundos, o pipeline ativa `adaptive_compact_v1`, restrito aos modos
+`devotional_application` e `pastoral_encouragement`. O Short começa com uma interrupção emocional
+curada de 10 a 12 palavras, entra imediatamente em uma fala direta de Jesus entre aspas e termina
+com a referência bíblica falada, sem “lemos” e sem CTA. Em 15 segundos, usa de 41 a 46 palavras,
+até seis cenas, trecho literal de até 28 palavras e até dois trabalhadores de imagens. O seletor
+aceita somente combinações com força de hook, valor da mensagem e potencial de replay acima dos
+pisos do perfil. A duração nunca é completada com silêncio. Na faixa adaptativa, qualquer voz
+íntegra entre os limites passa; cobertura do alvo preferencial e pausas são avisos. A revisão
+bíblica determinística, a qualidade visual, o render final e as validações técnicas de upload
+permanecem.
+
+Para um vídeo dedicado a um personagem, use o índice narrativo. Ele seleciona somente uma história
+cadastrada para o nome ou alias informado, ativa `character_portrait` e preenche a fonte principal,
+o contexto completo e as passagens relacionadas. Por exemplo, para Judas com a segunda voz:
+
+```powershell
+uv run pipeline-videos new-character-video Judas --format short --duration 60 `
+  --voice-variant jesus_2
+```
+
+O formato padrão desse comando é vídeo longo de 540 segundos. Retratos narrativos em Short precisam
+ter de 45 a 180 segundos; o catálogo narrativo nunca entra no perfil devocional compacto de 15 a 44
+segundos. Nomes alternativos como `mulher siro-fenícia`, `Simão Pedro`, `Saulo` e `Madalena` são
+resolvidos pelo mesmo índice. As opções são validadas antes de criar a pasta ou reservar a passagem.
 
 Para usar uma locução anexada sem ElevenLabs:
 
@@ -202,13 +227,46 @@ descrito em [Produção remota](docs/remote-production.md). A reserva é commita
 
 Passagens principais são controladas por formato: um uso principal em vídeo longo não esgota o
 estoque dos Shorts, e citações complementares de longos não bloqueiam nenhum futuro tema principal.
-O banco de expansão é carregado automaticamente antes da seleção. Quando todas as passagens
-principais de um formato completam um ciclo, o seletor inicia outro pela passagem menos utilizada,
-sem reutilizar referências ainda reservadas por jobs ativos. Consulte a capacidade sem reservar:
+Os bancos verificados são carregados automaticamente antes da seleção. O catálogo combinado possui
+557 candidatos: 76 legados, 120 falas diretas de Jesus curadas para Shorts compactos, 180 versos
+gerais, 100 âncoras extensas para vídeos longos e 81 histórias narrativas. O segmento
+`narrative_story` cobre 88 personagens e grupos, com 324 excertos verificados somando âncora e
+passagens relacionadas. Ele é estritamente opt-in por personagem; não participa da seleção comum.
+Candidatos `long_form_anchor` ficam fora da seleção de Shorts; `passage` registra a citação literal e
+`context_passage` preserva o intervalo maior para estudo. Quando todas as passagens principais de um
+formato completam um ciclo, o seletor inicia outro pela passagem menos utilizada, sem reutilizar
+referências ainda reservadas por jobs ativos.
+Consulte a capacidade sem reservar:
 
 ```powershell
 uv run pipeline-videos catalog status --format short
 uv run pipeline-videos catalog status --format long
+```
+
+O banco de 400 itens está em `config/bible/curated-verse-bank-v2.json`. Ele é reproduzível a partir
+dos artefatos VPL e USFM da Bíblia Portuguesa Mundial publicados pelo eBible.org e registra revisão,
+URL e SHA-256 da fonte. Para reconstruí-lo após atualizar a fonte oficial:
+
+```powershell
+uv run python scripts/build_curated_verse_bank.py <porbrbsl_vpl.txt> <diretorio-usfm> `
+  config/bible/curated-verse-bank-v2.json `
+  --exclude-catalog config/bible/shorts-verse-catalog.json `
+  --exclude-catalog config/bible/shorts-verse-expansion-bank.json
+```
+
+O gerador extrai as falas compactas das marcações USFM de fala de Jesus, rejeita trechos sem valor
+autônomo e exige hooks curados de 10 a 12 palavras. Para 15 a 20 segundos, a contagem inclui a forma
+real da referência falada — inclusive as duas palavras adicionais de um intervalo de versículos — e
+mantém pelo menos 20 pacotes elegíveis por duração.
+
+O banco narrativo fica em `config/bible/narrative-character-bank-v1.json`. Cada item registra nomes e
+aliases do personagem, passagem-âncora, contexto da história, limites de interpretação e ao menos
+três excertos relacionados classificados como contexto, desenvolvimento, desfecho ou relato
+paralelo. Para reconstruí-lo a partir do VPL oficial da BPM:
+
+```powershell
+uv run python scripts/build_narrative_character_bank.py <porbrbsl_vpl.txt> `
+  config/bible/narrative-character-bank-v1.json
 ```
 
 O projeto já nasce com `creative_retention_v3`: no perfil padrão, hook de até dois segundos,
@@ -259,23 +317,22 @@ uv run pipeline-videos approve salmo-121 briefing --by "Pedro"
 
 ### 2. Roteiro e revisão bíblica
 
-Em Shorts reais, use primeiro a etapa especializada. O roteirista lê somente a fila e grava um
-pacote no staging; o processo principal agrega as falhas determinísticas. Depois, um revisor bíblico
-independente lê um contexto selado e grava somente a revisão no staging. O import acontece uma vez,
-apenas quando roteiro e revisão passam juntos:
+Em Shorts compactos, a fila pede somente um `CompactVisualPlan`. Hook, citação, referência, seções,
+beats e revisão bíblica já estão selados pelo catálogo; o planejador não reescreve a locução. O
+preflight permite uma única correção agregada e depois usa o fallback determinístico. O import
+acontece uma vez:
 
 ```powershell
 uv run pipeline-videos script shorts-prepare davi-e-golias
-# O roteirista escreve apenas em script/staging/shorts-script-specialist/package.json
+# O planejador visual escreve apenas em script/staging/shorts-script-specialist/package.json
 uv run pipeline-videos script shorts-check-staging davi-e-golias
-uv run pipeline-videos script shorts-review-prepare davi-e-golias
-# O biblical_reviewer escreve apenas em reviews/staging/biblical-reviewer/review.json
-uv run pipeline-videos script shorts-check-reviewed-staging davi-e-golias
+# Se a única correção não resolver:
+uv run pipeline-videos script shorts-fallback davi-e-golias
 uv run pipeline-videos script shorts-import davi-e-golias
 ```
 
 O `shorts-check-staging` é somente leitura e devolve, de uma vez, todos os erros detectáveis do
-pacote. O especialista deve corrigir o lote completo antes do único import. O import também
+plano. Fora do compacto, a fila pode solicitar o pacote completo e uma revisão independente. O import também
 sincroniza deterministicamente os campos duplicados sem reescrever o staging: `open_loop` nos
 formatos legados e promessa, pergunta opcional, resolução, valor final e CTA em
 `creative_retention_v3`.
@@ -292,8 +349,10 @@ Novos Shorts padrão seguem `creative_retention_v3`, selecionam uma direção ed
 estruturas documentadas e terminar em até dois segundos. A citação verificada entra entre 8 e 20
 segundos. No perfil compacto, `hook_contract=cinematic_interruption_v1`: a primeira fala parece
 Jesus interrompendo um pensamento do espectador e é seguida imediatamente por uma citação direta
-de Jesus. Em 15 segundos, a citação ocupa de 2 a 12,3 segundos e a referência falada encerra de
-12,3 a 15 segundos, sem CTA. No perfil padrão, o valor cresce até um reengajamento entre 40% e 60%
+de Jesus. Em 15 segundos, o hook curado ocupa de 0 a 3,5 segundos, a citação de 3,5 a 12,3 e a
+referência falada de 12,3 a 15 segundos, sem CTA;
+qualquer falta de duração bloqueia o pacote em vez de gerar silêncio. No perfil padrão, o valor
+cresce até um reengajamento entre 40% e 60%
 da duração. A resolução pode ser factual,
 explicativa, analítica, filosófica ou devocional. Aplicação e callback só entram quando servem ao
 modo. Fora do perfil compacto, o encerramento pede somente comentar, inscrever-se ou compartilhar,
@@ -358,6 +417,17 @@ uv run pipeline-videos set-palette salmo-121 amanhecer-quente
 uv run pipeline-videos set-style salmo-121 cinematic-family-3d-animation
 ```
 
+Para criar um Short já no fluxo anterior de animação 3D com capa integrada, use explicitamente:
+
+```powershell
+uv run pipeline-videos new short-3d --title "Short 3D" --duration 60 --format short `
+  --style cinematic-family-3d-animation
+```
+
+Em um Short existente, `set-style ... cinematic-family-3d-animation` também restaura os contratos
+de planejamento por seção, thumbnail integrada e frame zero; voltar para
+`biblical-midcentury-gouache` restaura blocos por narração e frame automático.
+
 ### 4. Imagens pelo Codex
 
 O processo local não possui um endpoint para invocar a ferramenta embutida da assinatura. Por isso
@@ -403,8 +473,11 @@ uv run pipeline-videos audio generate salmo-121 --allow-external
 continua disponível apenas para uma voz personalizada fora desses presets.
 
 `--allow-external` é obrigatório para a ElevenLabs porque a chamada consome créditos. O padrão de
-saída é `mp3_44100_128`, convertido localmente para WAV 48 kHz. O áudio é gerado por cena; hashes
-evitam repetir chamadas e `--scene scene-003 --force` regenera somente um trecho.
+saída é `mp3_44100_128`, convertido localmente para WAV 48 kHz. No fluxo geral, o áudio é gerado por
+cena. Em `adaptive_compact_v1`, a narração completa é gerada em uma única chamada e os WAVs das
+cenas são recortes sem perda guiados pelo alinhamento de palavras; isso preserva a pronúncia e a
+interpretação vocal entre hook, versículo e referência. Hashes evitam repetir chamadas e, nesse
+perfil, `--scene scene-003 --force` regenera a unidade contínua completa à qual a cena pertence.
 
 Provedor gratuito de teste:
 
@@ -468,7 +541,7 @@ aprovação humana nem autoriza publicação pública ou agendamento.
 #### Mixagem padronizada
 
 Projetos novos usam `voice_music_loudness_v1`. O FFmpeg normaliza a narração para **-18 LUFS** e
-deriva o alvo da música pela diferença persistida de **16 LU**, resultando em **-34 LUFS** por
+deriva o alvo da música pela diferença persistida de **13 LU**, resultando em **-31 LUFS** por
 padrão. Limites de true peak protegem contra clipping; os campos de ganho permanecem disponíveis
 somente como trims deliberados. Assim, uma música originalmente masterizada mais alta não cobre a
 voz, e a proporção se mantém entre faixas e vídeos diferentes. Projetos antigos continuam usando o
@@ -479,9 +552,10 @@ em LU. Qualquer divergência entre o projeto e o manifesto bloqueia a validaçã
 
 ### 7. Especialista de título, descrição, SEO e thumbnail
 
-Projetos reais usam um subagente `youtube_growth_specialist`. Nos projetos novos, a fila é preparada
-depois da importação das imagens. Shorts editam diretamente a imagem ativa da abertura; longos usam
-o tema central do briefing no template `biblical_cinematic_landscape_v1`, sem imagem de referência:
+Projetos reais usam um subagente `youtube_growth_specialist`. Nos Shorts novos, ele produz somente
+título, descrição, tags e estratégia; `external_image_generation_required=false`, sem arquivo de
+thumbnail. O perfil 3D legado edita a imagem ativa da abertura. Longos usam o tema central do
+briefing no template `biblical_cinematic_landscape_v1`, sem imagem de referência:
 
 ```powershell
 uv run pipeline-videos metadata growth-prepare salmo-121
@@ -489,8 +563,9 @@ uv run pipeline-videos metadata growth-prepare salmo-121
 uv run pipeline-videos metadata growth-import salmo-121
 ```
 
-O especialista entrega exatamente uma combinação de título e thumbnail, uma
-descrição única, palavras-chave, intenção de busca, hipótese de CTR e justificativas registradas em
+O especialista entrega exatamente um título no perfil padrão de Shorts; nos longos e no perfil 3D
+legado, entrega uma combinação de título e thumbnail. Também produz uma descrição única,
+palavras-chave, intenção de busca, hipótese de CTR e justificativas registradas em
 `youtube/seo-strategy.json`. O agente principal valida e importa o pacote; o subagente não altera
 `project.json`, aprovações ou ativos em uso.
 
@@ -527,14 +602,12 @@ causalidade a partir de poucos dados.
 
 O objetivo é aumentar relevância, clareza e probabilidade de clique sem clickbait enganoso. Não há
 garantia de viralização: o próprio YouTube considera relevância, satisfação, watch time, histórico do
-público, concorrência e sazonalidade. Em Shorts novos, o especialista faz uma chamada de imagegen
-para editar a imagem ativa da abertura e entrega o bitmap final com texto, destaque vermelho e
-elemento narrativo incorporados. Em vídeos longos novos, faz uma geração horizontal 16:9 sem
+público, concorrência e sazonalidade. Em Shorts novos, o especialista não chama `imagegen`, não cria
+PNG e não insere capa no frame zero. Em vídeos longos novos, faz uma geração horizontal 16:9 sem
 referência visual, usando integralmente o prompt temático versionado e proibindo texto, letras,
 logotipos e marcações. O importador apenas normaliza dimensões e formato, sem aplicar texto com
 Pillow. A primeira saída válida é mantida; nova tentativa automática ocorre somente quando
-`moderation_blocked` não produz imagem. Projetos legados preservam o contrato armazenado. Em Shorts,
-a capa ocupa exatamente o frame zero.
+`moderation_blocked` não produz imagem. Projetos legados preservam o contrato armazenado.
 
 Projetos novos usam também `search_first_unique_v2`. A descrição abre com a consulta principal,
 passagem e valor concreto, contém ao menos dois parágrafos e não aceita CTAs genéricos como
@@ -544,7 +617,7 @@ entrega de oito a quinze tags relevantes — consulta, passagem, livro e variaç
 tags como motor principal de distribuição nem despejá-las na descrição. Hashtags são opcionais e
 limitadas a três diretamente relacionadas.
 
-Nos Shorts, a tipografia integrada segue `integrated_extruded_3d_v1`: as letras são modeladas como
+No perfil 3D legado de Shorts, a tipografia integrada segue `integrated_extruded_3d_v1`: as letras são modeladas como
 objetos 3D da própria cena, com extrusão espessa, bordas chanfradas, textura material, highlights, sombras de
 contato/oclusão e perspectiva coerentes com a câmera e a iluminação. A palavra dominante recebe
 escala muito maior, enquanto a palavra vermelha e a marcação narrativa mantêm o mesmo volume e
@@ -646,17 +719,16 @@ e o cache individual. Bases visuais equivalentes de rascunho/final são comparti
 atômica. Quando a configuração da prévia é idêntica à do final, o arquivo é copiado sem uma segunda
 recodificação completa.
 
-Projetos novos usam blur uniforme com sigma 8 em todo o fundo. Nos Shorts, a thumbnail sobreposta
-no frame zero permanece totalmente nítida; a partir do primeiro quadro narrativo, o mesmo blur é
-aplicado a todas as cenas. As legendas `active_card_v2` entram progressivamente, palavra por palavra,
+Projetos novos usam blur uniforme com sigma 8 em todo o fundo. O perfil padrão de Shorts começa
+diretamente na primeira cena narrativa; somente o perfil 3D legado mantém a thumbnail sobreposta no
+frame zero. As legendas `active_card_v2` entram progressivamente, palavra por palavra,
 com animação curta de posição, escala e opacidade, sem alterar tipografia, card ou sincronização.
 
-Nos Shorts novos, o gerador cria uma capa final e ela ocupa o frame zero. Em versículos longos, o
-construtor
-cria mudanças visuais aproximadamente a cada 5,5 segundos, preferindo pontuação e limites de oração;
-isso pode aumentar o número de imagens para dar mais ritmo à abertura. As filas continuam usando
-schemas compactados e arquivos de contexto dedicados, e os validadores locais completos permanecem
-como autoridade na importação.
+Nos Shorts novos, `visual_scenes` define os blocos antes do áudio e cada segmento guarda tanto
+`scene_id` quanto `narration_block_id`. As filas continuam usando
+schemas compactados e arquivos de contexto dedicados. Em `completion_first_v1`, somente mídia,
+duração solicitada, Bíblia/fonte, ativos, segurança, privacidade e custo autorizado bloqueiam; SEO,
+estética e heurísticas de retenção são avisos.
 
 Para conferir tudo sem alterar arquivos nem consumir créditos:
 
@@ -674,7 +746,8 @@ uv run pipeline-videos audit tokens salmo-121
 
 Ela separa coordenação, roteiro, revisão bíblica, imagens e crescimento em
 `audit/production-metrics.json`, compara o uso efetivo aos orçamentos persistidos e atualiza uma
-seção idempotente de `audit/report.md` sem apagar conteúdo anterior.
+seção idempotente de `audit/report.md` sem apagar conteúdo anterior. Orçamento excedido é apenas
+telemetria: aciona fallback quando necessário, mas nunca abandona a entrega.
 
 ## Estrutura de cada vídeo
 

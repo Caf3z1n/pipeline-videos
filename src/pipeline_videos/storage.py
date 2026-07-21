@@ -256,6 +256,10 @@ class ProjectLayout:
         return self.root / "youtube" / "seo-strategy.json"
 
     @property
+    def growth_warnings(self) -> Path:
+        return self.root / "youtube" / "growth-warnings.json"
+
+    @property
     def thumbnail(self) -> Path:
         return self.root / "youtube" / "thumbnail.png"
 
@@ -282,6 +286,10 @@ class ProjectLayout:
     @property
     def autopilot_state(self) -> Path:
         return self.root / "logs" / "autopilot-state.json"
+
+    @property
+    def coordinator_job(self) -> Path:
+        return self.root / "logs" / "coordinator-job.json"
 
     def ensure_directories(self) -> None:
         for directory in (

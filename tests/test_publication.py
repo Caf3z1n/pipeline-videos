@@ -160,12 +160,22 @@ def test_google_client_updates_snippet_and_status_separately() -> None:
     }
 
 
-def _ready_project(tmp_path, *, video_format: str = "landscape"):
+def _ready_project(
+    tmp_path,
+    *,
+    video_format: str = "landscape",
+    legacy_short_profile: bool = True,
+):
     layout = create_project(
         "video-publicavel",
         "Vídeo publicável",
         projects_dir=tmp_path,
         video_format=video_format,
+        style_id=(
+            "cinematic-family-3d-animation"
+            if video_format == "short" and legacy_short_profile
+            else None
+        ),
         project_date=date(2026, 7, 14),
     )
     metadata = YouTubeMetadata(
@@ -183,7 +193,9 @@ def _ready_project(tmp_path, *, video_format: str = "landscape"):
     write_text(layout.description, metadata.description + "\n\n" + "\n".join(metadata.chapters))
     layout.final_video.parent.mkdir(parents=True, exist_ok=True)
     layout.final_video.write_bytes(b"mp4 de teste")
-    Image.new("RGB", (1280, 720), "#31485F").save(layout.thumbnail)
+    youtube_auto_frame = video_format == "short" and not legacy_short_profile
+    if not youtube_auto_frame:
+        Image.new("RGB", (1280, 720), "#31485F").save(layout.thumbnail)
     write_text(layout.srt, "1\n00:00:00,000 --> 00:00:01,000\nOlá\n")
 
     manifest = layout.load_manifest()
@@ -206,7 +218,7 @@ def _ready_project(tmp_path, *, video_format: str = "landscape"):
                 {
                     "metadata": sha256_file(layout.metadata),
                     "description": sha256_file(layout.description),
-                    "thumbnail": sha256_file(layout.thumbnail),
+                    "thumbnail": (None if youtube_auto_frame else sha256_file(layout.thumbnail)),
                 }
             )
         )
@@ -367,6 +379,35 @@ def test_short_upload_skips_ineffective_custom_thumbnail_api_call(tmp_path) -> N
     assert record.thumbnail.status == "skipped"
     assert record.thumbnail.source_hash == sha256_file(layout.thumbnail)
     assert "selecione manualmente" in layout.load_manifest().stages["publication"].note
+
+
+def test_new_short_upload_needs_no_thumbnail_file_and_leaves_frame_selection_to_youtube(
+    tmp_path,
+) -> None:
+    layout = _ready_project(
+        tmp_path,
+        video_format="short",
+        legacy_short_profile=False,
+    )
+    client = FakeYouTubeClient()
+
+    plan = prepare_publication(layout, verify_validation=False)
+    record = upload_project(
+        layout,
+        client=client,
+        allow_external=True,
+        confirmation=layout.load_manifest().project_id,
+        verify_validation=False,
+    )
+
+    assert plan.thumbnail_path is None
+    assert plan.thumbnail_hash is None
+    assert not layout.thumbnail.exists()
+    assert client.thumbnail_calls == 0
+    assert record.thumbnail.status == "skipped"
+    assert record.thumbnail.source_path is None
+    assert record.thumbnail.source_hash is None
+    assert "YouTube selecionará um frame" in layout.load_manifest().stages["publication"].note
 
 
 def test_retry_after_thumbnail_failure_reuses_uploaded_video(tmp_path) -> None:

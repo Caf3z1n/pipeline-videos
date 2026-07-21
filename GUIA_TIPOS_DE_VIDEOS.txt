@@ -1,0 +1,323 @@
+GUIA DE TIPOS DE VÍDEOS DO PIPELINE
+===================================
+
+Este arquivo explica, em linguagem simples, os tipos de vídeos bíblicos que podem ser criados.
+Você não precisa usar os nomes técnicos ao fazer um pedido. Basta descrever naturalmente o que
+quer, e o pipeline escolhe ou configura a direção mais adequada.
+
+
+COMO PEDIR UM VÍDEO
+-------------------
+
+Um pedido simples pode conter:
+
+- formato: Short ou vídeo longo;
+- duração desejada;
+- tema, personagem ou passagem;
+- tipo de vídeo, se você quiser escolher;
+- tom desejado, como factual, curioso, reflexivo, investigativo ou devocional;
+- voz: Jesus 1, que é o padrão, ou Jesus 2.
+
+Exemplos:
+
+"Faça um Short de 50 segundos contando a queda de Jericó apenas com fatos bíblicos."
+
+"Faça um Short de 52 segundos sobre uma curiosidade de Sansão, usando Jesus 2."
+
+"Faça um vídeo longo de 10 minutos refletindo filosoficamente sobre o silêncio de Deus no livro
+de Jó."
+
+"Faça um vídeo longo comparando as reações de Pedro e Judas depois de seus erros."
+
+Se você não escolher o tipo, o modo automático analisa o tema, a passagem e o histórico recente
+do canal para selecionar uma direção que aumente a variedade dos vídeos.
+
+
+DURAÇÃO DOS SHORTS
+------------------
+
+O comando do pipeline aceita uma duração-alvo entre 30 e 180 segundos. Entretanto, o contrato
+criativo atual dos Shorts está calibrado para vídeos entre 45 e 55 segundos, com 105 a 130
+palavras, 8 a 10 cenas, hook inicial, citação bíblica, desenvolvimento, resolução e CTA.
+
+Na prática, hoje você pode pedir facilmente durações como 45, 48, 50, 52 ou 55 segundos. A duração
+informada é um alvo; o áudio real da ElevenLabs pode deixar o resultado alguns segundos mais curto
+ou mais longo. Pedidos fora da faixa de 45 a 55 segundos exigem que o contrato de roteiro seja
+adaptado antes, para que não seja apenas um vídeo de aproximadamente 50 segundos dentro de um
+projeto configurado com outro número.
+
+Exemplo de comando:
+
+uv run pipeline-videos new-short --duration 50
+
+
+OS 16 TIPOS DE VÍDEOS
+---------------------
+
+1. STORYTELLING BÍBLICO FACTUAL
+
+O que significa:
+Conta uma história da Bíblia seguindo ações, decisões, viradas e consequências registradas no
+texto. Não inventa diálogos, pensamentos, emoções ou detalhes que a Bíblia não informa.
+
+Funciona melhor para:
+Narrativas conhecidas ou episódios com começo, progressão e desfecho claros.
+
+Exemplo de pedido:
+"Conte a fuga de Pedro da prisão como uma narrativa factual de 50 segundos."
+
+
+2. RETRATO DE PERSONAGEM
+
+O que significa:
+Examina uma pessoa bíblica por suas escolhas, mudanças, virtudes, limites e contradições. Não conta
+somente o que aconteceu; procura mostrar que tipo de personagem emerge das evidências.
+
+Funciona melhor para:
+Pedro, Davi, Paulo, José, Ester, Gideão, Marta, Tomé e outros personagens com trajetórias marcantes.
+
+Exemplo de pedido:
+"Faça um retrato de Tomé sem reduzi-lo apenas ao homem que duvidou."
+
+
+3. EXPLICAÇÃO DE PASSAGEM
+
+O que significa:
+Explica o que uma passagem afirma, como suas ideias progridem, quais relações são importantes e o
+que o texto não permite concluir.
+
+Funciona melhor para:
+Versículos famosos, parábolas, discursos, salmos e trechos frequentemente lidos fora do contexto.
+
+Exemplo de pedido:
+"Explique Filipenses, capítulo 4, versículo 13, sem transformar o versículo em promessa de sucesso."
+
+
+4. CURIOSIDADE BÍBLICA
+
+O que significa:
+Apresenta um detalhe verificável que a maioria das pessoas não percebe e mostra como esse detalhe
+muda ou aprofunda a leitura da passagem.
+
+Funciona melhor para:
+Shorts, fatos pouco observados, detalhes narrativos, nomes, repetições e conexões claras no texto.
+
+Exemplo de pedido:
+"Faça um Short sobre um detalhe pouco percebido na luta de Davi e Golias."
+
+
+5. CONTEXTO HISTÓRICO VERIFICADO
+
+O que significa:
+Reconstrói aspectos culturais, políticos, geográficos ou históricos que ajudam a compreender uma
+passagem. Só usa informações sustentadas por fontes históricas verificadas e preserva incertezas.
+
+Funciona melhor para:
+Vídeos longos sobre costumes, impérios, cidades, viagens, práticas sociais e acontecimentos
+históricos relacionados ao mundo bíblico.
+
+Exemplo de pedido:
+"Explique o contexto histórico de Corinto e como ele ajuda a entender a primeira carta de Paulo."
+
+
+6. REFLEXÃO FILOSÓFICA
+
+O que significa:
+Desenvolve uma opinião ou argumento autoral a partir de uma questão bíblica. Distingue claramente
+o que a Bíblia afirma, o que é interpretação e o que é reflexão própria.
+
+Funciona melhor para:
+Liberdade, sofrimento, justiça, identidade, culpa, perdão, poder, esperança, silêncio e sentido.
+
+Exemplo de pedido:
+"Reflita filosoficamente sobre por que o perdão não apaga automaticamente as consequências."
+
+
+7. INVESTIGAÇÃO TEMÁTICA
+
+O que significa:
+Rastreia um tema por diferentes livros e passagens, procurando continuidade, mudanças, contrastes
+e limites. Exige pelo menos duas fontes bíblicas verificadas.
+
+Funciona melhor para:
+Vídeos longos sobre temas amplos, como sabedoria, aliança, justiça, exílio, fé, descanso ou reino.
+
+Exemplo de pedido:
+"Investigue como a ideia de descanso aparece do Gênesis até Hebreus."
+
+
+8. COMPARAÇÃO E CONTRASTE
+
+O que significa:
+Compara personagens, decisões, acontecimentos ou passagens sem ignorar as diferenças de contexto.
+Mostra semelhanças, diferenças e o que pode ou não ser concluído da comparação.
+
+Funciona melhor para:
+Pedro e Judas, Saul e Davi, Marta e Maria, dois reis, duas parábolas ou duas respostas ao mesmo tipo
+de conflito.
+
+Exemplo de pedido:
+"Compare como Saul e Davi reagiram quando foram confrontados por seus pecados."
+
+
+9. DILEMA ÉTICO
+
+O que significa:
+Examina uma decisão moral real, suas alternativas, seus custos e a tensão que permanece. Evita
+respostas superficiais e não transforma situações complexas em frases prontas.
+
+Funciona melhor para:
+Conflitos sobre verdade, lealdade, justiça, autoridade, violência, responsabilidade e misericórdia.
+
+Exemplo de pedido:
+"Analise o dilema ético das parteiras hebreias diante da ordem do faraó."
+
+
+10. CORREÇÃO DE LEITURA COMUM
+
+O que significa:
+Apresenta uma interpretação popular e a confronta com aquilo que a passagem realmente sustenta.
+A conclusão oferece uma formulação mais precisa, sem criar polêmica artificial.
+
+Funciona melhor para:
+Versículos usados fora do contexto, frases atribuídas à Bíblia e simplificações muito repetidas.
+
+Exemplo de pedido:
+"Explique por que a Bíblia não diz que o dinheiro é a raiz de todos os males."
+
+
+11. EXPLORAÇÃO LITERÁRIA
+
+O que significa:
+Observa como o texto produz sentido por imagens, repetições, contrastes, estrutura, ritmo ou mudança
+de voz. O foco está na construção do texto, não apenas na aplicação prática.
+
+Funciona melhor para:
+Salmos, poesia, profecias, parábolas e narrativas com padrões literários claros.
+
+Exemplo de pedido:
+"Mostre como a repetição funciona no Salmo 136 e que efeito ela produz."
+
+
+12. ENSAIO GUIADO POR PERGUNTA
+
+O que significa:
+Parte de uma pergunta específica, considera respostas possíveis, examina evidências e objeções e
+pode terminar com uma conclusão, uma reformulação ou uma incerteza honestamente preservada.
+
+Funciona melhor para:
+Questões que não cabem em uma resposta rápida ou meramente motivacional.
+
+Exemplo de pedido:
+"Por que pessoas fiéis também atravessam períodos em que Deus parece distante?"
+
+
+13. RECONSTRUÇÃO CRONOLÓGICA
+
+O que significa:
+Organiza fatos, viagens, mudanças de lugar e acontecimentos bíblicos em uma sequência temporal
+verificável. Não preenche lacunas com acontecimentos inventados.
+
+Funciona melhor para:
+Viagens de Paulo, trajetória de Abraão, semana da crucificação, sucessão de reis ou eventos que
+aparecem em passagens diferentes.
+
+Exemplo de pedido:
+"Reconstrua em ordem os acontecimentos entre a prisão e a crucificação de Jesus."
+
+
+14. CAUSA E CONSEQUÊNCIA
+
+O que significa:
+Acompanha como uma decisão inicial produz efeitos imediatos e consequências maiores ao longo da
+narrativa. Pode mostrar confirmação, reversão, arrependimento ou agravamento.
+
+Funciona melhor para:
+Escolhas de reis, conflitos familiares, desobediência, coragem, omissão e decisões sob pressão.
+
+Exemplo de pedido:
+"Mostre a sequência de consequências iniciada pela decisão de Jonas de fugir."
+
+
+15. DEVOCIONAL APLICADO
+
+O que significa:
+Conecta a passagem a uma resposta prática específica para a vida do espectador. Continua fiel ao
+texto e não promete que determinada atitude eliminará sofrimento ou garantirá sucesso.
+
+Funciona melhor para:
+Oração, perseverança, ansiedade, reconciliação, disciplina, generosidade e decisões cotidianas.
+
+Exemplo de pedido:
+"Faça um devocional sobre como responder à ansiedade a partir de Primeira Pedro, capítulo 5."
+
+
+16. ENCORAJAMENTO PASTORAL
+
+O que significa:
+Acolhe a dor, o medo ou o cansaço do espectador e oferece esperança bíblica responsável. Não trata
+sofrimento como falta de fé nem transforma a passagem em fórmula de solução imediata.
+
+Funciona melhor para:
+Luto, solidão, esgotamento, medo, culpa, espera, recomeço e momentos de incerteza.
+
+Exemplo de pedido:
+"Crie uma mensagem pastoral para quem está cansado de esperar, baseada no Salmo 13."
+
+
+POSTURAS QUE DEFINEM O TOM
+--------------------------
+
+Factual:
+Narra e explica fatos verificáveis, sem inventar detalhes ou opiniões.
+
+Expositiva:
+Explica relações e sentidos do texto, identificando o que é interpretação.
+
+Analítica:
+Compara evidências e constrói conclusões proporcionais ao que foi demonstrado.
+
+Exploratória:
+Permite reflexão e opinião autoral, deixando claro o que é interpretação própria.
+
+Devocional:
+Oferece aplicação ou encorajamento sem prometer resultados que a Bíblia não promete.
+
+
+REGRAS QUE CONTINUAM EM TODOS OS MODOS
+--------------------------------------
+
+- Todo Short começa com um hook forte, específico e honesto.
+- Todo Short possui pelo menos uma citação bíblica literal e verificada.
+- Vídeos longos mantêm citações verificadas distribuídas conforme a duração.
+- Afirmações bíblicas, contexto verificado, interpretação e elaboração criativa são distinguidos.
+- Nenhum modo pode inventar versículos, fatos históricos, falas ou detalhes bíblicos.
+- Cada parte precisa acrescentar informação, evidência, contexto, argumento ou consequência.
+- O encerramento precisa entregar o valor prometido, mas não precisa ser motivacional.
+- O CTA pede exatamente uma ação.
+
+
+ESCOLHA RÁPIDA
+--------------
+
+Se você quer contar o que aconteceu:
+Use Storytelling bíblico factual ou Reconstrução cronológica.
+
+Se você quer explicar melhor um texto:
+Use Explicação de passagem, Curiosidade bíblica ou Exploração literária.
+
+Se você quer analisar ideias e decisões:
+Use Retrato de personagem, Investigação temática, Comparação e contraste ou Causa e consequência.
+
+Se você quer discutir uma questão complexa:
+Use Reflexão filosófica, Dilema ético ou Ensaio guiado por pergunta.
+
+Se você quer corrigir uma interpretação popular:
+Use Correção de leitura comum.
+
+Se você quer uma mensagem prática ou acolhedora:
+Use Devocional aplicado ou Encorajamento pastoral.
+
+Se você não sabe qual escolher:
+Diga apenas o tema, o formato e a duração. O modo automático escolhe uma direção e evita repetir
+demais os tipos usados recentemente.

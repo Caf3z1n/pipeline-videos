@@ -21,8 +21,16 @@ from pipeline_videos.models import (
     USER_SIX_HOOK_FAMILIES,
     BiblicalReview,
     Briefing,
+    CompactVisualPlan,
+    ScriptDocument,
+    ScriptSection,
+    ShortsCinematicDevotionalDirection,
+    ShortsRetentionBeat,
     ShortsScriptConfig,
     ShortsScriptPackage,
+    ShortsScriptStrategy,
+    ShortsVerseOpening,
+    ShortsVisualScene,
     SourceEntry,
     SourceLibrary,
     StageStatus,
@@ -40,8 +48,8 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION = "5.0"
-SHORTS_SCRIPT_ALGORITHM_VERSION = "6.0"
+SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION = "5.2"
+SHORTS_SCRIPT_ALGORITHM_VERSION = "6.2"
 LEGACY_SCRIPTURE_BOUNDARY_PHRASE = "Até aqui, o texto bíblico."
 
 
@@ -151,6 +159,7 @@ def _compact_cinematic_instructions(
     *,
     project_id: str,
     main_passage_spoken: str,
+    required_hook: str,
     config: ShortsScriptConfig,
     main_agent_mode: bool,
 ) -> list[str]:
@@ -174,9 +183,8 @@ def _compact_cinematic_instructions(
             "não uma explicação bíblica, sermão, aula, lista de conselhos ou narração de história."
         ),
         (
-            "A primeira seção contém somente uma interrupção emocional curta, de duas a oito "
-            "palavras, como 'Não desista agora.', 'Olhe para mim.', "
-            "'Você ainda não perdeu essa batalha.' ou 'Eu sei que você está cansado.'."
+            "A primeira seção contém somente o hook curado para esta passagem, sem reescrever, "
+            f"encurtar ou completar: '{required_hook}'."
         ),
         (
             "Logo após o hook, cite o excerpt literal de Jesus. A seção bíblica deve conter "
@@ -203,12 +211,22 @@ def _compact_cinematic_instructions(
         (
             f"O roteiro completo deve ter de {config.min_words} a {config.max_words} palavras. "
             f"O excerpt literal pode ter no máximo {config.max_literal_verse_words} palavras e "
-            "não pode ser cortado, parafraseado ou completado."
+            "não pode ser cortado, parafraseado ou completado. Se faltar duração, o pacote deve "
+            "falhar; nunca reserve ou peça silêncio para preencher o vídeo."
         ),
         (
-            "As direções visuais mostram Jesus como centro emocional, com olhar, presença, "
-            "silêncio, "
-            "luz e escala épica; preservam cinematic-family-3d-v1 e um único momento por imagem."
+            "A scripture_candidate pode conter uma faixa contínua de dois ou mais versículos "
+            "quando a sequência for necessária ou benéfica para preservar sentido e continuidade. "
+            "Use integralmente o excerpt verificado, mantenha a referência exata da faixa e "
+            "respeite os limites de palavras e tempo; nunca amplie a citação apenas para preencher "
+            "duração."
+            if config.allow_contiguous_multi_verse_citations
+            else "Use somente uma referência de versículo único neste projeto."
+        ),
+        (
+            "As direções visuais preservam a reverência e descrevem um único momento, um único "
+            "ambiente e uma ação principal por imagem. O estilo é aplicado depois pelo perfil "
+            "visual do projeto."
         ),
         (
             "A revisão bíblica independente deve confirmar que a fala é atribuída diretamente "
@@ -348,6 +366,7 @@ def _shorts_context_payload(
     literal_candidates: list[SourceEntry],
 ) -> dict[str, Any]:
     project = layout.load_manifest()
+    config = project.config.shorts_script
     sources = read_model(layout.sources, SourceLibrary)
     payload: dict[str, Any] = {
         "schema_version": "1.0",
@@ -355,7 +374,8 @@ def _shorts_context_payload(
             "project_id": project.project_id,
             "title": project.title,
             "target_duration_seconds": project.target_duration_seconds,
-            "narrative_standard": project.config.shorts_script.narrative_standard,
+            "narrative_standard": config.narrative_standard,
+            "citation_policy": _shorts_citation_policy(config),
         },
         "briefing": read_json(layout.briefing),
         "sources": [source.model_dump(mode="json") for source in sources.entries],
@@ -367,6 +387,299 @@ def _shorts_context_payload(
         payload["current_script_for_critique"] = read_json(layout.script)
     if layout.biblical_review.is_file():
         payload["current_biblical_review_for_critique"] = read_json(layout.biblical_review)
+    return payload
+
+
+def _shorts_citation_policy(config: ShortsScriptConfig) -> dict[str, Any]:
+    return {
+        "allow_contiguous_multi_verse_citations": (config.allow_contiguous_multi_verse_citations),
+        "multi_verse_citation_policy": config.multi_verse_citation_policy,
+        "verified_single_excerpt_required": True,
+        "exact_range_reference_required": True,
+        "max_literal_verse_words": config.max_literal_verse_words,
+        "respect_timing_window": True,
+        "padding_only_expansion_forbidden": True,
+    }
+
+
+_STRONG_COMPACT_BOUNDARY_RE = re.compile(r"[.!?;:]+[\"'’”]*?(?=\s|$)")
+_COMMA_COMPACT_BOUNDARY_RE = re.compile(r",+[\"'’”]*?(?=\s|$)")
+_SAFE_COMPACT_END_RE = re.compile(r"[.!?;:,]+[\"'’”]*$")
+
+
+def _split_compact_at_matches(text: str, pattern: re.Pattern[str]) -> list[str]:
+    chunks: list[str] = []
+    cursor = 0
+    for match in pattern.finditer(text):
+        chunk = text[cursor : match.end()].strip()
+        if chunk:
+            chunks.append(chunk)
+        cursor = match.end()
+    remainder = text[cursor:].strip()
+    if remainder:
+        chunks.append(remainder)
+    return chunks
+
+
+def _compact_word_count(text: str) -> int:
+    return len(text.split())
+
+
+def _best_compact_comma_split(chunks: list[str]) -> tuple[int, list[str]] | None:
+    candidates: list[tuple[tuple[int, int, int], int, list[str]]] = []
+    for index, chunk in enumerate(chunks):
+        split = _split_compact_at_matches(chunk, _COMMA_COMPACT_BOUNDARY_RE)
+        if len(split) < 2:
+            continue
+        for boundary in range(1, len(split)):
+            left = " ".join(split[:boundary])
+            right = " ".join(split[boundary:])
+            left_words = _compact_word_count(left)
+            right_words = _compact_word_count(right)
+            if min(left_words, right_words) < 3:
+                continue
+            score = (
+                min(left_words, right_words),
+                left_words + right_words,
+                -abs(left_words - right_words),
+            )
+            candidates.append((score, index, [left, right]))
+    if not candidates:
+        return None
+    _score, index, split = max(candidates, key=lambda item: item[0])
+    return index, split
+
+
+def _balanced_compact_chunks(text: str, count: int) -> list[str]:
+    """Split a compact quotation only at natural linguistic boundaries.
+
+    ``count`` is an upper bound.  If the quotation does not contain enough safe
+    punctuation, the visual plan intentionally uses fewer scenes instead of
+    cutting a clause at an arbitrary word.
+    """
+
+    normalized = " ".join(text.split())
+    if not normalized:
+        raise ValueError("A fala direta de Jesus não pode estar vazia.")
+    count = max(1, count)
+    chunks = _split_compact_at_matches(normalized, _STRONG_COMPACT_BOUNDARY_RE)
+    if not chunks:
+        chunks = [normalized]
+
+    while len(chunks) > count:
+        merge_at = min(
+            range(len(chunks) - 1),
+            key=lambda index: (
+                _compact_word_count(chunks[index]) + _compact_word_count(chunks[index + 1])
+            ),
+        )
+        chunks[merge_at : merge_at + 2] = [f"{chunks[merge_at]} {chunks[merge_at + 1]}"]
+
+    while len(chunks) < count:
+        candidate = _best_compact_comma_split(chunks)
+        if candidate is None:
+            break
+        index, split = candidate
+        chunks[index : index + 1] = split
+    return chunks
+
+
+def _has_safe_compact_boundary(text: str) -> bool:
+    return _SAFE_COMPACT_END_RE.search(text.strip()) is not None
+
+
+def _compact_narration_blocks(
+    *,
+    source: SourceEntry,
+    spoken_reference: str,
+    config: ShortsScriptConfig,
+) -> list[dict[str, Any]]:
+    assert source.excerpt is not None
+    scene_count = config.target_scene_max
+    verse_chunks = _balanced_compact_chunks(source.excerpt, max(1, scene_count - 2))
+    fallbacks = (
+        "Jesus segura com cuidado as mãos de uma pessoa abatida em um caminho tranquilo.",
+        "Jesus ora com um pequeno grupo reunido ao ar livre.",
+        "Jesus prega com serenidade a pessoas atentas em uma colina.",
+        "Moradas acolhedoras aparecem sob um céu luminoso, como símbolo de esperança.",
+        "Um jardim amplo e pacífico evoca o Éden sob a luz da manhã.",
+        "Jesus caminha ao lado de pessoas renovadas em uma paisagem aberta.",
+        "Uma trilha iluminada conduz um pequeno grupo para além da sombra.",
+        "Pessoas se reúnem em paz enquanto Jesus permanece próximo delas.",
+        "A luz atravessa árvores antigas e alcança pessoas em oração.",
+    )
+    blocks: list[dict[str, Any]] = [
+        {
+            "block_id": "block-001",
+            "section_id": "section-001",
+            "narration": source.compact_hook,
+            "creative_concept_required": True,
+            "fallback_scene_description": fallbacks[0],
+            "fallback_visual_relation": "contextual",
+        }
+    ]
+    for index, chunk in enumerate(verse_chunks, start=2):
+        narration = chunk
+        if index == 2:
+            narration = f"“{narration}"
+        if index == len(verse_chunks) + 1:
+            narration = f"{narration}”"
+        blocks.append(
+            {
+                "block_id": f"block-{index:03d}",
+                "section_id": "section-002",
+                "narration": narration,
+                "creative_concept_required": True,
+                "fallback_scene_description": fallbacks[(index - 1) % len(fallbacks)],
+                "fallback_visual_relation": (
+                    "literal" if index == 2 else "contextual" if index % 2 else "symbolic"
+                ),
+            }
+        )
+    blocks.append(
+        {
+            "block_id": f"block-{len(blocks) + 1:03d}",
+            "section_id": "section-003",
+            "narration": f"{spoken_reference}.",
+            "creative_concept_required": False,
+            "fallback_scene_description": (
+                "Uma Bíblia aberta repousa sobre uma mesa de madeira diante de uma paisagem serena."
+            ),
+            "fallback_visual_relation": "contextual",
+        }
+    )
+    return blocks
+
+
+def _compact_visual_context_payload(
+    layout: ProjectLayout,
+    *,
+    briefing: Briefing,
+    blocks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    project = layout.load_manifest()
+    return {
+        "schema_version": "1.0",
+        "project_id": project.project_id,
+        "task": "Describe one distinct visual scene for each creative narration block.",
+        "creative_direction": {
+            "central_theme": briefing.central_theme,
+            "audience": briefing.audience,
+            "emotional_intent": briefing.emotional_intent,
+            "visual_notes": briefing.visual_notes,
+        },
+        "visual_standard_id": project.config.images.visual_standard_id,
+        "allowed_relations": ["literal", "contextual", "symbolic"],
+        "blocks": [
+            {
+                "block_id": item["block_id"],
+                "narration": item["narration"],
+                "fallback_scene_description": item["fallback_scene_description"],
+            }
+            for item in blocks
+            if item["creative_concept_required"]
+        ],
+    }
+
+
+def _compact_visual_plan_queue(
+    layout: ProjectLayout,
+    *,
+    input_hash: str,
+    baseline_hash: str | None,
+    next_version: int,
+    job_id: str,
+    briefing: Briefing,
+    source: SourceEntry,
+    compact_reference: str,
+    spoken_reference: str,
+    config: ShortsScriptConfig,
+) -> dict[str, Any]:
+    project = layout.load_manifest()
+    blocks = _compact_narration_blocks(
+        source=source,
+        spoken_reference=spoken_reference,
+        config=config,
+    )
+    context = _compact_visual_context_payload(layout, briefing=briefing, blocks=blocks)
+    write_json(layout.shorts_script_context, context)
+    payload: dict[str, Any] = {
+        "schema_version": SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION,
+        "generated_at": utc_now(),
+        "project_id": project.project_id,
+        "job_id": job_id,
+        "input_hash": input_hash,
+        "baseline_script_hash": baseline_hash,
+        "next_script_version": next_version,
+        "status": StageStatus.WAITING_EXTERNAL.value,
+        "role": config.specialist_role,
+        "generation_mode": "deterministic_compact_visual_plan_v1",
+        "output_contract": "compact_visual_plan_v1",
+        "orchestration": {
+            "mode": "subagent",
+            "worker_id": "shorts-visual-planner",
+            "single_writer": True,
+            "may_modify_project_state": False,
+            "may_publish": False,
+            "reasoning_effort": "medium",
+            "recommended_model": "gpt-5.6-sol",
+            "context_policy": "visual_blocks_only",
+            "fork_turns": "none",
+        },
+        "inputs": {
+            "compact_context": relative_posix(layout.shorts_script_context, layout.root),
+        },
+        "outputs": {
+            "package": relative_posix(layout.shorts_script_package_staging, layout.root),
+        },
+        "schemas": {
+            "package": compact_json_schema(CompactVisualPlan.model_json_schema()),
+        },
+        "preflight": {
+            "read_only": True,
+            "command": f'uv run pipeline-videos script shorts-check-staging "{project.project_id}"',
+            "success_condition": "valid=true",
+            "returns_all_detectable_errors": True,
+            "max_model_repairs": project.config.production.max_model_repairs_per_stage,
+            "fallback_command": (
+                f'uv run pipeline-videos script shorts-fallback "{project.project_id}"'
+            ),
+        },
+        "deterministic_contract": {
+            "source_id": source.source_id,
+            "compact_reference": compact_reference,
+            "spoken_reference": spoken_reference,
+            "blocks": blocks,
+            "biblical_review_mode": config.biblical_review_mode,
+        },
+        "instructions": [
+            "Leia somente inputs.compact_context.",
+            (
+                "Devolva um conceito visual para cada block_id, na mesma ordem, sem "
+                "reescrever a narração."
+            ),
+            "Varie personagens, ações, ambientes e relações literal, contextual ou simbólica.",
+            "Descreva um único momento visual por conceito; o estilo será aplicado pelo pipeline.",
+            "Repita job_id e input_hash exatamente e grave somente outputs.package.",
+            (
+                "Execute preflight.command; se houver erros, faça no máximo uma correção "
+                "agregada. Persistindo erro, execute preflight.fallback_command e encerre."
+            ),
+            "Não altere project.json, roteiro, fontes, filas, manifestos ou aprovações.",
+        ],
+    }
+    start_stage(layout, "shorts_script", input_hash, provider="deterministic-compact-visual-plan")
+    write_json(layout.shorts_script_queue, payload)
+    wait_stage(
+        layout,
+        "shorts_script",
+        input_hash,
+        "Aguardando somente os conceitos visuais do Short compacto.",
+        [
+            relative_posix(layout.shorts_script_queue, layout.root),
+            relative_posix(layout.shorts_script_context, layout.root),
+        ],
+    )
     return payload
 
 
@@ -394,11 +707,15 @@ def prepare_shorts_script_queue(
             for source in literal_candidates
             if len(tokenize_words(source.excerpt or "")) <= config.max_literal_verse_words
             and source.spoken_by == "jesus"
+            and source.compact_hook.strip()
+            and source.compact_hook_strength_score >= config.minimum_hook_strength_score
+            and source.compact_message_value_score >= config.minimum_message_value_score
+            and source.compact_rewatch_value_score >= config.minimum_rewatch_value_score
         ]
         if not literal_candidates:
             raise ValueError(
-                "O Short compacto exige uma fala direta de Jesus verificada com no máximo "
-                f"{config.max_literal_verse_words} palavras no excerpt literal."
+                "O Short compacto exige uma fala direta de Jesus verificada, um hook curado forte "
+                "e valor de mensagem/replay acima dos pisos configurados."
             )
     input_hash = shorts_script_input_hash(layout)
     stage = project.stages["shorts_script"]
@@ -457,6 +774,19 @@ def prepare_shorts_script_queue(
     write_json(layout.shorts_script_context, context)
     main_passage = str(context["briefing"].get("main_passage", "")).strip()
     main_passage_spoken = spoken_biblical_reference(main_passage)
+    if is_compact_cinematic and config.generation_mode == "deterministic_compact_visual_plan_v1":
+        return _compact_visual_plan_queue(
+            layout,
+            input_hash=input_hash,
+            baseline_hash=baseline_hash,
+            next_version=next_version,
+            job_id=job_id,
+            briefing=briefing,
+            source=literal_candidates[0],
+            compact_reference=main_passage,
+            spoken_reference=main_passage_spoken,
+            config=config,
+        )
     inputs: dict[str, str] = {
         "compact_context": relative_posix(layout.shorts_script_context, layout.root),
     }
@@ -533,6 +863,7 @@ def prepare_shorts_script_queue(
             "closing_quote": "”",
             "opening_example": f"Em {main_passage_spoken}, lemos: “texto do versículo.”",
         },
+        "citation_policy": _shorts_citation_policy(config),
         "retention_contract": (
             {
                 "standard": "creative_retention_v3",
@@ -638,6 +969,15 @@ def prepare_shorts_script_queue(
                 "registre tradução e fonte. Dê preferência a um versículo conhecido, curto e "
                 "fácil de entender. Use additional_scriptures somente se houver outra fonte "
                 "verificada e se a segunda citação realmente acrescentar algo sem apertar o ritmo."
+            ),
+            (
+                "Uma scripture_candidate pode abranger versículos consecutivos quando a faixa "
+                "preservar melhor o sentido ou a continuidade. Nesse caso, trate a faixa como uma "
+                "única citação literal, copie o excerpt verificado integralmente, mantenha a "
+                "referência exata e respeite palavras e tempo. Não expanda a faixa só para "
+                "preencher."
+                if config.allow_contiguous_multi_verse_citations
+                else "Use somente referências de versículo único neste projeto."
             ),
             (
                 "Neste perfil de duração, verse_text pode ter no máximo "
@@ -811,8 +1151,8 @@ def prepare_shorts_script_queue(
                 "Planeje a narração e as direções visuais para produzir "
                 f"{_target_scene_instruction(config)}: "
                 "uma ação concreta por imagem e mudança visual no meio. Callback final é "
-                "obrigatório apenas no contrato v2 legado. A "
-                "thumbnail continua sendo uma edição da imagem ativa da abertura."
+                "obrigatório apenas no contrato v2 legado. A política de thumbnail é definida "
+                "separadamente pela configuração visual do projeto."
                 if is_retention_v2 or is_creative_v3
                 else "Preserve o perfil visual e o ritmo configurados no projeto."
             ),
@@ -823,9 +1163,12 @@ def prepare_shorts_script_queue(
                 "colagem, tela dividida, storyboard ou várias cenas na mesma imagem."
             ),
             (
-                "Na primeira seção, descreva em visual_direction uma única imagem-âncora "
-                "vertical, fiel ao gancho e visualmente forte: assunto dominante, emoção "
-                "ou gesto legível, conflito simples, luz direcional e espaço negativo no terço "
+                "Em visual_direction, registre apenas a orientação geral da seção; o plano "
+                "visual por bloco em strategy.visual_scenes é a autoridade para cada imagem."
+                if project.config.images.scene_planning_standard == "narration_block_visual_v1"
+                else "Na primeira seção, descreva em visual_direction uma única imagem-âncora "
+                "vertical, fiel ao gancho e visualmente forte: assunto dominante, emoção ou "
+                "gesto legível, conflito simples, luz direcional e espaço negativo no terço "
                 "superior. Não escreva texto de capa dentro da imagem e não use choque gratuito."
             ),
             (
@@ -957,6 +1300,7 @@ def prepare_shorts_script_queue(
     }
     if is_compact_cinematic:
         timeline = _short_timeline_seconds(project.target_duration_seconds, config)
+        required_hook = literal_candidates[0].compact_hook
         payload["spoken_reference_standard"] = {
             "compact_reference": main_passage,
             "spoken_reference": main_passage_spoken,
@@ -982,25 +1326,80 @@ def prepare_shorts_script_queue(
                 "contract": "cinematic_interruption_v1",
                 "selected_family": "emotional_interruption",
                 "target_end_seconds": config.hook_target_seconds,
-                "examples": [
-                    "Não desista agora.",
-                    "Olhe para mim.",
-                    "Você ainda não perdeu essa batalha.",
-                    "Eu sei que você está cansado.",
-                ],
+                "required_text": required_hook,
+                "strength_score": literal_candidates[0].compact_hook_strength_score,
             },
+            "minimum_estimated_duration_ratio": config.minimum_estimated_duration_ratio,
+            "minimum_audio_duration_ratio": config.minimum_audio_duration_ratio,
+            "maximum_narration_gap_seconds": config.maximum_narration_gap_seconds,
             "timeline_seconds": timeline,
             "direct_jesus_speech_required": True,
             "reference_after_quote_required": True,
             "cta_allowed": False,
             "target_scene_count": [config.target_scene_min, config.target_scene_max],
             "music_library_profile": "adaptive_compact_devotional_v1",
+            "citation_policy": _shorts_citation_policy(config),
         }
         payload["instructions"] = _compact_cinematic_instructions(
             project_id=project.project_id,
             main_passage_spoken=main_passage_spoken,
+            required_hook=required_hook,
             config=config,
             main_agent_mode=main_agent_mode,
+        )
+    if project.config.images.scene_planning_standard == "narration_block_visual_v1":
+        payload["visual_scene_contract"] = {
+            "standard": "narration_block_visual_v1",
+            "target_scene_count": [config.target_scene_min, config.target_scene_max],
+            "visual_standard_id": project.config.images.visual_standard_id,
+            "composition_safety_mode": project.config.images.composition_safety_mode,
+            "allowed_relations": ["literal", "contextual", "symbolic"],
+            "thumbnail_generation_mode": (project.config.youtube_growth.thumbnail_generation_mode),
+            "spoken_reference_image": {
+                "mode": project.config.images.spoken_reference_image_mode,
+                "path": project.config.images.spoken_reference_image_path,
+                "section_id_field": "strategy.cinematic_devotional.reference_section_id",
+            },
+        }
+        payload["instructions"].extend(
+            [
+                (
+                    "Preencha strategy.visual_scenes com um item para cada futuro bloco de áudio, "
+                    f"totalizando de {config.target_scene_min} a {config.target_scene_max} cenas."
+                ),
+                (
+                    "Em cada item, section_id aponta para a seção de origem e narration copia "
+                    "literalmente um trecho contíguo dessa seção. Em conjunto e na mesma ordem, "
+                    "os blocos precisam reconstruir integralmente a narração de cada seção, sem "
+                    "omitir, repetir, parafrasear ou mover palavras."
+                ),
+                (
+                    "scene_description deve descrever a cena concreta que passará enquanto o "
+                    "bloco for narrado: personagens ou objeto central, ação e ambiente. Não use "
+                    "uma indicação genérica de câmera e não repita a mesma conversa, composição "
+                    "ou ação em vários blocos."
+                ),
+                (
+                    "Use visual_relation=literal quando a cena mostra diretamente o conteúdo, "
+                    "contextual quando mostra uma situação coerente e symbolic quando usa uma "
+                    "imagem artística clara. Isso permite, quando for benéfico, alternar Jesus "
+                    "acolhendo alguém, uma oração em grupo, moradas preparadas, pregação, jardim "
+                    "ou Bíblia aberta, sempre conforme a narração e sem transformar elaboração "
+                    "simbólica em fato bíblico."
+                ),
+                (
+                    "Descreva somente o conteúdo da cena; não repita estilo, paleta, proporção, "
+                    "regras de legenda ou thumbnail. O prompt matriz do perfil visual será "
+                    "acrescentado automaticamente depois."
+                ),
+                (
+                    "Mantenha o bloco de strategy.cinematic_devotional.reference_section_id no "
+                    "plano e associe-o a uma Bíblia aberta. O pipeline reutilizará a imagem fixa "
+                    "do perfil nesse bloco e não criará um job de imagegen para ele."
+                    if project.config.images.spoken_reference_image_mode == "fixed_profile_asset_v1"
+                    else "O perfil atual gera normalmente a imagem do bloco de referência."
+                ),
+            ]
         )
     if not config.require_independent_biblical_review:
         for key in (
@@ -1569,6 +1968,75 @@ def _validate_language_and_visuals(package: ShortsScriptPackage) -> None:
             )
 
 
+def _collect_visual_scene_errors(
+    layout: ProjectLayout,
+    package: ShortsScriptPackage,
+    errors: list[str],
+) -> None:
+    project = layout.load_manifest()
+    if project.config.images.scene_planning_standard != "narration_block_visual_v1":
+        return
+    config = project.config.shorts_script
+    planned = package.strategy.visual_scenes
+    minimum_scenes = (
+        3
+        if config.generation_mode == "deterministic_compact_visual_plan_v1"
+        else config.target_scene_min
+    )
+    if not minimum_scenes <= len(planned) <= config.target_scene_max:
+        _add_validation_error(
+            errors,
+            "strategy.visual_scenes precisa conter de "
+            f"{minimum_scenes} a {config.target_scene_max} blocos; recebeu "
+            f"{len(planned)}.",
+        )
+    sections = package.script.sections
+    section_by_id = {section.section_id: section for section in sections}
+    section_order = {section.section_id: index for index, section in enumerate(sections)}
+    previous_section_order = -1
+    narration_by_section: dict[str, list[str]] = {section.section_id: [] for section in sections}
+    descriptions: set[str] = set()
+    for index, scene in enumerate(planned, start=1):
+        if scene.section_id not in section_by_id:
+            _add_validation_error(
+                errors,
+                f"visual_scenes[{index}] referencia section_id inexistente.",
+            )
+            continue
+        current_order = section_order[scene.section_id]
+        if current_order < previous_section_order:
+            _add_validation_error(
+                errors,
+                "strategy.visual_scenes precisa preservar a ordem das seções do roteiro.",
+            )
+        previous_section_order = current_order
+        narration_by_section[scene.section_id].append(scene.narration)
+        normalized_description = _normalized(scene.scene_description)
+        if normalized_description in descriptions:
+            _add_validation_error(
+                errors,
+                "Cada bloco de áudio precisa ter uma descrição de cena específica e distinta.",
+            )
+        descriptions.add(normalized_description)
+    for section in sections:
+        section_scenes = [scene for scene in planned if scene.section_id == section.section_id]
+        for scene in section_scenes[:-1]:
+            if not _has_safe_compact_boundary(scene.narration):
+                _add_validation_error(
+                    errors,
+                    "Um bloco visual intermediário de "
+                    f"{section.section_id} termina sem pontuação natural segura: "
+                    f"{scene.narration!r}.",
+                )
+        reconstructed = _collapsed(" ".join(narration_by_section[section.section_id]))
+        if reconstructed != _collapsed(section.narration):
+            _add_validation_error(
+                errors,
+                "Os blocos visuais de "
+                f"{section.section_id} não reconstroem literalmente a narração da seção.",
+            )
+
+
 def _add_validation_error(errors: list[str], message: str) -> None:
     if message not in errors:
         errors.append(message)
@@ -1629,6 +2097,28 @@ def _collect_cinematic_devotional_errors(
         )
     if _normalized(direction.emotional_hook) != _normalized(strategy.hook):
         _add_validation_error(errors, "cinematic_devotional.emotional_hook precisa copiar o hook.")
+
+    sources = read_model(layout.sources, SourceLibrary)
+    compact_source = next(
+        (source for source in sources.entries if source.source_id == direction.source_id),
+        None,
+    )
+    if compact_source is None:
+        _add_validation_error(errors, "O hook compacto não possui uma fonte bíblica associada.")
+    else:
+        if not compact_source.compact_hook.strip():
+            _add_validation_error(errors, "A fonte compacta não possui um hook forte curado.")
+        elif _normalized(strategy.hook) != _normalized(compact_source.compact_hook):
+            _add_validation_error(
+                errors,
+                "O hook precisa copiar exatamente a combinação curada para esta passagem.",
+            )
+        if compact_source.compact_hook_strength_score < config.minimum_hook_strength_score:
+            _add_validation_error(errors, "O hook ficou abaixo do piso de força configurado.")
+        if compact_source.compact_message_value_score < config.minimum_message_value_score:
+            _add_validation_error(errors, "A mensagem ficou abaixo do piso de valor configurado.")
+        if compact_source.compact_rewatch_value_score < config.minimum_rewatch_value_score:
+            _add_validation_error(errors, "A mensagem ficou abaixo do piso de replay configurado.")
 
     mapped_ids = [
         direction.opening_section_id,
@@ -1704,7 +2194,9 @@ def _collect_cinematic_devotional_errors(
             or beats[0].target_end_seconds != config.hook_target_seconds
         ):
             _add_validation_error(
-                errors, "O beat de hook precisa ocupar os dois primeiros segundos."
+                errors,
+                f"O beat de hook precisa ocupar os primeiros {config.hook_target_seconds:g} "
+                "segundos.",
             )
         if (
             len(beats) >= 3
@@ -2241,6 +2733,7 @@ def _collect_package_validation_errors(
     section_ids = [section.section_id for section in sections]
     if len(section_ids) != len(set(section_ids)):
         _add_validation_error(errors, "O roteiro contém section_id duplicado.")
+    _collect_visual_scene_errors(layout, package, errors)
     if any(_RAW_NUMERIC_REFERENCE_PATTERN.search(section.narration) for section in sections):
         _add_validation_error(
             errors,
@@ -2248,20 +2741,44 @@ def _collect_package_validation_errors(
             "narre 'Livro, capítulo X, versículo Y'.",
         )
     words = tokenize_words(script.narration_text())
-    if not config.min_words <= len(words) <= config.max_words:
+    if (
+        project.duration_policy != "adaptive_range_v1"
+        and not config.min_words <= len(words) <= config.max_words
+    ):
         _add_validation_error(
             errors,
             f"O roteiro tem {len(words)} palavras; esperado entre "
             f"{config.min_words} e {config.max_words}.",
         )
     estimated_duration = len(words) / config.estimated_narration_wpm * 60
-    if estimated_duration > project.target_duration_seconds + config.duration_tolerance_seconds:
+    preferred_minimum = (
+        project.requested_duration_min_seconds
+        if project.duration_policy == "adaptive_range_v1"
+        else project.target_duration_seconds
+    )
+    preferred_maximum = (
+        project.requested_duration_max_seconds
+        if project.duration_policy == "adaptive_range_v1"
+        else project.target_duration_seconds
+    )
+    assert preferred_minimum is not None and preferred_maximum is not None
+    minimum_estimated_duration = preferred_minimum * config.minimum_estimated_duration_ratio
+    if estimated_duration < minimum_estimated_duration:
+        _add_validation_error(
+            errors,
+            f"O roteiro estima somente {estimated_duration:.1f}s de narração; precisa chegar a "
+            f"pelo menos {minimum_estimated_duration:.1f}s com hook ou versículo mais longo, "
+            "sem preencher o restante com silêncio.",
+        )
+    if estimated_duration > preferred_maximum + config.duration_tolerance_seconds:
         _add_validation_error(
             errors,
             f"O roteiro estima {estimated_duration:.1f}s na voz configurada e ultrapassa o "
-            f"alvo de {project.target_duration_seconds}s.",
+            f"limite de {preferred_maximum:g}s.",
         )
     hook_words = tokenize_words(strategy.hook)
+    if len(hook_words) < config.hook_min_words:
+        _add_validation_error(errors, "O gancho está curto demais para o perfil configurado.")
     if len(hook_words) > config.hook_max_words:
         _add_validation_error(errors, "O gancho ultrapassa o limite de palavras configurado.")
     if strategy.hook_target_end_seconds > config.hook_target_seconds + 0.5:
@@ -2674,10 +3191,294 @@ def _normalize_staging_package_payload(payload: Any) -> tuple[Any, tuple[str, ..
     return normalized, tuple(normalizations)
 
 
+def _load_compact_visual_plan(
+    layout: ProjectLayout,
+    queue: dict[str, Any],
+) -> CompactVisualPlan:
+    package_path = _safe_staging_file(layout, queue["outputs"]["package"])
+    plan = CompactVisualPlan.model_validate(read_json(package_path))
+    errors: list[str] = []
+    if plan.job_id != queue.get("job_id"):
+        errors.append("job_id não corresponde à fila visual atual.")
+    if plan.input_hash != queue.get("input_hash"):
+        errors.append("input_hash não corresponde à fila visual atual.")
+    blocks = queue.get("deterministic_contract", {}).get("blocks", [])
+    expected_ids = [
+        item.get("block_id")
+        for item in blocks
+        if isinstance(item, dict) and item.get("creative_concept_required") is True
+    ]
+    actual_ids = [item.block_id for item in plan.concepts]
+    if len(actual_ids) != len(set(actual_ids)):
+        errors.append("O plano visual contém block_id duplicado.")
+    missing = [item for item in expected_ids if item not in actual_ids]
+    unexpected = [item for item in actual_ids if item not in expected_ids]
+    if missing:
+        errors.append("Faltam conceitos para: " + ", ".join(str(item) for item in missing) + ".")
+    if unexpected:
+        errors.append(
+            "Há conceitos para blocos desconhecidos: "
+            + ", ".join(str(item) for item in unexpected)
+            + "."
+        )
+    if actual_ids != expected_ids:
+        errors.append("Os conceitos visuais precisam preservar a ordem dos blocos.")
+    if errors:
+        raise ShortsScriptPackageValidationError(errors)
+    return plan
+
+
+def materialize_compact_visual_fallback(layout: ProjectLayout) -> CompactVisualPlan:
+    """Write a deterministic, usable visual plan after the bounded model repair."""
+
+    queue = _load_shorts_script_queue(layout)
+    if queue.get("generation_mode") != "deterministic_compact_visual_plan_v1":
+        raise RuntimeError("A fila atual não usa o plano visual compacto determinístico.")
+    concepts = [
+        {
+            "block_id": item["block_id"],
+            "scene_description": item["fallback_scene_description"],
+            "visual_relation": item["fallback_visual_relation"],
+        }
+        for item in queue["deterministic_contract"]["blocks"]
+        if item["creative_concept_required"]
+    ]
+    plan = CompactVisualPlan(
+        job_id=queue["job_id"],
+        input_hash=queue["input_hash"],
+        concepts=concepts,
+    )
+    write_json(layout.shorts_script_package_staging, plan)
+    layout.append_event(
+        {
+            "event": "compact_visual_fallback_materialized",
+            "job_id": queue["job_id"],
+            "concepts": len(plan.concepts),
+        }
+    )
+    return plan
+
+
+def _build_deterministic_compact_package(
+    layout: ProjectLayout,
+    queue: dict[str, Any],
+    plan: CompactVisualPlan,
+) -> ShortsScriptPackage:
+    project = layout.load_manifest()
+    config = project.config.shorts_script
+    briefing = read_model(layout.briefing, Briefing)
+    sources = read_model(layout.sources, SourceLibrary)
+    contract = queue["deterministic_contract"]
+    source_id = contract["source_id"]
+    source = next((item for item in sources.entries if item.source_id == source_id), None)
+    if (
+        source is None
+        or source.excerpt is None
+        or source.passage is None
+        or source.translation is None
+    ):
+        raise ValueError("A fonte bíblica selada do Short compacto não está mais disponível.")
+    if not source.verified or source.spoken_by != "jesus" or not source.compact_hook.strip():
+        raise ValueError("A fonte compacta precisa permanecer verificada e atribuída a Jesus.")
+    compact_reference = str(contract["compact_reference"])
+    spoken_reference = spoken_biblical_reference(compact_reference)
+    if _normalized(spoken_reference) != _normalized(contract["spoken_reference"]):
+        raise ValueError("A referência falada mudou depois da criação da fila.")
+
+    promise = (
+        briefing.central_theme.strip()
+        or f"Jesus responde diretamente a quem precisa ouvir {compact_reference}."
+    )
+    takeaway = (
+        briefing.viewer_outcome.strip()
+        or briefing.practical_application.strip()
+        or briefing.central_theme.strip()
+        or "A fala de Jesus permanece como resposta direta para o espectador."
+    )
+    target_viewer = briefing.audience.strip() or "pessoas que precisam ouvir a fala de Jesus"
+    viewer_need = briefing.emotional_intent.strip() or takeaway
+    hook = source.compact_hook.strip()
+    verse = source.excerpt.strip()
+    reference_narration = f"{spoken_reference}."
+    sections = [
+        ScriptSection(
+            section_id="section-001",
+            role="opening",
+            title="Interrupção",
+            narration=hook,
+            biblical_basis=[compact_reference],
+            claim_classification=["creative_elaboration"],
+            retention_goal="Interromper o pensamento do espectador com o hook curado.",
+            visual_direction="Jesus encontra uma pessoa em um momento emocional concreto.",
+        ),
+        ScriptSection(
+            section_id="section-002",
+            role="biblical_narrative",
+            title="Fala de Jesus",
+            narration=f"“{verse}”",
+            biblical_basis=[compact_reference],
+            claim_classification=["biblical_text"],
+            retention_goal="Apresentar integralmente a fala direta e verificada de Jesus.",
+            visual_direction="A fala de Jesus avança por imagens reverentes e distintas.",
+        ),
+        ScriptSection(
+            section_id="section-003",
+            role="closing",
+            title="Referência",
+            narration=reference_narration,
+            biblical_basis=[compact_reference],
+            claim_classification=["biblical_text"],
+            retention_goal="Encerrar identificando com clareza a origem bíblica da citação.",
+            visual_direction="Uma Bíblia aberta repousa sobre uma mesa de madeira.",
+        ),
+    ]
+    concept_by_id = {item.block_id: item for item in plan.concepts}
+    visual_scenes: list[ShortsVisualScene] = []
+    for block in contract["blocks"]:
+        concept = concept_by_id.get(block["block_id"])
+        visual_scenes.append(
+            ShortsVisualScene(
+                section_id=block["section_id"],
+                narration=block["narration"],
+                scene_description=(
+                    concept.scene_description
+                    if concept is not None
+                    else block["fallback_scene_description"]
+                ),
+                visual_relation=(
+                    concept.visual_relation
+                    if concept is not None
+                    else block["fallback_visual_relation"]
+                ),
+            )
+        )
+
+    direction = ShortsCinematicDevotionalDirection(
+        creative_mode=briefing.creative_mode,
+        opening_section_id="section-001",
+        scripture_section_id="section-002",
+        reference_section_id="section-003",
+        emotional_hook=hook,
+        content_promise=promise,
+        viewer_takeaway=takeaway,
+        spoken_reference=spoken_reference,
+        source_id=source.source_id,
+        visual_emotional_arc=[
+            visual_scenes[0].scene_description,
+            visual_scenes[min(1, len(visual_scenes) - 1)].scene_description,
+            visual_scenes[-1].scene_description,
+        ],
+    )
+    quote_start = config.scripture_citation_min_start_seconds
+    quote_end = config.scripture_citation_max_end_seconds
+    final_end = float(project.target_duration_seconds)
+    beats = [
+        ShortsRetentionBeat(
+            section_id="section-001",
+            purpose="hook",
+            viewer_question="Jesus percebe o que estou vivendo?",
+            viewer_value="Receber uma interrupção emocional direta.",
+            target_start_seconds=0,
+            target_end_seconds=config.hook_target_seconds,
+            opens_loop=promise,
+            new_information="O hook curado nomeia a necessidade do espectador.",
+            visual_change=visual_scenes[0].scene_description,
+        ),
+        ShortsRetentionBeat(
+            section_id="section-002",
+            purpose="evidence",
+            viewer_question="O que Jesus diz?",
+            viewer_value="Ouvir a fala literal e verificada de Jesus.",
+            target_start_seconds=quote_start,
+            target_end_seconds=quote_end,
+            resolves_loop=promise,
+            new_information="A própria fala de Jesus entrega a resposta bíblica.",
+            visual_change=visual_scenes[min(1, len(visual_scenes) - 1)].scene_description,
+        ),
+        ShortsRetentionBeat(
+            section_id="section-003",
+            purpose="reference",
+            viewer_question="Onde essa fala está registrada?",
+            viewer_value="Receber a referência bíblica exata.",
+            target_start_seconds=quote_end,
+            target_end_seconds=final_end,
+            new_information="A referência identifica a fonte da citação.",
+            visual_change=visual_scenes[-1].scene_description,
+        ),
+    ]
+    strategy = ShortsScriptStrategy(
+        target_viewer=target_viewer,
+        viewer_need=viewer_need,
+        core_value=takeaway,
+        content_promise=promise,
+        hook=hook,
+        hook_type="emotional_interruption",
+        hook_family="emotional_interruption",
+        hook_techniques=["pattern_interrupt", "emotional_mirroring"],
+        hook_target_end_seconds=config.hook_target_seconds,
+        verse_opening=ShortsVerseOpening(
+            source_id=source.source_id,
+            reference=compact_reference,
+            translation=source.translation,
+            lead_in="",
+            verse_text=verse,
+            target_start_seconds=quote_start,
+            target_end_seconds=quote_end,
+        ),
+        cinematic_devotional=direction,
+        open_loop=promise,
+        payoff=verse,
+        practical_value=takeaway,
+        cta="",
+        reason_to_subscribe="",
+        retention_beats=beats,
+        visual_scenes=visual_scenes,
+        source_ids=[source.source_id],
+        section_ids=[section.section_id for section in sections],
+        biblical_safeguards=[
+            "Citação copiada integralmente da fonte local verificada e atribuída a Jesus."
+        ],
+        compliance_checks=["Sem CTA, sem comentário e sem introdução antes da citação."],
+    )
+    script = ScriptDocument(
+        version=int(queue["next_script_version"]),
+        title=briefing.title or project.title,
+        sections=sections,
+        word_count=len(tokenize_words(" ".join(item.narration for item in sections))),
+        source_ids=[source.source_id],
+        notes=["Roteiro compacto selado deterministicamente a partir do catálogo verificado."],
+    )
+    script.estimated_duration_seconds = round(
+        script.word_count / config.estimated_narration_wpm * 60,
+        2,
+    )
+    review = BiblicalReview(
+        script_version=script.version,
+        reviewed_at=utc_now(),
+        reviewer="deterministic-verified-compact-v1",
+        summary=(
+            "Citação literal, referência, tradução, atribuição a Jesus e hash da fonte "
+            f"conferidos deterministicamente ({source.content_hash})."
+        ),
+    )
+    return ShortsScriptPackage(
+        job_id=queue["job_id"],
+        input_hash=queue["input_hash"],
+        script=script,
+        biblical_review=review,
+        strategy=strategy,
+    )
+
+
 def _load_normalized_staging_package(
     layout: ProjectLayout,
     queue: dict[str, Any],
 ) -> tuple[ShortsScriptPackage, tuple[str, ...]]:
+    if queue.get("generation_mode") == "deterministic_compact_visual_plan_v1":
+        plan = _load_compact_visual_plan(layout, queue)
+        package = _build_deterministic_compact_package(layout, queue, plan)
+        _validate_package(layout, package, queue)
+        return package, ()
     package_path = _safe_staging_file(layout, queue["outputs"]["package"])
     payload, normalizations = _normalize_staging_package_payload(read_json(package_path))
     package = ShortsScriptPackage.model_validate(payload)
@@ -2699,10 +3500,15 @@ def check_shorts_script_package_staging(layout: ProjectLayout) -> ShortsScriptSt
     normalizations: tuple[str, ...] = ()
     try:
         queue = _load_shorts_script_queue(layout)
-        package_path = _safe_staging_file(layout, queue["outputs"]["package"])
-        payload, normalizations = _normalize_staging_package_payload(read_json(package_path))
-        package = ShortsScriptPackage.model_validate(payload)
-        _validate_package(layout, package, queue)
+        if queue.get("generation_mode") == "deterministic_compact_visual_plan_v1":
+            plan = _load_compact_visual_plan(layout, queue)
+            package = _build_deterministic_compact_package(layout, queue, plan)
+            _validate_package(layout, package, queue)
+        else:
+            package_path = _safe_staging_file(layout, queue["outputs"]["package"])
+            payload, normalizations = _normalize_staging_package_payload(read_json(package_path))
+            package = ShortsScriptPackage.model_validate(payload)
+            _validate_package(layout, package, queue)
     except ShortsScriptPackageValidationError as exc:
         return ShortsScriptStagingCheck(False, exc.errors, normalizations)
     except ValidationError as exc:
@@ -2723,6 +3529,12 @@ def prepare_shorts_biblical_review_queue(
 ) -> dict[str, Any]:
     """Prepare one compact, independent biblical review before shared-state import."""
 
+    config = layout.load_manifest().config.shorts_script
+    if config.biblical_review_mode == "deterministic_verified_compact_v1":
+        raise RuntimeError(
+            "Este Short usa verificação bíblica determinística do catálogo selado; "
+            "não há fila de revisor LLM."
+        )
     queue, package = validate_shorts_script_package_staging(layout)
     package_hash = sha256_file(layout.shorts_script_package_staging)
     if not force and layout.shorts_biblical_review_queue.is_file():
@@ -2733,8 +3545,11 @@ def prepare_shorts_biblical_review_queue(
             and layout.shorts_biblical_review_context.is_file()
         ):
             return existing
+    manifest = layout.load_manifest()
     context = {
-        "project_id": layout.load_manifest().project_id,
+        "project_id": manifest.project_id,
+        "target_duration_seconds": manifest.target_duration_seconds,
+        "citation_policy": _shorts_citation_policy(manifest.config.shorts_script),
         "package_hash": package_hash,
         "briefing": read_json(layout.briefing),
         "sources": read_json(layout.sources),
@@ -2777,6 +3592,11 @@ def prepare_shorts_biblical_review_queue(
         "schema": compact_json_schema(BiblicalReview.model_json_schema()),
         "instructions": [
             "Leia somente inputs.compact_context e revise o roteiro antes de qualquer import.",
+            (
+                "Aplique citation_policy do contexto, inclusive o limite literal específico da "
+                "duração; faixas consecutivas são válidas quando preservam continuidade e cumprem "
+                "esse contrato."
+            ),
             "Relate em uma única passagem todos os bloqueios de citação, contexto, interpretação, "
             "elaboração criativa, direitos e referência.",
             "Não reescreva o roteiro, não aprove em nome do usuário e não altere o projeto.",
@@ -2867,15 +3687,22 @@ def import_shorts_script_package(
         }
     )
 
+    deterministic_compact = config.generation_mode == "deterministic_compact_visual_plan_v1"
     save_script(
         layout,
         script,
-        provider="shorts-script-specialist",
+        provider=(
+            "deterministic-compact-script-plus-visual-plan"
+            if deterministic_compact
+            else "shorts-script-specialist"
+        ),
         creative_strategy=final_package.strategy,
     )
     review_provider = (
         "independent-biblical-reviewer"
         if config.require_independent_biblical_review
+        else "deterministic-verified-compact-v1"
+        if deterministic_compact
         else "shorts-script-specialist"
     )
     save_biblical_review(layout, review, provider=review_provider)

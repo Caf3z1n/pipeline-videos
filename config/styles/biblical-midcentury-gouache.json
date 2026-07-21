@@ -1,0 +1,31 @@
+{
+  "style_id": "biblical-midcentury-gouache",
+  "name": "Ilustração bíblica editorial em guache de meados do século",
+  "medium": "ilustração editorial cristã feita à mão em guache opaco e têmpera, reproduzida por impressão offset limpa de revista religiosa de aproximadamente 1955",
+  "principles": [
+    "estética de ilustrações protestantes americanas de escola dominical do fim dos anos 1940 ao começo dos anos 1960, serena, digna e devocional",
+    "acabamento fosco, modelagem suave e delicada, bordas ligeiramente difusas, transições amplas de luz e sombra e pinceladas discretamente visíveis",
+    "formas grandes, simples e legíveis, com detalhe reduzido e aparência artesanal preservada, sem imitar envelhecimento do papel",
+    "figuras humanas com anatomia natural, idealizada e simplificada, rostos serenos e dignos, olhos naturais e gestos claros",
+    "cabelos e barbas tratados como massas suaves, sem fios individuais ou definição fotográfica; dobras de tecido simples e controladas",
+    "Jesus pode receber definição ligeiramente maior que as demais figuras, mantendo humanidade, reverência e coerência com o conjunto",
+    "luz natural clara e difusa, sombras amplas e suaves e contraste baixo a moderado, sem efeitos espetaculares",
+    "paleta moderadamente suavizada e limpa, sem dominante global sépia, dourada ou marrom",
+    "ambientes bíblicos e representações simbólicas devem ser respeitosos, simples e coerentes com o sentido do bloco narrado",
+    "cada imagem contém uma única composição contínua, um único momento, um único ambiente e uma ação principal"
+  ],
+  "negative_constraints": [
+    "sem pintura digital moderna polida, concept art, pôster épico ou visual cinematográfico contemporâneo",
+    "sem fotografia, fotorrealismo, live action, CGI, render 3D, anime, low-poly ou aparência de boneco de plástico",
+    "sem rostos perfeitos demais, fios de cabelo individuais, mãos hiper detalhadas ou excesso de dobras nas roupas",
+    "sem cidades, arquiteturas ou fundos excessivamente complexos quando não forem essenciais à cena",
+    "sem cores saturadas, azul ciano ou elétrico, laranja vivo, HDR, luz volumétrica, raios luminosos ou brilho intenso",
+    "sem nitidez 8K, microdetalhes, profundidade de campo fotográfica ou textura pesada de papel",
+    "sem papel amarelado, sépia, bordas envelhecidas, granulação forte, manchas ou moldura",
+    "sem colagem, quadrinhos, storyboard, díptico, tríptico, múltiplos painéis ou tela dividida",
+    "sem texto, legenda, letras, números, símbolos gráficos, logotipo ou marca-d'água",
+    "sem violência gráfica"
+  ],
+  "visual_standard_id": "biblical-midcentury-gouache-v1",
+  "reference_note": "Padrão bíblico editorial de meados do século: guache opaco e têmpera com impressão offset limpa de aproximadamente 1955, acabamento fosco, formas simples, rostos serenos, luz natural difusa e paleta moderadamente suavizada."
+}

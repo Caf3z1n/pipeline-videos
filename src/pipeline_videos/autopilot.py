@@ -146,12 +146,69 @@ def _write_state(layout: ProjectLayout, result: AutopilotResult) -> None:
     )
 
 
+def prepare_local_coordinator_job(layout: ProjectLayout) -> dict[str, Any]:
+    """Persist the compact hand-off used by an isolated local coordinator task."""
+
+    project = layout.load_manifest()
+    payload = {
+        "schema_version": "1.0",
+        "generated_at": utc_now(),
+        "project_id": project.project_id,
+        "project_root": str(layout.root),
+        "objective": "Produzir um único candidato final local e validado, sem publicar.",
+        "orchestration": {
+            "coordinator_role": "local_video_coordinator",
+            "recommended_model": "gpt-5.6-sol",
+            "reasoning_effort": "medium",
+            "fork_turns": "none",
+            "sole_shared_state_writer": True,
+            "context_policy": "read_this_job_then_declared_queues_only",
+        },
+        "command": (
+            f'uv run pipeline-videos autopilot "{project.project_id}" '
+            + (
+                "--wait-external"
+                if project.config.audio.provider == "local_manual"
+                else "--allow-external --wait-external"
+            )
+        ),
+        "external_roles": {
+            "shorts_visual_planner": {
+                "queue": relative_posix(layout.shorts_script_queue, layout.root),
+                "reasoning_effort": "medium",
+                "when_present": True,
+            },
+            "image_workers": {
+                "jobs_directory": relative_posix(layout.image_jobs, layout.root),
+                "maximum_parallel": min(2, project.config.production.image_workers),
+                "reasoning_effort": "low",
+            },
+            "youtube_growth_specialist": {
+                "queue": relative_posix(layout.growth_queue, layout.root),
+                "reasoning_effort": "medium",
+                "when_present": True,
+            },
+        },
+        "policies": {
+            "repair_policy": project.config.production.repair_policy,
+            "max_model_repairs_per_stage": (project.config.production.max_model_repairs_per_stage),
+            "token_budget_behavior": project.config.production.token_budget_behavior,
+            "validation_policy": project.config.production.validation_policy,
+            "publication_authorized": False,
+            "one_final_render": True,
+        },
+    }
+    write_json(layout.coordinator_job, payload)
+    return payload
+
+
 def run_autopilot_once(
     layout: ProjectLayout,
     *,
     allow_external: bool = False,
     force: bool = False,
 ) -> AutopilotResult:
+    prepare_local_coordinator_job(layout)
     project = layout.load_manifest()
 
     if (
@@ -160,7 +217,9 @@ def run_autopilot_once(
         and project.stages["shorts_script"].status != StageStatus.COMPLETED
     ):
         from pipeline_videos.shorts_script import (
+            check_shorts_script_package_staging,
             import_shorts_script_package,
+            materialize_compact_visual_fallback,
             prepare_shorts_biblical_review_queue,
             prepare_shorts_script_queue,
         )
@@ -176,6 +235,14 @@ def run_autopilot_once(
                     _write_state(layout, result)
                     return result
             else:
+                check = check_shorts_script_package_staging(layout)
+                if (
+                    not check.valid
+                    and project.config.shorts_script.generation_mode
+                    == "deterministic_compact_visual_plan_v1"
+                    and project.config.production.repair_policy == "bounded_then_fallback_v1"
+                ):
+                    materialize_compact_visual_fallback(layout)
                 import_shorts_script_package(layout, force=force)
         else:
             result = AutopilotResult("waiting_external", collect_external_waits(layout))
@@ -194,6 +261,21 @@ def run_autopilot_once(
     from pipeline_videos.music import select_music
 
     prepare_images(layout, force=force)
+    project = layout.load_manifest()
+    growth_without_images = (
+        project.video_format == "short"
+        and project.config.youtube_growth.thumbnail_generation_mode == "youtube_auto_frame_v1"
+        and project.config.youtube_growth.thumbnail_reference_mode == "none_v1"
+    )
+    if (
+        not project.demo
+        and project.config.youtube_growth.enabled
+        and project.stages["youtube_growth"].status != StageStatus.COMPLETED
+        and growth_without_images
+    ):
+        from pipeline_videos.growth import prepare_growth_queue
+
+        prepare_growth_queue(layout, force=force)
     project = layout.load_manifest()
     if project.config.audio.provider == "local_manual":
         from pipeline_videos.manual_audio import prepare_manual_audio
@@ -229,8 +311,19 @@ def run_autopilot_once(
         and project.stages["youtube_growth"].status != StageStatus.COMPLETED
         and _growth_outputs_ready(layout)
     ):
-        from pipeline_videos.growth import import_growth_package
+        from pipeline_videos.growth import (
+            check_growth_package_staging,
+            import_growth_package,
+            materialize_compact_growth_fallback,
+        )
 
+        check = check_growth_package_staging(layout)
+        if (
+            not check.valid
+            and project.config.youtube_growth.generation_mode == "compact_metadata_draft_v1"
+            and project.config.production.repair_policy == "bounded_then_fallback_v1"
+        ):
+            materialize_compact_growth_fallback(layout)
         import_growth_package(layout, force=force)
 
     waits = [wait for wait in collect_external_waits(layout) if not wait.get("ready")]

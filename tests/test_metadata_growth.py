@@ -8,14 +8,18 @@ from PIL import Image
 
 from pipeline_videos.growth import (
     OFFICIAL_YOUTUBE_GUIDELINES,
+    YOUTUBE_AUTO_FRAME_CONCEPT,
     _validate_package,
+    check_growth_package_staging,
     import_growth_package,
     import_integrated_thumbnail_candidates,
+    materialize_compact_growth_fallback,
     prepare_growth_queue,
 )
 from pipeline_videos.models import (
     BiblicalReview,
     Briefing,
+    CompactGrowthDraft,
     ImageItem,
     ImageManifest,
     ImageVersion,
@@ -36,13 +40,24 @@ from pipeline_videos.storage import read_json, write_json
 from pipeline_videos.utils import utc_now
 
 
-def _project_with_editorial_inputs(tmp_path, *, video_format: str = "landscape"):
+def _project_with_editorial_inputs(
+    tmp_path,
+    *,
+    video_format: str = "landscape",
+    legacy_short_profile: bool = True,
+    target_duration_seconds: int = 60,
+):
     layout = create_project(
         "davi-e-golias",
         "Davi e Golias",
         projects_dir=tmp_path,
-        target_duration_seconds=60,
+        target_duration_seconds=target_duration_seconds,
         video_format=video_format,
+        style_id=(
+            "cinematic-family-3d-animation"
+            if video_format == "short" and legacy_short_profile
+            else None
+        ),
         project_date=date(2026, 7, 14),
     )
     briefing = Briefing(
@@ -120,6 +135,7 @@ def _set_growth_variants(layout, count: int) -> None:
 
 def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPackage:
     clean_theme_art = queue["outputs"]["thumbnail_source_mode"] == "generated_theme_art"
+    auto_frame = queue["outputs"]["thumbnail_source_mode"] == "youtube_auto_frame"
     design_specs = (
         [
             YouTubeThumbnailDesign(
@@ -170,20 +186,23 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
         "thumbnail_design_count",
         queue["outputs"].get("thumbnail_count", len(queue["outputs"]["thumbnails"])),
     )
+    title_count = queue["outputs"].get("title_count", design_count)
     title_standard = queue["outputs"]["title_standard"]
     if title_standard in {"tension_pipe_passage_v2", "creative_pipe_passage_v3"}:
         titles = [
             "O detalhe escondido em Davi e Golias | 1 Samuel 17",
             "Por que Davi e Golias começou antes da pedra | 1 Samuel 17",
             "O medo que muda a história de Davi e Golias | 1 Samuel 17",
-        ][:design_count]
+        ][:title_count]
         promise_match = YouTubePromiseMatch(
             content_promise=queue["contract_guard"]["content_promise"],
             opening_line=queue["contract_guard"]["opening_hook"],
             opening_scene_id=queue["contract_guard"]["opening_scene_id"],
             title_delivery=titles[0].split("|", 1)[0].strip(),
             thumbnail_delivery=(
-                "Davi pequeno diante da paisagem do vale"
+                YOUTUBE_AUTO_FRAME_CONCEPT
+                if auto_frame
+                else "Davi pequeno diante da paisagem do vale"
                 if clean_theme_art
                 else design_specs[0].text
             ),
@@ -193,7 +212,7 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
             "1 Samuel 17 | Davi e Golias: Coragem Diante do Medo",
             "1 Samuel 17 | Como Davi Enfrentou Golias?",
             "1 Samuel 17 | Davi Não Recuou Diante do Gigante",
-        ][:design_count]
+        ][:title_count]
         promise_match = None
     return YouTubeGrowthPackage(
         job_id=queue["job_id"],
@@ -224,12 +243,16 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
             ],
             pinned_comment="Em Davi e Golias, qual decisão de Davi mais chama sua atenção?",
             thumbnail_concept=(
-                "Davi pequeno diante da paisagem do vale"
+                YOUTUBE_AUTO_FRAME_CONCEPT
+                if auto_frame
+                else "Davi pequeno diante da paisagem do vale"
                 if clean_theme_art
                 else "Davi pequeno diante da sombra de Golias"
             ),
             thumbnail_prompt=(
-                queue["inputs"]["thumbnail_prompt"]
+                ""
+                if auto_frame
+                else queue["inputs"]["thumbnail_prompt"]
                 if clean_theme_art
                 else (
                     "Visual standard: cinematic-family-3d-v1. Style/medium: animação 3D "
@@ -269,7 +292,9 @@ def _package(queue: dict, *, format_name: str = "long_form") -> YouTubeGrowthPac
             source_ids=[],
             section_ids=["section-001"],
             thumbnail_designs=design_specs[:design_count],
-            short_cover_timestamp_seconds=0.0 if format_name == "short" else None,
+            short_cover_timestamp_seconds=(
+                None if auto_frame else 0.0 if format_name == "short" else None
+            ),
             experiment_plan=["Comparar três combinações por watch time no Studio."],
             compliance_checks=["Promessa fiel ao conteúdo", "Sem clickbait enganoso"],
             official_guidelines=list(OFFICIAL_YOUTUBE_GUIDELINES),
@@ -417,6 +442,62 @@ def test_growth_queue_is_idempotent_and_imports_one_long_form_candidate(tmp_path
     assert thumbnail_manifest["text_forbidden"] is True
 
 
+def test_compact_growth_uses_small_draft_and_treats_seo_as_advisory(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(
+        tmp_path,
+        video_format="short",
+        legacy_short_profile=False,
+        target_duration_seconds=18,
+    )
+
+    queue = prepare_growth_queue(layout)
+
+    assert queue["generation_mode"] == "compact_metadata_draft_v1"
+    assert queue["validation_mode"] == "advisory_seo_v1"
+    assert queue["outputs"]["thumbnail_source_mode"] == "youtube_auto_frame"
+    assert queue["outputs"]["thumbnails"] == []
+    assert len(json.dumps(queue["schemas"]["package"])) < 5_000
+
+    weak_draft = CompactGrowthDraft(
+        job_id=queue["job_id"],
+        input_hash=queue["input_hash"],
+        title="Coragem",
+        description="Uma mensagem curta.",
+        primary_keyword="confiança em Deus",
+    )
+    write_json(layout.growth_package_staging, weak_draft)
+    check = check_growth_package_staging(layout)
+
+    assert check.valid is True
+    assert check.errors == ()
+    assert check.warnings
+
+    imported = import_growth_package(layout)
+    assert imported.metadata.title.endswith(" | 1 Samuel 17")
+    assert imported.metadata.thumbnail_concept == YOUTUBE_AUTO_FRAME_CONCEPT
+    warnings = read_json(layout.growth_warnings)
+    assert warnings["warnings"] == list(check.warnings)
+
+
+def test_compact_growth_fallback_finishes_without_model_output(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(
+        tmp_path,
+        video_format="short",
+        legacy_short_profile=False,
+        target_duration_seconds=18,
+    )
+    prepare_growth_queue(layout)
+
+    draft = materialize_compact_growth_fallback(layout)
+    check = check_growth_package_staging(layout)
+
+    assert draft.title
+    assert check.valid is True
+    imported = import_growth_package(layout)
+    assert imported.strategy.format == "short"
+    assert imported.strategy.thumbnail_designs == []
+
+
 def test_single_agent_growth_queue_requests_one_integrated_title_thumbnail_pair(tmp_path) -> None:
     layout = _project_with_editorial_inputs(tmp_path, video_format="short")
     manifest = layout.load_manifest()
@@ -541,6 +622,37 @@ def test_short_growth_queue_requests_composed_first_frame(tmp_path) -> None:
     assert len(queue["outputs"]["thumbnails"]) == 1
     assert queue["outputs"]["thumbnail_source_mode"] == "generated_integrated_art"
     assert queue["outputs"]["external_image_generation_required"] is True
+
+
+def test_new_short_growth_uses_youtube_auto_frame_without_image_generation(tmp_path) -> None:
+    layout = _project_with_editorial_inputs(
+        tmp_path,
+        video_format="short",
+        legacy_short_profile=False,
+    )
+
+    queue = prepare_growth_queue(layout)
+
+    assert queue["outputs"]["thumbnail_source_mode"] == "youtube_auto_frame"
+    assert queue["outputs"]["thumbnail_role"] == "youtube_selected_frame"
+    assert queue["outputs"]["thumbnail_count"] == 0
+    assert queue["outputs"]["thumbnail_design_count"] == 0
+    assert queue["outputs"]["thumbnails"] == []
+    assert queue["outputs"]["external_image_generation_required"] is False
+    assert queue["inputs"]["thumbnail_visual_reference_path"] is None
+
+    write_json(layout.growth_package_staging, _package(queue, format_name="short"))
+    imported = import_growth_package(layout)
+
+    assert imported.metadata.thumbnail_concept == YOUTUBE_AUTO_FRAME_CONCEPT
+    assert imported.metadata.thumbnail_prompt == ""
+    assert imported.strategy.thumbnail_designs == []
+    assert imported.strategy.short_cover_timestamp_seconds is None
+    assert not layout.thumbnail.exists()
+    thumbnail_manifest = read_json(layout.thumbnail.parent / "thumbnail-manifest.json")
+    assert thumbnail_manifest["provider"] == "youtube-auto-frame"
+    assert thumbnail_manifest["active_path"] is None
+    assert layout.load_manifest().stages["thumbnail"].provider == "youtube-auto-frame"
     assert queue["outputs"]["title_standard"] == "creative_pipe_passage_v3"
     assert any("Enfoque concreto" in item for item in queue["instructions"])
     assert any("strategy.promise_match" in item for item in queue["instructions"])

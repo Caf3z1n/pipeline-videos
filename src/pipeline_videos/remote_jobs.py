@@ -138,6 +138,7 @@ class RemoteVideoRequest(PipelineModel):
     video_format: Literal["short", "long"]
     topic: str | None = Field(default=None, max_length=240)
     title: str | None = Field(default=None, max_length=240)
+    character: str | None = Field(default=None, max_length=120)
     creative_mode: CreativeMode = "auto"
     hook_policy: HookPolicy = "auto"
     hook_family: HookFamily = "auto"
@@ -154,6 +155,7 @@ class RemoteVideoRequest(PipelineModel):
     def validate_request(self) -> RemoteVideoRequest:
         object.__setattr__(self, "topic", self.topic.strip() if self.topic else None)
         object.__setattr__(self, "title", self.title.strip() if self.title else None)
+        object.__setattr__(self, "character", self.character.strip() if self.character else None)
         if self.duration_seconds is None:
             object.__setattr__(
                 self,
@@ -171,6 +173,11 @@ class RemoteVideoRequest(PipelineModel):
         compact = (
             self.video_format == "short" and self.duration_seconds < COMPACT_SHORT_THRESHOLD_SECONDS
         )
+        if compact and self.character:
+            raise ValueError(
+                "Histórias de personagens exigem Short de ao menos "
+                f"{COMPACT_SHORT_THRESHOLD_SECONDS} segundos ou vídeo longo."
+            )
         if compact and self.creative_mode not in {
             "auto",
             "devotional_application",
@@ -403,7 +410,19 @@ def prepare_job_project(
         "short" if request.video_format == "short" else "landscape"
     )
     assert request.duration_seconds is not None
-    if request.topic:
+    if request.character:
+        layout, _, _ = create_auto_video(
+            projects_dir=root,
+            target_duration_seconds=request.duration_seconds,
+            video_format=video_format,
+            production_mode="final_candidate_one_shot",
+            creative_mode_override=(
+                request.creative_mode if request.creative_mode != "auto" else "character_portrait"
+            ),
+            hook_family_override=(request.hook_family if request.hook_family != "auto" else None),
+            requested_character=request.character,
+        )
+    elif request.topic:
         layout = create_project(
             slugify(request.topic),
             request.title or request.topic,
@@ -463,7 +482,8 @@ def prepare_job_project(
     manifest.config.audio.voice_id = elevenlabs_voice_id_for_variant(request.voice_variant)
     manifest.config.audio.model_id = default_elevenlabs_model_id()
     manifest.config.youtube_growth.title_variants = 1
-    manifest.config.youtube_growth.thumbnail_variants = 1
+    if manifest.config.youtube_growth.thumbnail_generation_mode != "youtube_auto_frame_v1":
+        manifest.config.youtube_growth.thumbnail_variants = 1
     manifest.config.youtube_publication.allow_automated_private_review_upload = True
     manifest.config.youtube_publication.allow_automated_scheduled_release = (
         request.publication_mode == "scheduled"
@@ -487,8 +507,22 @@ def prepare_job_project(
             "model": DEFAULT_REMOTE_CODEX_MODEL,
             "coordinator_reasoning_effort": DEFAULT_REMOTE_REASONING_EFFORT,
             "specialist_reasoning_effort": {
-                "shorts_script_specialist": "high",
-                "biblical_reviewer": "high",
+                "shorts_visual_planner": (
+                    "medium"
+                    if manifest.config.shorts_script.generation_mode
+                    == "deterministic_compact_visual_plan_v1"
+                    else None
+                ),
+                "shorts_script_specialist": (
+                    "high"
+                    if manifest.config.shorts_script.generation_mode == "specialist_full_package_v1"
+                    else None
+                ),
+                "biblical_reviewer": (
+                    "high"
+                    if manifest.config.shorts_script.require_independent_biblical_review
+                    else None
+                ),
                 "image_worker": "low",
                 "youtube_growth_specialist": "medium",
             },
@@ -563,6 +597,7 @@ def _available_verse_candidates(
     layout: ProjectLayout,
     *,
     projects_root: Path,
+    requested_character: str | None = None,
 ) -> tuple[list[VerseCandidate], str | None, set[str]]:
     from pipeline_videos.verse_selection import (
         eligible_main_candidate_ids,
@@ -601,14 +636,44 @@ def _available_verse_candidates(
             and project.config.shorts_script.require_direct_jesus_speech
             else None
         ),
+        minimum_package_words=(
+            project.config.shorts_script.min_words
+            if project.video_format == "short"
+            and project.config.shorts_script.compact_narrative_standard
+            == "cinematic_jesus_devotional_v1"
+            else None
+        ),
+        maximum_package_words=(
+            project.config.shorts_script.max_words
+            if project.video_format == "short"
+            and project.config.shorts_script.compact_narrative_standard
+            == "cinematic_jesus_devotional_v1"
+            else None
+        ),
+        minimum_hook_strength_score=project.config.shorts_script.minimum_hook_strength_score,
+        minimum_message_value_score=project.config.shorts_script.minimum_message_value_score,
+        minimum_rewatch_value_score=project.config.shorts_script.minimum_rewatch_value_score,
+        requested_character=requested_character,
     )
     if current_main:
         main_eligible.add(current_main)
-    available = (
-        [candidate for candidate in catalog.candidates if candidate.candidate_id in main_eligible]
-        if project.video_format == "short"
-        else list(catalog.candidates)
-    )
+    if requested_character:
+        available = [
+            candidate
+            for candidate in catalog.candidates
+            if candidate.candidate_id in main_eligible
+            or candidate.catalog_segment != "narrative_story"
+        ]
+    elif project.video_format == "short":
+        available = [
+            candidate for candidate in catalog.candidates if candidate.candidate_id in main_eligible
+        ]
+    else:
+        available = [
+            candidate
+            for candidate in catalog.candidates
+            if candidate.catalog_segment != "narrative_story"
+        ]
     return available, current_main, main_eligible
 
 
@@ -670,6 +735,7 @@ def _editorial_sources_phase_spec(
     candidates, current_main, main_eligible = _available_verse_candidates(
         layout,
         projects_root=projects_root,
+        requested_character=job.request.character,
     )
     desired_count = 1
     if project.video_format != "short":
@@ -695,6 +761,7 @@ def _editorial_sources_phase_spec(
                 {
                     "candidate_id": candidate.candidate_id,
                     "reference": candidate.reference,
+                    "context_reference": candidate.context_reference,
                     "verse_text": candidate.verse_text,
                     "title": candidate.title,
                     "title_seed": candidate.title_seed,
@@ -709,8 +776,23 @@ def _editorial_sources_phase_spec(
                     "retention_potential_score": candidate.retention_potential_score,
                     "themes": candidate.themes,
                     "characters": candidate.characters,
+                    "character_aliases": candidate.character_aliases,
+                    "related_passages": [
+                        {
+                            "reference": passage.reference,
+                            "role": passage.role,
+                        }
+                        for passage in candidate.related_passages
+                    ],
                     "interpretation_limits": candidate.interpretation_limits,
                     "spoken_by": candidate.spoken_by,
+                    "catalog_segment": candidate.catalog_segment,
+                    "recommended_formats": candidate.recommended_formats,
+                    "source_text_scope": candidate.source_text_scope,
+                    "compact_hook": candidate.compact_hook,
+                    "compact_hook_strength_score": candidate.compact_hook_strength_score,
+                    "compact_message_value_score": candidate.compact_message_value_score,
+                    "compact_rewatch_value_score": candidate.compact_rewatch_value_score,
                 }
                 for candidate in candidates
             ],
@@ -740,29 +822,14 @@ def _editorial_sources_phase_spec(
 
 
 def _source_entry(candidate: VerseCandidate, *, long_form: bool) -> SourceEntry:
-    from pipeline_videos.verse_selection import load_verse_catalog
+    from pipeline_videos.verse_selection import load_verse_catalog, source_entries_for_candidate
 
     catalog = load_verse_catalog()
-    return SourceEntry(
-        source_id=candidate.source_id,
-        kind="biblical_text",
-        title=f"{candidate.reference} — {candidate.translation}",
-        passage=candidate.context_reference,
-        translation=candidate.translation,
-        author_or_publisher=catalog.publisher,
-        url=candidate.source_url,
-        accessed_at=candidate.accessed_at,
-        excerpt=candidate.verse_text,
-        use_in_video=(
-            "Citação literal verificada distribuída na narrativa do vídeo longo."
-            if long_form
-            else "Citação literal obrigatória e base do desenvolvimento do Short."
-        ),
-        claim_scope="Texto bíblico; contexto e aplicações devem ser distinguidos.",
-        rights_note=candidate.rights_note,
-        verified=True,
-        spoken_by=candidate.spoken_by,
-    )
+    return source_entries_for_candidate(
+        candidate,
+        publisher=catalog.publisher,
+        long_form=long_form,
+    )[0]
 
 
 def _import_editorial_source_selection(
@@ -788,6 +855,7 @@ def _import_editorial_source_selection(
     candidates, current_main, main_eligible = _available_verse_candidates(
         layout,
         projects_root=projects_root,
+        requested_character=job.request.character,
     )
     by_id = {candidate.candidate_id: candidate for candidate in candidates}
     main_id = str(selection.get("main_candidate_id", ""))
@@ -826,6 +894,8 @@ def _import_editorial_source_selection(
         if current.creative_mode != "auto"
         else select_compact_devotional_mode(usage)
         if compact
+        else "character_portrait"
+        if job.request.character
         else select_creative_mode(main, usage, video_format=project.video_format)
     )
     interpretive_stance = default_interpretive_stance(creative_mode)
@@ -894,7 +964,14 @@ def _import_editorial_source_selection(
     briefing = Briefing(
         title=title,
         main_passage=main.reference,
-        complementary_references=[candidate.reference for candidate in selected[1:]],
+        complementary_references=list(
+            dict.fromkeys(
+                [
+                    *[passage.reference for passage in main.related_passages],
+                    *[candidate.reference for candidate in selected[1:]],
+                ]
+            )
+        ),
         central_theme=central_theme,
         practical_application=practical_application,
         audience=current.audience.strip() or main.audience,
@@ -951,15 +1028,18 @@ def _import_editorial_source_selection(
     )
     current_sources = SourceLibrary.model_validate(read_json(layout.sources))
     non_biblical = [source for source in current_sources.entries if source.kind != "biblical_text"]
-    sources = SourceLibrary(
-        entries=[
-            *[
-                _source_entry(candidate, long_form=project.video_format != "short")
-                for candidate in selected
-            ],
-            *non_biblical,
-        ]
-    )
+    from pipeline_videos.verse_selection import source_entries_for_candidate
+
+    biblical_sources = [
+        source
+        for candidate in selected
+        for source in source_entries_for_candidate(
+            candidate,
+            publisher=load_verse_catalog().publisher,
+            long_form=project.video_format != "short",
+        )
+    ]
+    sources = SourceLibrary(entries=[*biblical_sources, *non_biblical])
     write_json(layout.briefing, briefing)
     write_json(layout.sources, sources)
     digest = sha256_value({"briefing": briefing, "sources": sources})
@@ -996,6 +1076,12 @@ def _shorts_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     queue = read_json(layout.shorts_script_queue)
     context = _project_file(layout, queue["inputs"]["compact_context"])
     package = _project_file(layout, queue["outputs"]["package"])
+    visual_plan_only = queue.get("generation_mode") == "deterministic_compact_visual_plan_v1"
+    specialist_effort = str(
+        queue.get("orchestration", {}).get(
+            "reasoning_effort", "medium" if visual_plan_only else "high"
+        )
+    )
     return CodexPhaseSpec(
         phase="shorts_script",
         item_id=str(queue.get("job_id")),
@@ -1007,12 +1093,16 @@ def _shorts_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 "role": "shorts_script_specialist",
                 "count": 1,
                 "fork_turns": "none",
-                "reasoning_effort": "high",
+                "reasoning_effort": specialist_effort,
                 "model": DEFAULT_REMOTE_CODEX_MODEL,
             },
             "allowed_inputs": [str(layout.shorts_script_queue), str(context)],
             "task": {
-                "kind": "produce_shorts_script_package",
+                "kind": (
+                    "produce_compact_visual_plan"
+                    if visual_plan_only
+                    else "produce_shorts_script_package"
+                ),
                 "queue_path": str(layout.shorts_script_queue),
                 "compact_context_path": str(context),
                 "instructions": [
@@ -1252,6 +1342,7 @@ def _shorts_script_correction_checkpoint(
 ) -> CodexPhaseSpec:
     queue = read_json(layout.shorts_script_queue)
     package = _project_file(layout, queue["outputs"]["package"])
+    visual_plan_only = queue.get("generation_mode") == "deterministic_compact_visual_plan_v1"
     return CodexPhaseSpec(
         phase="shorts_script_correction",
         item_id=str(queue.get("job_id")),
@@ -1263,12 +1354,16 @@ def _shorts_script_correction_checkpoint(
                 "role": "shorts_script_specialist",
                 "count": 1,
                 "fork_turns": "none",
-                "reasoning_effort": "high",
+                "reasoning_effort": "medium" if visual_plan_only else "high",
                 "model": DEFAULT_REMOTE_CODEX_MODEL,
             },
             "allowed_inputs": [str(layout.shorts_script_queue), str(package)],
             "task": {
-                "kind": "correct_shorts_script_package",
+                "kind": (
+                    "correct_compact_visual_plan"
+                    if visual_plan_only
+                    else "correct_shorts_script_package"
+                ),
                 "queue_path": str(layout.shorts_script_queue),
                 "package_path": str(package),
                 "validation_error": str(validation_error)[:4000],
@@ -1302,12 +1397,16 @@ def _shorts_script_correction_checkpoint(
     )
 
 
-def _shorts_script_correction_is_available(job: RemoteVideoJob) -> bool:
+def _shorts_script_correction_is_available(
+    job: RemoteVideoJob,
+    layout: ProjectLayout,
+) -> bool:
     correction_runs = sum(
         run.phase == "shorts_script_correction" and run.job_attempt == job.attempts
         for run in job.codex_runs
     )
-    return correction_runs < 2
+    maximum = layout.load_manifest().config.production.max_model_repairs_per_stage
+    return correction_runs < maximum
 
 
 def _shorts_pipeline_repair_is_applicable(layout: ProjectLayout) -> bool:
@@ -1331,13 +1430,20 @@ def _repair_shorts_pipeline_failure(
     from pipeline_videos.shorts_script import (
         check_reviewed_shorts_script_staging,
         import_shorts_script_package,
+        materialize_compact_visual_fallback,
         prepare_shorts_biblical_review_queue,
         prepare_shorts_script_queue,
         validate_shorts_script_package_staging,
     )
 
     latest, _ = store.find(job.job_id)
-    if not _shorts_script_correction_is_available(latest):
+    if not _shorts_script_correction_is_available(latest, layout):
+        project = layout.load_manifest()
+        if project.config.shorts_script.generation_mode == "deterministic_compact_visual_plan_v1":
+            prepare_shorts_script_queue(layout, force=True)
+            materialize_compact_visual_fallback(layout)
+            import_shorts_script_package(layout, force=True)
+            return latest
         raise RuntimeError(
             "A tentativa atual esgotou dois checkpoints de correÃ§Ã£o do roteiro de Short. "
             "O job serÃ¡ retomado automaticamente em uma nova tentativa."
@@ -1351,20 +1457,22 @@ def _repair_shorts_pipeline_failure(
         timeout_seconds=timeout_seconds,
     )
     validate_shorts_script_package_staging(layout)
-    prepare_shorts_biblical_review_queue(layout, force=True)
-    latest = _execute_agent_checkpoint(
-        latest,
-        _biblical_review_phase_spec(layout),
-        store,
-        repo_root=repo_root,
-        timeout_seconds=timeout_seconds,
-    )
-    reviewed = check_reviewed_shorts_script_staging(layout)
-    if not reviewed.valid:
-        raise RuntimeError(
-            "A revisão bíblica independente bloqueou o pacote corrigido: "
-            + "; ".join(reviewed.errors)
+    project = layout.load_manifest()
+    if project.config.shorts_script.require_independent_biblical_review:
+        prepare_shorts_biblical_review_queue(layout, force=True)
+        latest = _execute_agent_checkpoint(
+            latest,
+            _biblical_review_phase_spec(layout),
+            store,
+            repo_root=repo_root,
+            timeout_seconds=timeout_seconds,
         )
+        reviewed = check_reviewed_shorts_script_staging(layout)
+        if not reviewed.valid:
+            raise RuntimeError(
+                "A revisão bíblica independente bloqueou o pacote corrigido: "
+                + "; ".join(reviewed.errors)
+            )
     import_shorts_script_package(layout, force=True)
     layout.append_event(
         {
@@ -1407,14 +1515,24 @@ def _ensure_valid_shorts_script_staging(
                 }
             )
 
-    from pipeline_videos.shorts_script import validate_shorts_script_package_staging
+    from pipeline_videos.shorts_script import (
+        materialize_compact_visual_fallback,
+        validate_shorts_script_package_staging,
+    )
 
     try:
         validate_shorts_script_package_staging(layout)
         return job
     except (ValueError, TypeError, KeyError) as exc:
         latest, _ = store.find(job.job_id)
-        if not _shorts_script_correction_is_available(latest):
+        if not _shorts_script_correction_is_available(latest, layout):
+            if (
+                project.config.shorts_script.generation_mode
+                == "deterministic_compact_visual_plan_v1"
+            ):
+                materialize_compact_visual_fallback(layout)
+                validate_shorts_script_package_staging(layout)
+                return latest
             raise RuntimeError(
                 "O pacote de roteiro continuou inválido após as correções da sessão principal. "
                 f"Último erro: {exc}"
@@ -1429,6 +1547,13 @@ def _ensure_valid_shorts_script_staging(
         try:
             validate_shorts_script_package_staging(layout)
         except (ValueError, TypeError, KeyError) as repair_exc:
+            if (
+                project.config.shorts_script.generation_mode
+                == "deterministic_compact_visual_plan_v1"
+            ):
+                materialize_compact_visual_fallback(layout)
+                validate_shorts_script_package_staging(layout)
+                return job
             raise RuntimeError(
                 "O pacote de roteiro continuou inválido após o checkpoint de correção. "
                 f"Último erro: {repair_exc}"
@@ -1545,9 +1670,9 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
 
 def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     queue = read_json(layout.growth_queue)
-    theme_based_thumbnail = (
-        queue.get("outputs", {}).get("thumbnail_source_mode") == "generated_theme_art"
-    )
+    thumbnail_source_mode = queue.get("outputs", {}).get("thumbnail_source_mode")
+    theme_based_thumbnail = thumbnail_source_mode == "generated_theme_art"
+    youtube_auto_frame = thumbnail_source_mode == "youtube_auto_frame"
     context = _project_file(layout, queue["inputs"]["compact_context"])
     package = _project_file(layout, queue["outputs"]["package"])
     thumbnails = tuple(
@@ -1610,8 +1735,12 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
             },
             "allowed_inputs": allowed_inputs,
             "task": {
-                "kind": "produce_one_title_thumbnail_pair",
-                "tool": "$imagegen",
+                "kind": (
+                    "produce_youtube_metadata_without_thumbnail"
+                    if youtube_auto_frame
+                    else "produce_one_title_thumbnail_pair"
+                ),
+                "tool": None if youtube_auto_frame else "$imagegen",
                 "queue_path": str(layout.growth_queue),
                 "compact_context_path": str(context),
                 "thumbnail_visual_reference_path": (
@@ -1620,7 +1749,11 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 "instructions": [
                     "Siga integralmente instructions, schemas e generation_retry_policy da fila.",
                     (
-                        "Use somente inputs.thumbnail_prompt, sem referenced_image_paths; gere a "
+                        "Não chame imagegen e não crie thumbnail; entregue somente o pacote de "
+                        "metadados, deixando o YouTube selecionar um frame do vídeo."
+                        if youtube_auto_frame
+                        else "Use somente inputs.thumbnail_prompt, sem referenced_image_paths; "
+                        "gere a "
                         "thumbnail horizontal limpa e sem texto exatamente como a fila determina."
                         if theme_based_thumbnail
                         else (
@@ -1633,8 +1766,16 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                             else "Siga integralmente o visual_standard textual da fila."
                         )
                     ),
-                    "Gere exatamente um título e uma thumbnail nesta produção remota.",
-                    "Escreva apenas outputs.package e outputs.thumbnails.",
+                    (
+                        "Gere exatamente o título configurado e nenhuma thumbnail."
+                        if youtube_auto_frame
+                        else "Gere exatamente um título e uma thumbnail nesta produção remota."
+                    ),
+                    (
+                        "Escreva apenas outputs.package."
+                        if youtube_auto_frame
+                        else "Escreva apenas outputs.package e outputs.thumbnails."
+                    ),
                     "O executor importará o pacote; não altere metadados compartilhados.",
                 ],
             },
@@ -1658,17 +1799,27 @@ def _growth_correction_checkpoint(
         read_json(layout.growth_queue).get("outputs", {}).get("thumbnail_source_mode")
         == "generated_theme_art"
     )
+    youtube_auto_frame = (
+        read_json(layout.growth_queue).get("outputs", {}).get("thumbnail_source_mode")
+        == "youtube_auto_frame"
+    )
     task.update(
         {
-            "kind": "correct_one_title_thumbnail_pair",
+            "kind": (
+                "correct_youtube_metadata_without_thumbnail"
+                if youtube_auto_frame
+                else "correct_one_title_thumbnail_pair"
+            ),
             "validation_error": str(validation_error)[:4000],
             "instructions": [
                 "Corrija somente o pacote e a thumbnail que falharam na validação.",
                 ("Preserve título, promessa, passagem e todos os campos já válidos."),
                 (
-                    "Mantenha cinematic-family-3d-v1 e animação 3D cinematográfica familiar "
-                    "como estilo positivo. Termos fotográficos podem aparecer somente dentro "
-                    "de restrições negativas como Avoid."
+                    "Não crie prompt, design ou arquivo de thumbnail durante a correção."
+                    if youtube_auto_frame
+                    else "Mantenha o visual_standard da fila como estilo positivo. Termos "
+                    "fotográficos conflitantes podem aparecer somente dentro de restrições "
+                    "negativas como Avoid."
                 ),
                 (
                     "Para a thumbnail temática longa, restaure metadata.thumbnail_prompt como "
@@ -1683,8 +1834,11 @@ def _growth_correction_checkpoint(
                     "explicitamente cada saída que precisar ser corrigida."
                 ),
                 (
-                    "Sobrescreva outputs.package e outputs.thumbnails. Não altere project.json, "
-                    "fila, aprovações ou outros ativos."
+                    "Sobrescreva somente outputs.package. Não altere project.json, fila, "
+                    "aprovações ou outros ativos."
+                    if youtube_auto_frame
+                    else "Sobrescreva outputs.package e outputs.thumbnails. Não altere "
+                    "project.json, fila, aprovações ou outros ativos."
                 ),
             ],
         }
@@ -1729,6 +1883,12 @@ def _repair_growth_package_failure(
 ) -> RemoteVideoJob:
     latest, _ = store.find(job.job_id)
     if not _growth_correction_is_available(latest):
+        project = layout.load_manifest()
+        if project.config.youtube_growth.generation_mode == "compact_metadata_draft_v1":
+            from pipeline_videos.growth import materialize_compact_growth_fallback
+
+            materialize_compact_growth_fallback(layout)
+            return latest
         raise RuntimeError(
             "A tentativa atual já usou o checkpoint único de correção do crescimento. "
             "O job será retomado automaticamente em uma nova tentativa."

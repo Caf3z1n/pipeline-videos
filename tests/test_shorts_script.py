@@ -5,10 +5,13 @@ from datetime import date
 
 import pytest
 
+from pipeline_videos.audio import generate_audio
+from pipeline_videos.images import build_codex_queue
 from pipeline_videos.models import (
     BiblicalReview,
     Briefing,
     CreativeContract,
+    ImageManifest,
     ScriptDocument,
     ScriptSection,
     ShortsCinematicDevotionalDirection,
@@ -22,6 +25,7 @@ from pipeline_videos.models import (
     ShortsScriptPackage,
     ShortsScriptStrategy,
     ShortsVerseOpening,
+    ShortsVisualScene,
     SourceEntry,
     SourceLibrary,
     StageStatus,
@@ -31,9 +35,11 @@ from pipeline_videos.scenes import build_scenes
 from pipeline_videos.shorts_script import (
     LEGACY_SCRIPTURE_BOUNDARY_PHRASE,
     ShortsScriptPackageValidationError,
+    _balanced_compact_chunks,
     check_reviewed_shorts_script_staging,
     check_shorts_script_package_staging,
     import_shorts_script_package,
+    materialize_compact_visual_fallback,
     prepare_shorts_biblical_review_queue,
     prepare_shorts_script_queue,
     spoken_biblical_reference,
@@ -49,6 +55,7 @@ def _short_project(tmp_path):
         projects_dir=tmp_path,
         target_duration_seconds=60,
         video_format="short",
+        style_id="cinematic-family-3d-animation",
         project_date=date(2026, 7, 14),
     )
     manifest = layout.load_manifest()
@@ -319,6 +326,7 @@ def _retention_project(tmp_path):
         projects_dir=tmp_path,
         target_duration_seconds=50,
         video_format="short",
+        style_id="cinematic-family-3d-animation",
         project_date=date(2026, 7, 16),
     )
     manifest = layout.load_manifest()
@@ -725,13 +733,14 @@ def _creative_package(queue: dict) -> ShortsScriptPackage:
     return legacy.model_copy(update={"script": script, "strategy": creative_strategy})
 
 
-def _micro_creative_project(tmp_path):
+def _micro_creative_project(tmp_path, *, legacy_short_profile: bool = True):
     layout = create_project(
         "momento-com-jesus",
         "Jesus conhece o seu cansaço",
         projects_dir=tmp_path,
         target_duration_seconds=15,
         video_format="short",
+        style_id=("cinematic-family-3d-animation" if legacy_short_profile else None),
         project_date=date(2026, 7, 20),
     )
     manifest = layout.load_manifest()
@@ -741,7 +750,7 @@ def _micro_creative_project(tmp_path):
         layout.briefing,
         Briefing(
             title="Jesus conhece o seu cansaço",
-            main_passage="Mateus 11:28",
+            main_passage="Mateus 11:29",
             central_theme="O convite de Jesus aos cansados.",
             practical_application="Receber o convite de descanso em Jesus.",
             audience="pessoas cansadas e sobrecarregadas",
@@ -762,23 +771,27 @@ def _micro_creative_project(tmp_path):
         SourceLibrary(
             entries=[
                 SourceEntry(
-                    source_id="bpm-mateus-11-28",
+                    source_id="bpm-mateus-11-29",
                     kind="biblical_text",
-                    title="Mateus 11:28 — BPM",
+                    title="Mateus 11:29 — BPM",
                     passage="Mateus 11:28-30",
                     translation="BPM",
                     author_or_publisher="eBible.org",
                     url="https://example.invalid/mateus-11",
                     accessed_at="2026-07-20",
                     excerpt=(
-                        "Venham a mim, todos vocês que estão cansados e sobrecarregados, "
-                        "e eu lhes darei descanso."
+                        "Tomem sobre vocês o meu jugo e aprendam de mim, pois sou manso e "
+                        "humilde de coração; e vocês encontrarão descanso para as suas almas."
                     ),
                     use_in_video="Fala direta de Jesus.",
                     claim_scope="Citação literal.",
                     rights_note="Domínio público.",
                     verified=True,
                     spoken_by="jesus",
+                    compact_hook=("Eu sei que está cansado. Há um descanso que ainda não conhece."),
+                    compact_hook_strength_score=0.96,
+                    compact_message_value_score=0.97,
+                    compact_rewatch_value_score=0.94,
                 )
             ]
         ),
@@ -787,11 +800,12 @@ def _micro_creative_project(tmp_path):
 
 
 def _micro_creative_package(queue: dict) -> ShortsScriptPackage:
-    hook = "Eu sei que você está cansado."
+    hook = "Eu sei que está cansado. Há um descanso que ainda não conhece."
     verse = (
-        "Venham a mim, todos vocês que estão cansados e sobrecarregados, e eu lhes darei descanso."
+        "Tomem sobre vocês o meu jugo e aprendam de mim, pois sou manso e humilde de coração; "
+        "e vocês encontrarão descanso para as suas almas."
     )
-    spoken_reference = "Mateus, capítulo 11, versículo 28"
+    spoken_reference = "Mateus, capítulo 11, versículo 29"
     promise = "Jesus interrompe o cansaço com um convite de descanso."
     takeaway = "O descanso é oferecido pela própria voz de Jesus."
     sections = [
@@ -800,7 +814,7 @@ def _micro_creative_package(queue: dict) -> ShortsScriptPackage:
             role="opening",
             title="Interrupção",
             narration=hook,
-            biblical_basis=["Mateus 11:28"],
+            biblical_basis=["Mateus 11:29"],
             claim_classification=["creative_elaboration"],
             retention_goal="Interromper o pensamento de desistência.",
             visual_direction="Jesus interrompe o passo e olha diretamente para o espectador.",
@@ -810,7 +824,7 @@ def _micro_creative_package(queue: dict) -> ShortsScriptPackage:
             role="biblical_narrative",
             title="Fala de Jesus",
             narration=f"“{verse}”",
-            biblical_basis=["Mateus 11:28"],
+            biblical_basis=["Mateus 11:29"],
             claim_classification=["biblical_text"],
             retention_goal="Ouvir a fala direta de Jesus.",
             visual_direction="Jesus estende a mão em uma paisagem épica iluminada pelo amanhecer.",
@@ -820,7 +834,7 @@ def _micro_creative_package(queue: dict) -> ShortsScriptPackage:
             role="closing",
             title="Referência",
             narration=f"{spoken_reference}.",
-            biblical_basis=["Mateus 11:28"],
+            biblical_basis=["Mateus 11:29"],
             claim_classification=["biblical_text"],
             retention_goal="Selar a origem bíblica da fala.",
             visual_direction="O olhar de Jesus permanece firme enquanto a luz envolve a cena.",
@@ -835,7 +849,7 @@ def _micro_creative_package(queue: dict) -> ShortsScriptPackage:
         content_promise=promise,
         viewer_takeaway=takeaway,
         spoken_reference=spoken_reference,
-        source_id="bpm-mateus-11-28",
+        source_id="bpm-mateus-11-29",
         visual_emotional_arc=[
             "Jesus interrompe o movimento.",
             "Jesus oferece descanso diretamente.",
@@ -849,7 +863,7 @@ def _micro_creative_package(queue: dict) -> ShortsScriptPackage:
             viewer_question="Jesus percebeu o meu cansaço?",
             viewer_value="Sentir uma interrupção direta e acolhedora.",
             target_start_seconds=0,
-            target_end_seconds=2,
+            target_end_seconds=3.5,
             opens_loop=promise,
             new_information="Jesus interrompe o pensamento do espectador.",
             visual_change="Jesus para e encontra o olhar do espectador.",
@@ -859,7 +873,7 @@ def _micro_creative_package(queue: dict) -> ShortsScriptPackage:
             purpose="evidence",
             viewer_question="O que Jesus diz aos cansados?",
             viewer_value="Ouvir a fala literal de Jesus.",
-            target_start_seconds=2,
+            target_start_seconds=3.5,
             target_end_seconds=12.3,
             resolves_loop=promise,
             new_information="Jesus convida os sobrecarregados ao descanso.",
@@ -885,14 +899,14 @@ def _micro_creative_package(queue: dict) -> ShortsScriptPackage:
         hook_type="emotional_interruption",
         hook_family="emotional_interruption",
         hook_techniques=["pattern_interrupt", "emotional_mirroring"],
-        hook_target_end_seconds=2,
+        hook_target_end_seconds=3.5,
         verse_opening=ShortsVerseOpening(
-            source_id="bpm-mateus-11-28",
-            reference="Mateus 11:28",
+            source_id="bpm-mateus-11-29",
+            reference="Mateus 11:29",
             translation="BPM",
             lead_in="",
             verse_text=verse,
-            target_start_seconds=2,
+            target_start_seconds=3.5,
             target_end_seconds=12.3,
         ),
         cinematic_devotional=direction,
@@ -902,7 +916,43 @@ def _micro_creative_package(queue: dict) -> ShortsScriptPackage:
         cta="",
         reason_to_subscribe="",
         retention_beats=beats,
-        source_ids=["bpm-mateus-11-28"],
+        visual_scenes=(
+            [
+                ShortsVisualScene(
+                    section_id="section-001",
+                    narration=hook,
+                    scene_description="Jesus segura com cuidado as mãos de uma pessoa cansada.",
+                    visual_relation="contextual",
+                ),
+                ShortsVisualScene(
+                    section_id="section-002",
+                    narration="“Tomem sobre vocês o meu jugo e aprendam de mim,",
+                    scene_description="Jesus ensina um pequeno grupo sentado ao ar livre.",
+                    visual_relation="literal",
+                ),
+                ShortsVisualScene(
+                    section_id="section-002",
+                    narration="pois sou manso e humilde de coração;",
+                    scene_description="Jesus ora serenamente junto de pessoas fatigadas.",
+                    visual_relation="contextual",
+                ),
+                ShortsVisualScene(
+                    section_id="section-002",
+                    narration="e vocês encontrarão descanso para as suas almas.”",
+                    scene_description="Um jardim preparado transmite descanso e acolhimento.",
+                    visual_relation="symbolic",
+                ),
+                ShortsVisualScene(
+                    section_id="section-003",
+                    narration=f"{spoken_reference}.",
+                    scene_description="Uma Bíblia aberta repousa sobre uma mesa simples.",
+                    visual_relation="contextual",
+                ),
+            ]
+            if queue.get("visual_scene_contract")
+            else []
+        ),
+        source_ids=["bpm-mateus-11-29"],
         section_ids=[section.section_id for section in sections],
         biblical_safeguards=["Usar somente a fala direta verificada de Jesus."],
         compliance_checks=["Sem CTA e sem lemos."],
@@ -913,13 +963,13 @@ def _micro_creative_package(queue: dict) -> ShortsScriptPackage:
         script=ScriptDocument(
             title="Jesus conhece o seu cansaço",
             sections=sections,
-            source_ids=["bpm-mateus-11-28"],
+            source_ids=["bpm-mateus-11-29"],
         ),
         biblical_review=BiblicalReview(
             script_version=1,
             reviewed_at=utc_now(),
             reviewer="fixture-reviewer",
-            summary="Fala direta de Jesus conferida em Mateus 11:28.",
+            summary="Fala direta de Jesus conferida em Mateus 11:29.",
         ),
         strategy=strategy,
     )
@@ -956,6 +1006,16 @@ def test_shorts_specialist_queue_imports_script_review_and_retention_strategy(tm
     assert queue["next_script_version"] == 1
     assert queue["scripture_candidates"] == ["biblia-josue-1-9"]
     assert queue["verse_opening_candidates"] == ["biblia-josue-1-9"]
+    assert queue["citation_policy"] == {
+        "allow_contiguous_multi_verse_citations": True,
+        "multi_verse_citation_policy": "when_necessary_or_beneficial_for_continuity",
+        "verified_single_excerpt_required": True,
+        "exact_range_reference_required": True,
+        "max_literal_verse_words": 40,
+        "respect_timing_window": True,
+        "padding_only_expansion_forbidden": True,
+    }
+    assert context["project"]["citation_policy"] == queue["citation_policy"]
     assert queue["spoken_reference_standard"] == {
         "compact_reference": "Josué 1:9",
         "spoken_reference": "Josué, capítulo 1, versículo 9",
@@ -1073,7 +1133,7 @@ def test_creative_retention_v3_accepts_curiosity_without_practical_application(t
     layout = _creative_project(tmp_path)
     queue = prepare_shorts_script_queue(layout)
 
-    assert queue["schema_version"] == "5.0"
+    assert queue["schema_version"] == "5.2"
     assert queue["retention_contract"]["standard"] == "creative_retention_v3"
     assert queue["retention_contract"]["creative_mode"] == "biblical_curiosity"
     assert queue["retention_contract"]["mode_guidance"]["id"] == "biblical_curiosity"
@@ -1097,26 +1157,32 @@ def test_creative_retention_v3_accepts_curiosity_without_practical_application(t
 
 
 def test_fifteen_second_profile_builds_cinematic_jesus_moment_without_cta(tmp_path) -> None:
-    layout = _micro_creative_project(tmp_path)
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
     queue = prepare_shorts_script_queue(layout)
 
-    assert queue["retention_contract"]["duration_profile"] == "adaptive_compact_v1"
-    assert queue["retention_contract"]["standard"] == "cinematic_jesus_devotional_v1"
-    assert queue["retention_contract"]["timeline_seconds"] == {
-        "hook": [0, 2.0],
-        "direct_jesus_quote": [2.0, 12.3],
-        "spoken_reference": [12.3, 15],
-        "cta": None,
-    }
-    assert queue["retention_contract"]["target_scene_count"] == [3, 4]
-    assert queue["retention_contract"]["cta_allowed"] is False
-    assert queue["scripture_candidates"] == ["bpm-mateus-11-28"]
-    assert queue["spoken_reference_standard"]["placement"] == "after_closing_quote"
-    assert any("filme épico sobre Jesus" in instruction for instruction in queue["instructions"])
-    assert any("Não crie CTA" in instruction for instruction in queue["instructions"])
+    assert queue["generation_mode"] == "deterministic_compact_visual_plan_v1"
+    assert queue["output_contract"] == "compact_visual_plan_v1"
+    assert queue["orchestration"]["reasoning_effort"] == "medium"
+    assert queue["preflight"]["max_model_repairs"] == 1
+    assert queue["preflight"]["fallback_command"].endswith(
+        'shorts-fallback "20-07-2026_momento-com-jesus"'
+    )
+    assert queue["deterministic_contract"]["biblical_review_mode"] == (
+        "deterministic_verified_compact_v1"
+    )
+    assert queue["deterministic_contract"]["spoken_reference"] == (
+        "Mateus, capítulo 11, versículo 29"
+    )
+    blocks = queue["deterministic_contract"]["blocks"]
+    assert len(blocks) == 5
+    assert blocks[0]["narration"] == (
+        "Eu sei que está cansado. Há um descanso que ainda não conhece."
+    )
+    assert blocks[-1]["creative_concept_required"] is False
+    assert blocks[-1]["narration"] == "Mateus, capítulo 11, versículo 29."
+    assert len(json.dumps(queue["schemas"]["package"])) < 2_000
 
-    package = _micro_creative_package(queue)
-    write_json(layout.shorts_script_package_staging, package)
+    materialize_compact_visual_fallback(layout)
     check = check_shorts_script_package_staging(layout)
 
     assert check.valid is True, check.errors
@@ -1124,7 +1190,7 @@ def test_fifteen_second_profile_builds_cinematic_jesus_moment_without_cta(tmp_pa
     scenes = build_scenes(layout, skip_approvals=True)
     contract = read_model(layout.creative_contract, CreativeContract)
 
-    assert 21 <= imported.script.word_count <= 42
+    assert 41 <= imported.script.word_count <= 46
     assert imported.script.estimated_duration_seconds <= 15
     assert imported.strategy.cinematic_devotional is not None
     assert imported.strategy.creative_direction is None
@@ -1132,19 +1198,113 @@ def test_fifteen_second_profile_builds_cinematic_jesus_moment_without_cta(tmp_pa
     assert "lemos" not in imported.script.narration_text().casefold()
     assert imported.script.sections[1].narration.startswith("“")
     assert imported.script.sections[1].narration.endswith("”")
-    assert imported.script.sections[-1].narration == "Mateus, capítulo 11, versículo 28."
+    assert imported.script.sections[-1].narration == "Mateus, capítulo 11, versículo 29."
     assert contract.pacing.profile_id == "short_compact_v1"
     assert contract.engagement_action is None
-    assert 3 <= len(scenes.scenes) <= 4
+    assert len(scenes.scenes) == 5
+    assert imported.biblical_review.reviewer == "deterministic-verified-compact-v1"
+    assert layout.load_manifest().config.audio.synthesis_segmentation == ("continuous_narration_v1")
+
+
+def test_painterly_short_maps_each_audio_block_to_a_specific_varied_scene(tmp_path) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
+    queue = prepare_shorts_script_queue(layout)
+
+    assert queue["generation_mode"] == "deterministic_compact_visual_plan_v1"
+    assert queue["inputs"] == {"compact_context": "script/shorts-context.json"}
+    assert queue["deterministic_contract"]["blocks"][-1]["fallback_scene_description"].startswith(
+        "Uma Bíblia aberta"
+    )
+    materialize_compact_visual_fallback(layout)
+    imported = import_shorts_script_package(layout)
+    scenes = build_scenes(layout, skip_approvals=True)
+    audio = generate_audio(layout, provider="mock")
+
+    assert len(imported.strategy.visual_scenes) == 5
+    assert len(scenes.scenes) == 5
+    assert len(audio.segments) == 5
+    assert [segment.scene_id for segment in audio.segments] == [
+        scene.scene_id for scene in scenes.scenes
+    ]
+    assert [segment.narration_block_id for segment in audio.segments] == [
+        scene.narration_block_id for scene in scenes.scenes
+    ]
+    assert len({scene.visual_brief for scene in scenes.scenes}) == 5
+    assert {scene.visual_relation for scene in scenes.scenes} == {
+        "literal",
+        "contextual",
+        "symbolic",
+    }
+    assert all(
+        "biblical-midcentury-gouache-v1" in scene.prompt.assembled_prompt for scene in scenes.scenes
+    )
+    assert all("42% e 58%" not in scene.prompt.assembled_prompt for scene in scenes.scenes)
+    assert all(
+        "bordas direita e inferior" not in scene.prompt.assembled_prompt for scene in scenes.scenes
+    )
+    reference_scene = scenes.scenes[-1]
+    assert reference_scene.section_id == "section-003"
+    assert reference_scene.image_source_mode == "fixed_profile_asset_v1"
+    assert reference_scene.image_source_path == (
+        "visual/reference-images/biblical-midcentury-gouache-spoken-reference.png"
+    )
+
+    image_queue = build_codex_queue(layout)
+    assert len(image_queue["items"]) == len(scenes.scenes) - 1
+    assert reference_scene.scene_id not in {item["scene_id"] for item in image_queue["items"]}
+    assert image_queue["fixed_profile_assets"] == [
+        {
+            "scene_id": reference_scene.scene_id,
+            "source_path": reference_scene.image_source_path,
+            "active_path": f"images/assets/{reference_scene.scene_id}/v001.png",
+            "role": "spoken_reference",
+        }
+    ]
+    image_manifest = read_model(layout.images, ImageManifest)
+    reference_image = next(
+        item for item in image_manifest.items if item.scene_id == reference_scene.scene_id
+    )
+    assert reference_image.status == StageStatus.COMPLETED
+    assert reference_image.active_version == 1
+    assert reference_image.versions[0].provider == "profile-fixed-asset"
+    assert reference_image.versions[0].metadata["source_hash"] == (
+        "86a071ed5d3cd9ed4c825edc5cabf7b3b52dc1403a54fbb3294f49174e38fc3c"
+    )
+    assert (layout.root / reference_image.versions[0].path).is_file()
+
+    forced_queue = build_codex_queue(layout, force=True)
+    assert reference_scene.scene_id not in {item["scene_id"] for item in forced_queue["items"]}
+
+
+def test_compact_chunking_prefers_sentences_and_safe_commas_over_equal_word_counts() -> None:
+    verse = (
+        "Eu sou a videira verdadeira, e meu Pai é o agricultor. "
+        "Todo ramo em mim que não dá fruto, ele corta. "
+        "Todo ramo que dá fruto, ele limpa, para que dê mais fruto."
+    )
+
+    assert _balanced_compact_chunks(verse, 4) == [
+        "Eu sou a videira verdadeira, e meu Pai é o agricultor.",
+        "Todo ramo em mim que não dá fruto, ele corta.",
+        "Todo ramo que dá fruto,",
+        "ele limpa, para que dê mais fruto.",
+    ]
+    assert _balanced_compact_chunks(
+        "Uma fala contínua sem pontuação intermediária suficiente",
+        4,
+    ) == ["Uma fala contínua sem pontuação intermediária suficiente"]
 
 
 def test_compact_profile_rejects_lemos_and_cta(tmp_path) -> None:
     layout = _micro_creative_project(tmp_path)
+    manifest = layout.load_manifest()
+    manifest.config.shorts_script.generation_mode = "specialist_full_package_v1"
+    layout.save_manifest(manifest)
     queue = prepare_shorts_script_queue(layout)
     package = _micro_creative_package(queue).model_dump(mode="json")
     package["strategy"]["cta"] = "Inscreva-se."
     package["script"]["sections"][1]["narration"] = (
-        "Em Mateus, capítulo 11, versículo 28, lemos: "
+        "Em Mateus, capítulo 11, versículo 29, lemos: "
         + package["script"]["sections"][1]["narration"]
     )
     write_json(layout.shorts_script_package_staging, package)
@@ -1154,6 +1314,26 @@ def test_compact_profile_rejects_lemos_and_cta(tmp_path) -> None:
     assert check.valid is False
     assert any("não permite CTA" in error for error in check.errors)
     assert any("palavra 'lemos'" in error for error in check.errors)
+
+
+def test_compact_profile_rejects_weak_hook_and_underfilled_narration(tmp_path) -> None:
+    layout = _micro_creative_project(tmp_path)
+    manifest = layout.load_manifest()
+    manifest.config.shorts_script.generation_mode = "specialist_full_package_v1"
+    layout.save_manifest(manifest)
+    queue = prepare_shorts_script_queue(layout)
+    package = _micro_creative_package(queue).model_dump(mode="json")
+    weak_hook = "Não deixe a dor escolher por você."
+    package["script"]["sections"][0]["narration"] = weak_hook
+    package["strategy"]["hook"] = weak_hook
+    package["strategy"]["cinematic_devotional"]["emotional_hook"] = weak_hook
+    write_json(layout.shorts_script_package_staging, package)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is False
+    assert any("combinação curada" in error for error in check.errors)
+    assert any("sem preencher o restante com silêncio" in error for error in check.errors)
 
 
 def test_compact_profile_refuses_source_not_marked_as_direct_jesus_speech(tmp_path) -> None:
@@ -1182,6 +1362,11 @@ def test_new_short_import_waits_for_one_independent_biblical_review(tmp_path) ->
     assert "Revisão bíblica independente ausente" in missing.errors[0]
     assert review_queue["role"] == "biblical_reviewer"
     assert review_queue["orchestration"]["context_policy"] == "compact_only"
+    review_context = read_json(layout.shorts_biblical_review_context)
+    assert review_context["target_duration_seconds"] == 50
+    assert review_context["citation_policy"]["max_literal_verse_words"] == 40
+    assert review_context["citation_policy"]["allow_contiguous_multi_verse_citations"] is True
+    assert any("citation_policy" in instruction for instruction in review_queue["instructions"])
     assert queue["preflight"]["independent_biblical_review_required"] is True
 
     independent = package.biblical_review.model_copy(
@@ -1371,6 +1556,7 @@ def test_shorts_prepare_requires_a_verified_literal_verse_source(tmp_path) -> No
         projects_dir=tmp_path,
         target_duration_seconds=60,
         video_format="short",
+        style_id="cinematic-family-3d-animation",
         project_date=date(2026, 7, 14),
     )
 

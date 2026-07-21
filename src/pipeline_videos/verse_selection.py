@@ -19,6 +19,7 @@ from pipeline_videos.creative_direction import (
     default_interpretive_stance,
     default_long_hook_policy,
     hook_families_for_mode,
+    hook_matches_family,
     narration_tone_for_mode,
     viewer_outcome_for_mode,
 )
@@ -43,6 +44,10 @@ from pipeline_videos.models import (
     VerseUsageRecord,
 )
 from pipeline_videos.project import (
+    COMPACT_MINIMUM_HOOK_STRENGTH_SCORE,
+    COMPACT_MINIMUM_MESSAGE_VALUE_SCORE,
+    COMPACT_MINIMUM_REWATCH_VALUE_SCORE,
+    compact_narration_word_range,
     create_project,
     project_directory_name,
     short_literal_verse_word_limit,
@@ -60,6 +65,15 @@ from pipeline_videos.utils import relative_posix, sha256_value, tokenize_words, 
 
 DEFAULT_VERSE_CATALOG = REPO_ROOT / "config" / "bible" / "shorts-verse-catalog.json"
 DEFAULT_VERSE_EXPANSION_BANK = REPO_ROOT / "config" / "bible" / "shorts-verse-expansion-bank.json"
+DEFAULT_CURATED_VERSE_BANK = REPO_ROOT / "config" / "bible" / "curated-verse-bank-v2.json"
+DEFAULT_NARRATIVE_CHARACTER_BANK = (
+    REPO_ROOT / "config" / "bible" / "narrative-character-bank-v1.json"
+)
+DEFAULT_VERSE_BANKS = (
+    DEFAULT_VERSE_EXPANSION_BANK,
+    DEFAULT_CURATED_VERSE_BANK,
+    DEFAULT_NARRATIVE_CHARACTER_BANK,
+)
 VERSE_USAGE_FILENAME = "verse-usage.json"
 REGISTRY_ENVIRONMENT_ENV = "PIPELINE_VIDEOS_CONTENT_REGISTRY_ENVIRONMENT"
 RETENTION_ARCHETYPES = (
@@ -75,18 +89,51 @@ COMPACT_DEVOTIONAL_MODES: tuple[CreativeMode, ...] = (
 BOOK_ALIASES = {
     "genesis": "genesis",
     "exodo": "exodo",
+    "levitico": "levitico",
+    "numeros": "numeros",
     "deuteronomio": "deuteronomio",
     "josue": "josue",
+    "juizes": "juizes",
+    "rute": "rute",
     "1 samuel": "1-samuel",
     "i samuel": "1-samuel",
+    "2 samuel": "2-samuel",
+    "ii samuel": "2-samuel",
+    "1 reis": "1-reis",
+    "i reis": "1-reis",
+    "2 reis": "2-reis",
+    "ii reis": "2-reis",
+    "1 cronicas": "1-cronicas",
+    "i cronicas": "1-cronicas",
+    "2 cronicas": "2-cronicas",
+    "ii cronicas": "2-cronicas",
+    "esdras": "esdras",
+    "neemias": "neemias",
+    "ester": "ester",
+    "jo": "jo",
     "salmo": "salmos",
     "salmos": "salmos",
     "proverbios": "proverbios",
+    "eclesiastes": "eclesiastes",
+    "cantares": "cantares",
+    "cantares de salomao": "cantares",
     "isaias": "isaias",
     "jeremias": "jeremias",
     "lamentacoes": "lamentacoes",
+    "ezequiel": "ezequiel",
+    "daniel": "daniel",
+    "oseias": "oseias",
+    "joel": "joel",
+    "amos": "amos",
+    "obadias": "obadias",
+    "jonas": "jonas",
     "miqueias": "miqueias",
+    "naum": "naum",
     "habacuque": "habacuque",
+    "sofonias": "sofonias",
+    "ageu": "ageu",
+    "zacarias": "zacarias",
+    "malaquias": "malaquias",
     "mateus": "mateus",
     "marcos": "marcos",
     "lucas": "lucas",
@@ -103,14 +150,27 @@ BOOK_ALIASES = {
     "colossenses": "colossenses",
     "1 tessalonicenses": "1-tessalonicenses",
     "i tessalonicenses": "1-tessalonicenses",
+    "2 tessalonicenses": "2-tessalonicenses",
+    "ii tessalonicenses": "2-tessalonicenses",
+    "1 timoteo": "1-timoteo",
+    "i timoteo": "1-timoteo",
     "2 timoteo": "2-timoteo",
     "ii timoteo": "2-timoteo",
+    "tito": "tito",
+    "filemom": "filemom",
     "hebreus": "hebreus",
     "tiago": "tiago",
     "1 pedro": "1-pedro",
     "i pedro": "1-pedro",
+    "2 pedro": "2-pedro",
+    "ii pedro": "2-pedro",
     "1 joao": "1-joao",
     "i joao": "1-joao",
+    "2 joao": "2-joao",
+    "ii joao": "2-joao",
+    "3 joao": "3-joao",
+    "iii joao": "3-joao",
+    "judas": "judas",
     "apocalipse": "apocalipse",
 }
 BOOK_PATTERN = "|".join(sorted((re.escape(item) for item in BOOK_ALIASES), key=len, reverse=True))
@@ -180,30 +240,40 @@ def load_verse_catalog(
     include_expansion_bank: bool = True,
 ) -> VerseCatalog:
     catalog = read_model(path, VerseCatalog)
-    if (
-        not include_expansion_bank
-        or path.resolve() != DEFAULT_VERSE_CATALOG.resolve()
-        or not DEFAULT_VERSE_EXPANSION_BANK.is_file()
-    ):
+    if not include_expansion_bank or path.resolve() != DEFAULT_VERSE_CATALOG.resolve():
         return catalog
-    expansion = read_model(DEFAULT_VERSE_EXPANSION_BANK, VerseCatalog)
-    if expansion.translation != catalog.translation or expansion.rights_note != catalog.rights_note:
-        raise ValueError("O banco de expansão precisa usar a mesma tradução e os mesmos direitos.")
     candidates = list(catalog.candidates)
     known_ids = {candidate.candidate_id for candidate in candidates}
-    known_references = {
+    known_standard_references = {
         token for candidate in candidates for token in reference_tokens(candidate.reference)
     }
-    for candidate in expansion.candidates:
-        tokens = reference_tokens(candidate.reference)
-        if candidate.candidate_id in known_ids or tokens & known_references:
+    loaded_catalog_ids = [catalog.catalog_id]
+    for bank_path in DEFAULT_VERSE_BANKS:
+        if not bank_path.is_file():
             continue
-        candidates.append(candidate)
-        known_ids.add(candidate.candidate_id)
-        known_references.update(tokens)
+        expansion = read_model(bank_path, VerseCatalog)
+        if (
+            expansion.translation != catalog.translation
+            or expansion.rights_note != catalog.rights_note
+        ):
+            raise ValueError(
+                f"O banco {bank_path.name} precisa usar a mesma tradução e os mesmos direitos."
+            )
+        loaded_catalog_ids.append(expansion.catalog_id)
+        for candidate in expansion.candidates:
+            tokens = reference_tokens(candidate.reference)
+            narrative_story = candidate.catalog_segment == "narrative_story"
+            if candidate.candidate_id in known_ids or (
+                not narrative_story and tokens & known_standard_references
+            ):
+                continue
+            candidates.append(candidate)
+            known_ids.add(candidate.candidate_id)
+            if not narrative_story:
+                known_standard_references.update(tokens)
     return catalog.model_copy(
         update={
-            "catalog_id": f"{catalog.catalog_id}+{expansion.catalog_id}",
+            "catalog_id": "+".join(loaded_catalog_ids),
             "candidates": candidates,
         }
     )
@@ -769,18 +839,103 @@ def catalog_capacity_summary(
     video_format: Literal["landscape", "short"],
 ) -> dict[str, int | str]:
     counts, reserved = _main_candidate_usage(catalog, usage, video_format=video_format)
-    minimum_usage = min(counts.values(), default=0)
+    eligible_ids = {
+        candidate.candidate_id
+        for candidate in catalog.candidates
+        if _candidate_supports_format(candidate, video_format)
+    }
+    eligible_counts = {
+        candidate_id: count
+        for candidate_id, count in counts.items()
+        if candidate_id in eligible_ids
+    }
+    minimum_usage = min(eligible_counts.values(), default=0)
     available = sum(
         count == minimum_usage and candidate_id not in reserved
-        for candidate_id, count in counts.items()
+        for candidate_id, count in eligible_counts.items()
     )
     return {
         "video_format": video_format,
-        "catalog_candidates": len(catalog.candidates),
+        "catalog_candidates": len(eligible_ids),
         "selection_cycle": minimum_usage + 1,
         "available_in_cycle": available,
         "reserved_main_passages": len(reserved),
     }
+
+
+def compact_package_word_count(candidate: VerseCandidate) -> int:
+    """Count the exact compact hook + quote + spoken-reference package."""
+
+    spoken_reference_words = len(tokenize_words(candidate.book)) + 4
+    if "-" in candidate.reference.rsplit(" ", 1)[-1]:
+        spoken_reference_words += 2
+    return (
+        len(tokenize_words(candidate.compact_hook))
+        + len(tokenize_words(candidate.verse_text))
+        + spoken_reference_words
+    )
+
+
+def _candidate_matches_compact_package(
+    candidate: VerseCandidate,
+    *,
+    minimum_package_words: int | None,
+    maximum_package_words: int | None,
+    minimum_hook_strength_score: float,
+    minimum_message_value_score: float,
+    minimum_rewatch_value_score: float,
+) -> bool:
+    if minimum_package_words is None and maximum_package_words is None:
+        return True
+    if not candidate.compact_hook.strip():
+        return False
+    if not hook_matches_family(candidate.compact_hook, "emotional_interruption"):
+        return False
+    if not all(
+        value.strip()
+        for value in (
+            candidate.reference,
+            candidate.translation,
+            candidate.verse_text,
+            candidate.source_url,
+            candidate.accessed_at,
+            candidate.rights_note,
+        )
+    ):
+        return False
+    package_words = compact_package_word_count(candidate)
+    if minimum_package_words is not None and package_words < minimum_package_words:
+        return False
+    if maximum_package_words is not None and package_words > maximum_package_words:
+        return False
+    return (
+        candidate.compact_hook_strength_score >= minimum_hook_strength_score
+        and candidate.compact_message_value_score >= minimum_message_value_score
+        and candidate.compact_rewatch_value_score >= minimum_rewatch_value_score
+    )
+
+
+def _candidate_supports_format(
+    candidate: VerseCandidate,
+    video_format: Literal["landscape", "short"],
+    *,
+    requested_character: str | None = None,
+) -> bool:
+    requested = "short" if video_format == "short" else "long"
+    if requested_character:
+        if candidate.catalog_segment != "narrative_story":
+            return False
+        normalized = _plain(requested_character)
+        names = {
+            _plain(value)
+            for value in [*candidate.characters, *candidate.character_aliases]
+            if value.strip()
+        }
+        return requested in candidate.recommended_formats and normalized in names
+    return (
+        candidate.catalog_segment != "narrative_story"
+        and requested in candidate.recommended_formats
+    )
 
 
 def eligible_main_candidate_ids(
@@ -790,13 +945,32 @@ def eligible_main_candidate_ids(
     video_format: Literal["landscape", "short"],
     max_verse_words: int | None = None,
     required_spoken_by: Literal["jesus"] | None = None,
+    minimum_package_words: int | None = None,
+    maximum_package_words: int | None = None,
+    minimum_hook_strength_score: float = 0.0,
+    minimum_message_value_score: float = 0.0,
+    minimum_rewatch_value_score: float = 0.0,
+    requested_character: str | None = None,
 ) -> set[str]:
     counts, reserved = _main_candidate_usage(catalog, usage, video_format=video_format)
     candidate_ids = {
         candidate.candidate_id
         for candidate in catalog.candidates
+        if _candidate_supports_format(
+            candidate,
+            video_format,
+            requested_character=requested_character,
+        )
         if max_verse_words is None or len(tokenize_words(candidate.verse_text)) <= max_verse_words
         if required_spoken_by is None or candidate.spoken_by == required_spoken_by
+        if _candidate_matches_compact_package(
+            candidate,
+            minimum_package_words=minimum_package_words,
+            maximum_package_words=maximum_package_words,
+            minimum_hook_strength_score=minimum_hook_strength_score,
+            minimum_message_value_score=minimum_message_value_score,
+            minimum_rewatch_value_score=minimum_rewatch_value_score,
+        )
     }
     minimum_usage = min((counts[candidate_id] for candidate_id in candidate_ids), default=0)
     return {
@@ -813,17 +987,49 @@ def select_unused_verse(
     video_format: Literal["landscape", "short"] = "short",
     max_verse_words: int | None = None,
     required_spoken_by: Literal["jesus"] | None = None,
+    minimum_package_words: int | None = None,
+    maximum_package_words: int | None = None,
+    minimum_hook_strength_score: float = 0.0,
+    minimum_message_value_score: float = 0.0,
+    minimum_rewatch_value_score: float = 0.0,
+    requested_character: str | None = None,
 ) -> tuple[VerseCandidate, float]:
     counts, reserved = _main_candidate_usage(catalog, usage, video_format=video_format)
     candidate_pool = [
         candidate
         for candidate in catalog.candidates
+        if _candidate_supports_format(
+            candidate,
+            video_format,
+            requested_character=requested_character,
+        )
         if max_verse_words is None or len(tokenize_words(candidate.verse_text)) <= max_verse_words
         if required_spoken_by is None or candidate.spoken_by == required_spoken_by
+        if _candidate_matches_compact_package(
+            candidate,
+            minimum_package_words=minimum_package_words,
+            maximum_package_words=maximum_package_words,
+            minimum_hook_strength_score=minimum_hook_strength_score,
+            minimum_message_value_score=minimum_message_value_score,
+            minimum_rewatch_value_score=minimum_rewatch_value_score,
+        )
     ]
     if not candidate_pool:
+        if requested_character:
+            raise RuntimeError(
+                "O catálogo narrativo ainda não possui uma história verificada para "
+                f'"{requested_character}" neste formato.'
+            )
         raise RuntimeError(
-            "O catálogo não possui fala direta de Jesus curta o bastante para a duração solicitada."
+            (
+                "O catálogo não possui uma combinação de hook forte e fala direta de Jesus com "
+                "valor e palavras suficientes para preencher a duração com narração."
+            )
+            if required_spoken_by == "jesus" and minimum_package_words is not None
+            else (
+                "O catálogo não possui fala direta de Jesus curta o bastante para a duração "
+                "solicitada."
+            )
             if required_spoken_by == "jesus"
             else "O catálogo não possui versículo curto o bastante para a duração solicitada."
         )
@@ -857,7 +1063,11 @@ def select_unused_verse(
         book_token = next(iter(reference_tokens(candidate.reference))).split("|", 1)[0]
         score = candidate.selection_weight * 100
         verse_word_count = len(tokenize_words(candidate.verse_text))
-        if verse_word_count <= 18:
+        if minimum_package_words is not None and maximum_package_words is not None:
+            package_word_count = compact_package_word_count(candidate)
+            target_word_count = (minimum_package_words + maximum_package_words) / 2
+            brevity_bonus = max(0.0, 20.0 - abs(package_word_count - target_word_count) * 4)
+        elif verse_word_count <= 18:
             brevity_bonus = 16
         elif verse_word_count <= 25:
             brevity_bonus = 8
@@ -868,6 +1078,10 @@ def select_unused_verse(
         score += candidate.familiarity_score * 20
         score += candidate.clarity_score * 16
         score += candidate.retention_potential_score * 20
+        if minimum_package_words is not None:
+            score += candidate.compact_hook_strength_score * 24
+            score += candidate.compact_message_value_score * 28
+            score += candidate.compact_rewatch_value_score * 20
         if candidate.human_conflict.strip() and candidate.central_question.strip():
             score += 6
         if len(candidate.visual_progression) >= 2:
@@ -882,6 +1096,68 @@ def select_unused_verse(
         scored.append((score, -order, candidate))
     score, _, selected = max(scored, key=lambda item: (item[0], item[1]))
     return selected, round(score, 2)
+
+
+def source_entries_for_candidate(
+    candidate: VerseCandidate,
+    *,
+    publisher: str,
+    long_form: bool,
+) -> list[SourceEntry]:
+    """Expand a narrative candidate into its verified, role-labelled source package."""
+    entries = [
+        SourceEntry(
+            source_id=candidate.source_id,
+            kind="biblical_text",
+            title=f"{candidate.reference} — {candidate.translation}",
+            passage=candidate.reference,
+            context_passage=candidate.context_reference,
+            translation=candidate.translation,
+            author_or_publisher=publisher,
+            url=candidate.source_url,
+            accessed_at=candidate.accessed_at,
+            excerpt=candidate.verse_text,
+            use_in_video=(
+                "Âncora literal verificada da narrativa do personagem."
+                if candidate.catalog_segment == "narrative_story"
+                else "Citação literal verificada distribuída na narrativa do vídeo longo."
+                if long_form
+                else "Citação literal obrigatória e base do desenvolvimento do Short."
+            ),
+            claim_scope="Texto bíblico; contexto e aplicações devem ser distinguidos.",
+            rights_note=candidate.rights_note,
+            verified=True,
+            spoken_by=candidate.spoken_by,
+            compact_hook=candidate.compact_hook,
+            compact_hook_strength_score=candidate.compact_hook_strength_score,
+            compact_message_value_score=candidate.compact_message_value_score,
+            compact_rewatch_value_score=candidate.compact_rewatch_value_score,
+        )
+    ]
+    for related in candidate.related_passages:
+        entries.append(
+            SourceEntry(
+                source_id=f"{candidate.source_id}-{related.passage_id}",
+                kind="biblical_text",
+                title=f"{related.reference} — {candidate.translation}",
+                passage=related.reference,
+                context_passage=related.context_reference,
+                translation=candidate.translation,
+                author_or_publisher=publisher,
+                url=related.source_url,
+                accessed_at=candidate.accessed_at,
+                excerpt=related.verse_text,
+                use_in_video=(
+                    "Passagem verificada relacionada ao personagem; função narrativa: "
+                    f"{related.role}."
+                ),
+                claim_scope="Texto bíblico; contexto e aplicações devem ser distinguidos.",
+                rights_note=candidate.rights_note,
+                verified=True,
+                spoken_by=related.spoken_by,
+            )
+        )
+    return entries
 
 
 @contextmanager
@@ -912,12 +1188,15 @@ def create_auto_video(
     *,
     projects_dir: Path | None = None,
     target_duration_seconds: int,
+    duration_min_seconds: float | None = None,
+    duration_max_seconds: float | None = None,
     video_format: Literal["landscape", "short"],
     project_date: date | None = None,
     catalog_path: Path = DEFAULT_VERSE_CATALOG,
     production_mode: ProductionMode = "final_candidate_one_shot",
     creative_mode_override: CreativeMode | None = None,
     hook_family_override: HookFamily | None = None,
+    requested_character: str | None = None,
 ) -> tuple[ProjectLayout, VerseCandidate, float]:
     if creative_mode_override == "auto":
         creative_mode_override = None
@@ -926,6 +1205,21 @@ def create_auto_video(
     compact_profile = (
         video_format == "short" and target_duration_seconds < COMPACT_SHORT_THRESHOLD_SECONDS
     )
+    requested_character = requested_character.strip() if requested_character else None
+    if compact_profile and requested_character:
+        raise ValueError(
+            "Histórias de personagens não entram no perfil compacto. "
+            f"Use um Short de ao menos {COMPACT_SHORT_THRESHOLD_SECONDS} segundos ou vídeo longo."
+        )
+    if compact_profile:
+        selection_minimum_seconds = int(duration_min_seconds or target_duration_seconds)
+        selection_maximum_seconds = int(duration_max_seconds or target_duration_seconds)
+        minimum_words = compact_narration_word_range(selection_minimum_seconds)[0]
+        maximum_words = compact_narration_word_range(selection_maximum_seconds)[1]
+        compact_word_range: tuple[int | None, int | None] = (minimum_words, maximum_words)
+    else:
+        selection_maximum_seconds = target_duration_seconds
+        compact_word_range = (None, None)
     if compact_profile and creative_mode_override not in {None, *COMPACT_DEVOTIONAL_MODES}:
         raise ValueError(
             "Shorts compactos aceitam somente devotional_application ou pastoral_encouragement."
@@ -966,17 +1260,31 @@ def create_auto_video(
                 usage,
                 video_format=video_format,
                 max_verse_words=(
-                    short_literal_verse_word_limit(target_duration_seconds)
+                    short_literal_verse_word_limit(selection_maximum_seconds)
                     if video_format == "short"
                     else None
                 ),
                 required_spoken_by="jesus" if compact_profile else None,
+                minimum_package_words=compact_word_range[0],
+                maximum_package_words=compact_word_range[1],
+                minimum_hook_strength_score=(
+                    COMPACT_MINIMUM_HOOK_STRENGTH_SCORE if compact_profile else 0.0
+                ),
+                minimum_message_value_score=(
+                    COMPACT_MINIMUM_MESSAGE_VALUE_SCORE if compact_profile else 0.0
+                ),
+                minimum_rewatch_value_score=(
+                    COMPACT_MINIMUM_REWATCH_VALUE_SCORE if compact_profile else 0.0
+                ),
+                requested_character=requested_character,
             )
             retention_archetype = (
                 select_retention_archetype(candidate, usage) if video_format == "short" else None
             )
             creative_mode = creative_mode_override or (
-                select_compact_devotional_mode(usage)
+                "character_portrait"
+                if requested_character
+                else select_compact_devotional_mode(usage)
                 if compact_profile
                 else select_creative_mode(candidate, usage, video_format=video_format)
             )
@@ -1074,6 +1382,8 @@ def create_auto_video(
             project_title,
             projects_dir=root,
             target_duration_seconds=target_duration_seconds,
+            duration_min_seconds=duration_min_seconds,
+            duration_max_seconds=duration_max_seconds,
             video_format=video_format,
             project_date=project_date,
             production_mode=production_mode,
@@ -1090,6 +1400,7 @@ def create_auto_video(
         briefing = Briefing(
             title=project_title,
             main_passage=candidate.reference,
+            complementary_references=[passage.reference for passage in candidate.related_passages],
             central_theme=candidate.central_theme,
             practical_application=practical_application,
             audience=candidate.audience,
@@ -1166,28 +1477,11 @@ def create_auto_video(
             creative_rationale=(f"{creative_spec.label}: {creative_spec.purpose}"),
         )
         sources = SourceLibrary(
-            entries=[
-                SourceEntry(
-                    source_id=candidate.source_id,
-                    kind="biblical_text",
-                    title=f"{candidate.reference} — {candidate.translation}",
-                    passage=candidate.context_reference,
-                    translation=candidate.translation,
-                    author_or_publisher=catalog.publisher,
-                    url=candidate.source_url,
-                    accessed_at=candidate.accessed_at,
-                    excerpt=candidate.verse_text,
-                    use_in_video=(
-                        "Citação literal obrigatória e base do desenvolvimento do Short."
-                        if video_format == "short"
-                        else "Citação literal obrigatória e base do desenvolvimento do vídeo."
-                    ),
-                    claim_scope="Texto bíblico; contexto e aplicações devem ser distinguidos.",
-                    rights_note=candidate.rights_note,
-                    verified=True,
-                    spoken_by=candidate.spoken_by,
-                )
-            ]
+            entries=source_entries_for_candidate(
+                candidate,
+                publisher=catalog.publisher,
+                long_form=video_format != "short",
+            )
         )
         write_json(layout.briefing, briefing)
         write_json(layout.sources, sources)
@@ -1213,6 +1507,13 @@ def create_auto_video(
                 "familiarity_score": candidate.familiarity_score,
                 "clarity_score": candidate.clarity_score,
                 "retention_potential_score": candidate.retention_potential_score,
+                "compact_hook": candidate.compact_hook if compact_profile else None,
+                "compact_package_word_count": (
+                    compact_package_word_count(candidate) if compact_profile else None
+                ),
+                "compact_hook_strength_score": candidate.compact_hook_strength_score,
+                "compact_message_value_score": candidate.compact_message_value_score,
+                "compact_rewatch_value_score": candidate.compact_rewatch_value_score,
                 "retention_archetype": retention_archetype,
                 "creative_mode": creative_mode,
                 "interpretive_stance": default_interpretive_stance(creative_mode),
@@ -1221,6 +1522,8 @@ def create_auto_video(
                 "catalog_id": catalog.catalog_id,
                 "usage_records_considered": len(before.records),
                 "development_modes": candidate.preferred_development_modes,
+                "requested_character": requested_character,
+                "related_passages": [passage.reference for passage in candidate.related_passages],
             }
         )
         sync_shared_usage(root, catalog=catalog)
@@ -1231,19 +1534,25 @@ def create_auto_short(
     *,
     projects_dir: Path | None = None,
     target_duration_seconds: int = 50,
+    duration_min_seconds: float | None = None,
+    duration_max_seconds: float | None = None,
     project_date: date | None = None,
     catalog_path: Path = DEFAULT_VERSE_CATALOG,
     production_mode: ProductionMode = "final_candidate_one_shot",
     creative_mode_override: CreativeMode | None = None,
     hook_family_override: HookFamily | None = None,
+    requested_character: str | None = None,
 ) -> tuple[ProjectLayout, VerseCandidate, float]:
     return create_auto_video(
         projects_dir=projects_dir,
         target_duration_seconds=target_duration_seconds,
+        duration_min_seconds=duration_min_seconds,
+        duration_max_seconds=duration_max_seconds,
         video_format="short",
         project_date=project_date,
         catalog_path=catalog_path,
         production_mode=production_mode,
         creative_mode_override=creative_mode_override,
         hook_family_override=hook_family_override,
+        requested_character=requested_character,
     )

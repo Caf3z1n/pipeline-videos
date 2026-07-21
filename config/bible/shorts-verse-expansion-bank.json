@@ -744,6 +744,10 @@
     {
       "candidate_id": "bpm-mateus-11-29",
       "spoken_by": "jesus",
+      "compact_hook": "Eu sei que está cansado. Há um descanso que ainda não conhece.",
+      "compact_hook_strength_score": 0.96,
+      "compact_message_value_score": 0.97,
+      "compact_rewatch_value_score": 0.94,
       "source_id": "bpm-mateus-11-29",
       "reference": "Mateus 11:29",
       "context_reference": "Mateus 11:28-30",
@@ -754,10 +758,10 @@
       "source_url": "https://ebible.org/porbrbsl/MAT11.htm",
       "accessed_at": "2026-07-17",
       "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
-      "title": "Aprender o ritmo de Jesus",
+      "title": "O descanso que sua alma ainda não aprendeu",
       "slug": "mateus-11-29-mansidao",
-      "central_theme": "Mansidão e descanso.",
-      "practical_application": "Trocar uma carga autodestrutiva por obediência, limites e aprendizado com Jesus.",
+      "central_theme": "Jesus oferece um modo de viver que troca exaustão por aprendizado e descanso interior.",
+      "practical_application": "Parar de carregar tudo do mesmo modo e aprender de Jesus uma resposta mansa, humilde e sustentável.",
       "themes": [
         "mansidao",
         "e",
@@ -774,8 +778,8 @@
       "claims_to_avoid": [
         "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
       ],
-      "title_seed": "Aprender o ritmo de Jesus",
-      "retention_potential_score": 0.78,
+      "title_seed": "O descanso que sua alma ainda não aprendeu",
+      "retention_potential_score": 0.96,
       "selection_weight": 1.0,
       "familiarity_score": 0.8,
       "clarity_score": 0.85
@@ -1093,6 +1097,10 @@
     {
       "candidate_id": "bpm-joao-15-5",
       "spoken_by": "jesus",
+      "compact_hook": "Pare de lutar sozinho. Você precisa ouvir o que eu vou dizer.",
+      "compact_hook_strength_score": 0.97,
+      "compact_message_value_score": 0.98,
+      "compact_rewatch_value_score": 0.95,
       "source_id": "bpm-joao-15-5",
       "reference": "João 15:5",
       "context_reference": "João 15:1-8",
@@ -1103,10 +1111,10 @@
       "source_url": "https://ebible.org/porbrbsl/JHN15.htm",
       "accessed_at": "2026-07-17",
       "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
-      "title": "Fruto não nasce da desconexão",
+      "title": "Por que tentar vencer sozinho está esgotando você",
       "slug": "joao-15-5-permanecer",
-      "central_theme": "Permanecer em jesus.",
-      "practical_application": "Substituir ativismo vazio por comunhão e obediência consistentes.",
+      "central_theme": "Jesus confronta a tentativa de vencer tudo sozinho e chama o espectador a permanecer nele.",
+      "practical_application": "Interromper o esforço solitário e voltar à comunhão e à obediência que sustentam fruto real.",
       "themes": [
         "permanecer",
         "em",
@@ -1123,8 +1131,8 @@
       "claims_to_avoid": [
         "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
       ],
-      "title_seed": "Fruto não nasce da desconexão",
-      "retention_potential_score": 0.78,
+      "title_seed": "Por que tentar vencer sozinho está esgotando você",
+      "retention_potential_score": 0.97,
       "selection_weight": 1.0,
       "familiarity_score": 0.8,
       "clarity_score": 0.85
@@ -1132,6 +1140,10 @@
     {
       "candidate_id": "bpm-joao-16-33",
       "spoken_by": "jesus",
+      "compact_hook": "Você ainda não perdeu esta batalha. Olhe para mim e escute.",
+      "compact_hook_strength_score": 0.99,
+      "compact_message_value_score": 1.0,
+      "compact_rewatch_value_score": 0.98,
       "source_id": "bpm-joao-16-33",
       "reference": "João 16:33",
       "context_reference": "João 16:29-33",
@@ -1142,10 +1154,10 @@
       "source_url": "https://ebible.org/porbrbsl/JHN16.htm",
       "accessed_at": "2026-07-17",
       "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
-      "title": "Paz sem negar as aflições",
+      "title": "Esta batalha não termina no que você sente agora",
       "slug": "joao-16-33-paz",
-      "central_theme": "Paz e perseverança.",
-      "practical_application": "Enfrentar a aflição com realismo e confiança em Jesus.",
+      "central_theme": "Jesus reconhece a aflição, oferece paz e desloca a última palavra para a vitória dele.",
+      "practical_application": "Nomear a aflição sem tratá-la como desfecho e responder com coragem ancorada na vitória de Jesus.",
       "themes": [
         "paz",
         "e",
@@ -1162,8 +1174,8 @@
       "claims_to_avoid": [
         "Não prometer ausência de sofrimento, sucesso material ou solução instantânea."
       ],
-      "title_seed": "Paz sem negar as aflições",
-      "retention_potential_score": 0.78,
+      "title_seed": "Esta batalha não termina no que você sente agora",
+      "retention_potential_score": 0.99,
       "selection_weight": 1.0,
       "familiarity_score": 0.8,
       "clarity_score": 0.85

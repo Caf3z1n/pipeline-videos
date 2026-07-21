@@ -189,7 +189,7 @@ class RenderConfig(PipelineModel):
         "voice_music_loudness_v1",
     ] = "legacy_gain_v1"
     narration_target_lufs: float = Field(default=-18.0, ge=-30.0, le=-12.0)
-    background_music_gap_lu: float = Field(default=16.0, ge=10.0, le=24.0)
+    background_music_gap_lu: float = Field(default=13.0, ge=10.0, le=24.0)
     narration_true_peak_dbfs: float = Field(default=-2.0, ge=-9.0, le=-1.0)
     background_music_true_peak_dbfs: float = Field(default=-9.0, ge=-9.0, le=-1.0)
     audio_loudness_range_lu: float = Field(default=7.0, ge=1.0, le=20.0)
@@ -276,6 +276,11 @@ class CaptionStyle(PipelineModel):
 
 class AudioConfig(PipelineModel):
     provider: Literal["mock", "elevenlabs", "local_manual"] = "elevenlabs"
+    synthesis_segmentation: Literal[
+        "per_scene_v1",
+        "continuous_section_v1",
+        "continuous_narration_v1",
+    ] = "per_scene_v1"
     voice_id: str | None = Field(default_factory=default_elevenlabs_voice_id)
     model_id: str = Field(default_factory=default_elevenlabs_model_id)
     output_format: str = "mp3_44100_128"
@@ -301,6 +306,29 @@ class ImageConfig(PipelineModel):
     visual_standard_id: str = "cinematic-family-3d-v1"
     enforce_visual_standard: bool = True
     reject_panel_like_images: bool = True
+    scene_planning_standard: Literal[
+        "section_visual_direction_v1",
+        "narration_block_visual_v1",
+    ] = "section_visual_direction_v1"
+    composition_safety_mode: Literal[
+        "caption_safe_area_v1",
+        "unrestricted_scene_v1",
+    ] = "caption_safe_area_v1"
+    spoken_reference_image_mode: Literal[
+        "generated",
+        "fixed_profile_asset_v1",
+    ] = "generated"
+    spoken_reference_image_path: str | None = None
+
+    @model_validator(mode="after")
+    def validate_spoken_reference_image(self) -> ImageConfig:
+        if self.spoken_reference_image_mode == "fixed_profile_asset_v1":
+            path = (self.spoken_reference_image_path or "").strip().replace("\\", "/")
+            if not path:
+                raise ValueError("A imagem fixa da referência falada precisa declarar um caminho")
+            if path.startswith("/") or ".." in path.split("/") or ":" in path.split("/", 1)[0]:
+                raise ValueError("O caminho da imagem fixa precisa ser relativo e seguro")
+        return self
 
 
 class MusicConfig(PipelineModel):
@@ -316,15 +344,25 @@ class YouTubeGrowthConfig(PipelineModel):
     enabled: bool = True
     use_specialist_subagent: bool = True
     specialist_role: Literal["youtube_growth_specialist"] = "youtube_growth_specialist"
+    generation_mode: Literal[
+        "specialist_full_package_v1",
+        "compact_metadata_draft_v1",
+    ] = "specialist_full_package_v1"
+    validation_mode: Literal[
+        "strict_v1",
+        "advisory_seo_v1",
+    ] = "strict_v1"
     title_variants: int = Field(default=1, ge=1, le=3)
-    thumbnail_variants: int = Field(default=1, ge=1, le=3)
+    thumbnail_variants: int = Field(default=1, ge=0, le=3)
     thumbnail_generation_mode: Literal[
         "integrated_imagegen_v1",
         "theme_prompt_imagegen_v1",
+        "youtube_auto_frame_v1",
     ] = "integrated_imagegen_v1"
     thumbnail_reference_mode: Literal[
         "opening_scene_edit_v1",
         "theme_only_v1",
+        "none_v1",
     ] = "opening_scene_edit_v1"
     title_standard: Literal[
         "passage_pipe_topic_v1",
@@ -338,6 +376,7 @@ class YouTubeGrowthConfig(PipelineModel):
     thumbnail_standard: Literal[
         "direct_conflict_red_v1",
         "biblical_cinematic_landscape_v1",
+        "youtube_auto_frame_v1",
     ] = "direct_conflict_red_v1"
     thumbnail_typography_standard: Literal[
         "integrated_extruded_3d_v1",
@@ -421,6 +460,14 @@ class ShortsScriptConfig(PipelineModel):
     use_specialist_subagent: bool = True
     specialist_role: Literal["shorts_script_specialist"] = "shorts_script_specialist"
     require_independent_biblical_review: bool = False
+    generation_mode: Literal[
+        "specialist_full_package_v1",
+        "deterministic_compact_visual_plan_v1",
+    ] = "specialist_full_package_v1"
+    biblical_review_mode: Literal[
+        "independent_model_v1",
+        "deterministic_verified_compact_v1",
+    ] = "independent_model_v1"
     duration_profile: Literal["standard_45_55_v1", "adaptive_compact_v1"] = "standard_45_55_v1"
     compact_narrative_standard: Literal["cinematic_jesus_devotional_v1"] | None = None
     require_direct_jesus_speech: bool = False
@@ -429,6 +476,14 @@ class ShortsScriptConfig(PipelineModel):
     require_no_cta: bool = False
     min_words: int = Field(default=105, ge=15, le=180)
     max_words: int = Field(default=130, ge=28, le=200)
+    minimum_estimated_duration_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    minimum_audio_duration_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    maximum_narration_gap_seconds: float = Field(default=5.0, ge=0.25, le=10.0)
+    maximum_terminal_silence_seconds: float = Field(default=3.0, ge=0.1, le=5.0)
+    minimum_hook_strength_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    minimum_message_value_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    minimum_rewatch_value_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    hook_min_words: int = Field(default=2, ge=1, le=16)
     hook_max_words: int = Field(default=12, ge=4, le=24)
     hook_target_seconds: float = Field(default=2.0, ge=1.0, le=4.0)
     narrative_standard: Literal[
@@ -444,6 +499,10 @@ class ShortsScriptConfig(PipelineModel):
     scripture_citation_max_end_seconds: float = Field(default=20.0, ge=6.0, le=30.0)
     verse_visual_change_seconds: float = Field(default=5.5, ge=2.5, le=8.0)
     max_literal_verse_words: int = Field(default=40, ge=8, le=80)
+    allow_contiguous_multi_verse_citations: bool = True
+    multi_verse_citation_policy: Literal["when_necessary_or_beneficial_for_continuity"] = (
+        "when_necessary_or_beneficial_for_continuity"
+    )
     minimum_retention_beats: int = Field(default=5, ge=3, le=10)
     minimum_progression_beats: int = Field(default=2, ge=1, le=5)
     minimum_sections: int = Field(default=6, ge=3, le=10)
@@ -473,6 +532,8 @@ class ShortsScriptConfig(PipelineModel):
     def validate_word_range(self) -> ShortsScriptConfig:
         if self.max_words < self.min_words:
             raise ValueError("max_words deve ser maior ou igual a min_words")
+        if self.hook_max_words < self.hook_min_words:
+            raise ValueError("hook_max_words deve ser maior ou igual a hook_min_words")
         if self.retention_target_max_seconds < self.retention_target_min_seconds:
             raise ValueError("retention_target_max_seconds deve ser maior ou igual ao mínimo")
         if self.target_scene_max < self.target_scene_min:
@@ -493,6 +554,10 @@ class ProductionConfig(PipelineModel):
     worker_context_policy: Literal["compact_only"] = "compact_only"
     coordinator_effective_token_budget: int = Field(default=120_000, ge=10_000)
     total_effective_token_budget: int = Field(default=550_000, ge=50_000)
+    validation_policy: Literal["strict_v1", "completion_first_v1"] = "strict_v1"
+    repair_policy: Literal["bounded_then_fallback_v1"] = "bounded_then_fallback_v1"
+    token_budget_behavior: Literal["audit_only", "fallback_then_continue"] = "audit_only"
+    max_model_repairs_per_stage: int = Field(default=1, ge=0, le=3)
 
     @model_validator(mode="before")
     @classmethod
@@ -527,11 +592,37 @@ class ProjectManifest(PipelineModel):
     updated_at: str
     root_hint: str = "."
     target_duration_seconds: int = 540
+    duration_policy: Literal["exact_target_v1", "adaptive_range_v1"] = "exact_target_v1"
+    requested_duration_min_seconds: float | None = Field(default=None, ge=1.0)
+    requested_duration_max_seconds: float | None = Field(default=None, ge=1.0)
+    effective_duration_seconds: float | None = Field(default=None, ge=0.0)
     demo: bool = False
     video_format: Literal["landscape", "short"] = "landscape"
     config: ProjectConfig = Field(default_factory=ProjectConfig)
     stages: dict[str, StageRecord] = Field(default_factory=dict)
     approvals: dict[str, ApprovalRecord] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_duration_contract(self) -> ProjectManifest:
+        minimum = self.requested_duration_min_seconds
+        maximum = self.requested_duration_max_seconds
+        if self.duration_policy == "adaptive_range_v1":
+            if minimum is None or maximum is None:
+                raise ValueError("A duração adaptativa exige limites mínimo e máximo")
+            if maximum < minimum:
+                raise ValueError("O limite máximo de duração deve ser maior ou igual ao mínimo")
+            if not minimum <= self.target_duration_seconds <= maximum:
+                raise ValueError(
+                    "A duração preferencial precisa permanecer dentro da faixa solicitada"
+                )
+        if (
+            self.effective_duration_seconds is not None
+            and self.duration_policy == "adaptive_range_v1"
+        ):
+            assert minimum is not None and maximum is not None
+            if not minimum <= self.effective_duration_seconds <= maximum:
+                raise ValueError("A duração efetiva precisa permanecer dentro da faixa solicitada")
+        return self
 
 
 class Briefing(PipelineModel):
@@ -601,6 +692,7 @@ class SourceEntry(PipelineModel):
     ]
     title: str
     passage: str | None = None
+    context_passage: str | None = None
     translation: str | None = None
     author_or_publisher: str | None = None
     url: str | None = None
@@ -612,6 +704,10 @@ class SourceEntry(PipelineModel):
     rights_note: str | None = None
     verified: bool = False
     spoken_by: Literal["jesus", "other", "unspecified"] = "unspecified"
+    compact_hook: str = ""
+    compact_hook_strength_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    compact_message_value_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    compact_rewatch_value_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def seal_excerpt_snapshot(self) -> SourceEntry:
@@ -627,6 +723,23 @@ class SourceEntry(PipelineModel):
 
 class SourceLibrary(PipelineModel):
     entries: list[SourceEntry] = Field(default_factory=list)
+
+
+class RelatedBiblicalPassage(PipelineModel):
+    passage_id: str
+    reference: str
+    context_reference: str
+    verse_text: str
+    source_url: str
+    role: Literal[
+        "story_context",
+        "parallel_account",
+        "character_background",
+        "character_development",
+        "character_outcome",
+        "direct_speech",
+    ]
+    spoken_by: Literal["jesus", "other", "unspecified"] = "unspecified"
 
 
 class VerseCandidate(PipelineModel):
@@ -650,6 +763,8 @@ class VerseCandidate(PipelineModel):
     narration_tone: str = "pastoral, natural, próximo, sereno, direto e fácil de entender"
     themes: list[str] = Field(default_factory=list)
     characters: list[str] = Field(default_factory=list)
+    character_aliases: list[str] = Field(default_factory=list)
+    related_passages: list[RelatedBiblicalPassage] = Field(default_factory=list)
     preferred_development_modes: list[
         Literal[
             "context",
@@ -684,7 +799,27 @@ class VerseCandidate(PipelineModel):
     selection_weight: float = 1.0
     familiarity_score: float = Field(default=0.5, ge=0.0, le=1.0)
     clarity_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    catalog_segment: Literal[
+        "legacy",
+        "compact_jesus",
+        "general",
+        "long_form_anchor",
+        "narrative_story",
+    ] = "legacy"
+    recommended_formats: list[Literal["short", "long"]] = Field(
+        default_factory=lambda: ["short", "long"]
+    )
+    source_text_scope: Literal[
+        "verse",
+        "verse_range",
+        "direct_speech_excerpt",
+        "pericope_excerpt",
+    ] = "verse"
     spoken_by: Literal["jesus", "other", "unspecified"] = "unspecified"
+    compact_hook: str = ""
+    compact_hook_strength_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    compact_message_value_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    compact_rewatch_value_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class VerseCatalog(PipelineModel):
@@ -695,6 +830,9 @@ class VerseCatalog(PipelineModel):
     source_url: str
     rights_note: str
     accessed_at: str
+    source_artifact_url: str = ""
+    source_artifact_sha256: str = ""
+    source_revision: str = ""
     candidates: list[VerseCandidate]
 
 
@@ -1172,6 +1310,11 @@ class Scene(PipelineModel):
     narrative_function: str
     prompt: PromptBlocks
     image_id: str
+    image_source_mode: Literal["generated", "fixed_profile_asset_v1"] = "generated"
+    image_source_path: str | None = None
+    narration_block_id: str | None = None
+    visual_relation: Literal["literal", "contextual", "symbolic"] = "contextual"
+    visual_brief: str = ""
     generation_status: StageStatus = StageStatus.PENDING
     approval: ApprovalStatus = ApprovalStatus.PENDING
 
@@ -1199,6 +1342,8 @@ class ImageItem(PipelineModel):
     scene_id: str
     prompt: str
     prompt_hash: str
+    source_mode: Literal["generated", "fixed_profile_asset_v1"] = "generated"
+    source_path: str | None = None
     status: StageStatus = StageStatus.PENDING
     active_version: int | None = None
     approved_version: int | None = None
@@ -1223,6 +1368,7 @@ class WordTiming(PipelineModel):
 
 class AudioSegment(PipelineModel):
     scene_id: str
+    narration_block_id: str | None = None
     version: int
     text: str
     input_hash: str
@@ -1437,8 +1583,6 @@ class YouTubeGrowthStrategy(PipelineModel):
 
     @model_validator(mode="after")
     def validate_short_cover(self) -> YouTubeGrowthStrategy:
-        if self.format == "short" and self.short_cover_timestamp_seconds is None:
-            raise ValueError("short_cover_timestamp_seconds é obrigatório para Shorts")
         return self
 
 
@@ -1447,6 +1591,23 @@ class YouTubeGrowthPackage(PipelineModel):
     input_hash: str
     metadata: YouTubeMetadata
     strategy: YouTubeGrowthStrategy
+
+
+class CompactGrowthDraft(PipelineModel):
+    """Small creative hand-off; deterministic code owns the full YouTube package."""
+
+    job_id: str
+    input_hash: str
+    title: str = Field(min_length=1, max_length=100)
+    description: str = Field(min_length=1)
+    primary_keyword: str = Field(min_length=1)
+    secondary_keywords: list[str] = Field(default_factory=list, max_length=8)
+    topics: list[str] = Field(default_factory=list, max_length=15)
+    pinned_comment: str = ""
+    title_rationale: str = ""
+    description_rationale: str = ""
+    tag_strategy: str = ""
+    discovery_hypothesis: str = ""
 
 
 class ShortsRetentionBeat(PipelineModel):
@@ -1660,6 +1821,35 @@ class ShortsCinematicDevotionalDirection(PipelineModel):
         return self
 
 
+class ShortsVisualScene(PipelineModel):
+    section_id: str
+    narration: str
+    scene_description: str
+    visual_relation: Literal["literal", "contextual", "symbolic"]
+
+    @model_validator(mode="after")
+    def validate_visual_scene(self) -> ShortsVisualScene:
+        if not self.narration.strip():
+            raise ValueError("O bloco de narração da cena não pode ficar vazio")
+        if not self.scene_description.strip():
+            raise ValueError("A descrição específica da cena não pode ficar vazia")
+        return self
+
+
+class CompactVisualConcept(PipelineModel):
+    block_id: str
+    scene_description: str = Field(min_length=1)
+    visual_relation: Literal["literal", "contextual", "symbolic"]
+
+
+class CompactVisualPlan(PipelineModel):
+    """Creative scene concepts for narration blocks sealed by deterministic code."""
+
+    job_id: str
+    input_hash: str
+    concepts: list[CompactVisualConcept] = Field(min_length=1, max_length=11)
+
+
 class ShortsScriptStrategy(PipelineModel):
     target_viewer: str
     viewer_need: str
@@ -1700,6 +1890,7 @@ class ShortsScriptStrategy(PipelineModel):
     cta: str
     reason_to_subscribe: str
     retention_beats: list[ShortsRetentionBeat]
+    visual_scenes: list[ShortsVisualScene] = Field(default_factory=list, max_length=60)
     source_ids: list[str] = Field(default_factory=list)
     section_ids: list[str] = Field(default_factory=list)
     biblical_safeguards: list[str] = Field(default_factory=list)

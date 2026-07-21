@@ -83,8 +83,8 @@ class PublicationPlan:
     video_path: Path
     video_hash: str
     metadata_hash: str
-    thumbnail_path: Path
-    thumbnail_hash: str
+    thumbnail_path: Path | None
+    thumbnail_hash: str | None
     captions_path: Path | None
     captions_hash: str | None
     automated_review_candidate: bool = False
@@ -92,7 +92,7 @@ class PublicationPlan:
     def input_hash(self) -> str:
         payload = asdict(self)
         payload["video_path"] = str(self.video_path)
-        payload["thumbnail_path"] = str(self.thumbnail_path)
+        payload["thumbnail_path"] = str(self.thumbnail_path) if self.thumbnail_path else None
         payload["captions_path"] = str(self.captions_path) if self.captions_path else None
         return sha256_value(payload)
 
@@ -342,7 +342,11 @@ def prepare_publication(
         raise RuntimeError("A validação final precisa estar concluída antes do upload.")
     if not layout.final_video.is_file():
         raise FileNotFoundError(f"Render final ausente: {layout.final_video}")
-    if not layout.thumbnail.is_file():
+    youtube_auto_frame = (
+        manifest.video_format == "short"
+        and manifest.config.youtube_growth.thumbnail_generation_mode == "youtube_auto_frame_v1"
+    )
+    if not youtube_auto_frame and not layout.thumbnail.is_file():
         raise FileNotFoundError(f"Thumbnail aprovada ausente: {layout.thumbnail}")
     if manifest.stages["thumbnail"].provider == "fixture":
         raise RuntimeError("A thumbnail fixture não pode ser enviada ao YouTube.")
@@ -367,7 +371,7 @@ def prepare_publication(
         {
             "metadata": sha256_file(layout.metadata),
             "description": sha256_file(layout.description),
-            "thumbnail": sha256_file(layout.thumbnail),
+            "thumbnail": None if youtube_auto_frame else sha256_file(layout.thumbnail),
         }
     )
     if (
@@ -416,8 +420,8 @@ def prepare_publication(
         video_path=layout.final_video,
         video_hash=sha256_file(layout.final_video),
         metadata_hash=sha256_value(metadata_payload),
-        thumbnail_path=layout.thumbnail,
-        thumbnail_hash=sha256_file(layout.thumbnail),
+        thumbnail_path=None if youtube_auto_frame else layout.thumbnail,
+        thumbnail_hash=None if youtube_auto_frame else sha256_file(layout.thumbnail),
         captions_path=captions_path,
         captions_hash=sha256_file(captions_path) if captions_path else None,
         automated_review_candidate=automated_candidate,
@@ -598,6 +602,7 @@ def upload_project(
             record.thumbnail.status != "uploaded"
             or record.thumbnail.source_hash != plan.thumbnail_hash
         ):
+            assert plan.thumbnail_path is not None
             thumbnail_path = _thumbnail_for_upload(layout, plan.thumbnail_path)
             client.set_thumbnail(record.video_id, thumbnail_path)
             record.thumbnail = YouTubePublicationAsset(
@@ -639,8 +644,13 @@ def upload_project(
             [relative_posix(layout.publication, layout.root)],
             provider="youtube-data-api-v3",
             note=(
-                "Upload do Short concluído; selecione manualmente o frame da capa no app "
-                f"do YouTube: {record.youtube_url}"
+                (
+                    "Upload do Short concluído sem thumbnail personalizada; o YouTube "
+                    f"selecionará um frame: {record.youtube_url}"
+                    if plan.thumbnail_path is None
+                    else "Upload do Short concluído; selecione manualmente o frame da capa no "
+                    f"app do YouTube: {record.youtube_url}"
+                )
                 if plan.video_format == "short"
                 else f"Upload concluído como {record.privacy_status}: {record.youtube_url}"
             ),

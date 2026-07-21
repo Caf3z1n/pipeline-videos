@@ -12,7 +12,7 @@ from pipeline_videos.scenes import _resolved_style, assemble_prompt, build_scene
 from pipeline_videos.storage import read_model, write_json
 
 
-def test_visual_standard_migrates_legacy_flat_profile_and_hardens_prompt(tmp_path) -> None:
+def test_visual_standard_restores_the_project_profile_and_hardens_prompt(tmp_path) -> None:
     layout = create_project(
         "padrao-visual-short",
         "Padrão visual",
@@ -21,21 +21,20 @@ def test_visual_standard_migrates_legacy_flat_profile_and_hardens_prompt(tmp_pat
         video_format="short",
         project_date=date(2026, 7, 14),
     )
-    project = layout.load_manifest()
-    project.config.images.visual_standard_id = "davi-poupa-saul-flat-v1"
-    layout.save_manifest(project)
-    legacy = load_style("minimalist-cinematic-flat-vector")
-    write_json(layout.style_profile, legacy)
+    canonical = load_style("biblical-midcentury-gouache")
+    tampered = canonical.model_copy(update={"medium": "estilo adulterado"})
+    write_json(layout.style_profile, tampered)
 
     restored = _resolved_style(layout)
-    canonical = load_style("cinematic-family-3d-animation")
 
     assert restored == canonical
-    assert layout.load_manifest().config.images.visual_standard_id == "cinematic-family-3d-v1"
+    assert layout.load_manifest().config.images.visual_standard_id == (
+        "biblical-midcentury-gouache-v1"
+    )
     assert read_model(layout.style_profile, StyleProfile) == canonical
     archived = list((layout.style_profile.parent / "versions").glob("style-profile-*.json"))
     assert len(archived) == 1
-    assert read_model(archived[0], StyleProfile) == legacy
+    assert read_model(archived[0], StyleProfile) == tampered
 
     palette = read_model(layout.palette, Palette)
     prompt = assemble_prompt(
@@ -47,12 +46,14 @@ def test_visual_standard_migrates_legacy_flat_profile_and_hardens_prompt(tmp_pat
         emotion="tensão contida",
         canvas_width=1080,
         canvas_height=1920,
+        reserve_caption_safe_area=False,
     ).assembled_prompt
-    assert "Visual standard: cinematic-family-3d-v1" in prompt
-    assert "animação 3D cinematográfica familiar premium" in prompt
-    assert "prioridade sobre realismo fotográfico" in prompt
-    assert "sem aparência de boneco de plástico" in prompt
+    assert "Visual standard: biblical-midcentury-gouache-v1" in prompt
+    assert "guache opaco e têmpera" in prompt
+    assert "sem fotografia" in prompt
     assert "uma única composição contínua" in prompt
+    assert "42% e 58%" not in prompt
+    assert "bordas direita e inferior" not in prompt
     assert "sem tela dividida" in prompt
 
 
@@ -63,6 +64,7 @@ def test_short_verse_opening_can_change_images_and_keeps_first_anchor(tmp_path) 
         projects_dir=tmp_path,
         target_duration_seconds=60,
         video_format="short",
+        style_id="cinematic-family-3d-animation",
         project_date=date(2026, 7, 14),
     )
     write_json(

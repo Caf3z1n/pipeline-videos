@@ -180,6 +180,21 @@ def _context_sizes(layout: ProjectLayout) -> dict[str, int]:
     return result
 
 
+def _fallback_counts(layout: ProjectLayout) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    if not layout.events.is_file():
+        return counts
+    with layout.events.open("r", encoding="utf-8", errors="replace") as handle:
+        for raw in handle:
+            try:
+                event = json.loads(raw).get("event")
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, str) and "fallback" in event:
+                counts[event] = counts.get(event, 0) + 1
+    return counts
+
+
 def write_local_token_audit(
     layout: ProjectLayout,
     *,
@@ -193,6 +208,7 @@ def write_local_token_audit(
     end = ended_at or _parse_time(project.updated_at)
     if start is None or end is None:
         raise ValueError("O projeto não possui janela temporal válida para auditoria.")
+    production_end = end
     end += timedelta(minutes=2)
     if session_logs:
         sessions = [
@@ -251,6 +267,21 @@ def write_local_token_audit(
             },
             "contexts": _context_sizes(layout),
             "token_budget": budget,
+            "production": {
+                "elapsed_seconds": max(
+                    0.0,
+                    round((production_end - start).total_seconds(), 3),
+                ),
+                "optimization_profile": project.config.production.optimization_profile,
+                "validation_policy": project.config.production.validation_policy,
+                "repair_policy": project.config.production.repair_policy,
+                "token_budget_behavior": project.config.production.token_budget_behavior,
+                "duration_policy": project.duration_policy,
+                "requested_duration_min_seconds": project.requested_duration_min_seconds,
+                "requested_duration_max_seconds": project.requested_duration_max_seconds,
+                "effective_duration_seconds": project.effective_duration_seconds,
+                "fallback_counts": _fallback_counts(layout),
+            },
         }
     )
     write_json(metrics_path, payload)

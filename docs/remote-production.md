@@ -4,7 +4,8 @@
 
 A VPS executa o mesmo pipeline atual usado localmente. Não existe modo remoto alternativo nem
 fallback para o executor antigo. Cada job usa um coordenador persistente em `gpt-5.6-sol` e os
-mesmos subagentes especializados do fluxo local; as etapas determinísticas continuam no Python.
+mesmos contratos do fluxo local; o compacto cria somente os especialistas ainda necessários e
+mantém roteiro/revisão no Python.
 
 Cada pedido declara:
 
@@ -30,15 +31,19 @@ e fontes a partir dos IDs escolhidos.
 
 O primeiro checkpoint inicia `codex exec`. O executor captura o identificador da sessão raiz e o
 salva em `codex_session_id`. Os checkpoints retomam essa sessão com `codex exec resume`. O
-coordenador cria exatamente um roteirista em raciocínio alto, exatamente um revisor bíblico
-independente após o preflight do pacote, até dois workers de imagem em baixo e um especialista de
-crescimento em médio, todos com `fork_turns=none`.
+No compacto, o coordenador cria um planejador visual em raciocínio médio, até dois workers de imagem
+em baixo e um especialista de crescimento em médio, todos com `fork_turns=none`. Hook, citação,
+referência, seções e revisão bíblica vêm deterministicamente do catálogo verificado. Fora do
+compacto, roteirista e revisor independente continuam em raciocínio alto quando a fila os exigir.
 
-O remoto usa o mesmo perfil adaptativo local. Um Short de 15 segundos preserva um único worker de
+O remoto usa o mesmo perfil adaptativo local. Um Short de 15 segundos usa até dois workers de
 imagem, aceita somente `devotional_application` ou `pastoral_encouragement`, seleciona apenas fala
-direta de Jesus cujo trecho literal caiba no limite de 28 palavras e envia ao roteirista os limites
-persistidos de 17 a 44 palavras e três a quatro cenas. O hook ocupa de 0 a 2 segundos, a citação de
-2 a 12,3 e a referência de 12,3 a 15 segundos; não existe CTA. A música é selecionada exclusivamente
+direta de Jesus cujo trecho literal caiba no limite de 28 palavras e sela os limites persistidos de
+41 a 46 palavras e cinco a seis cenas. O hook curado ocupa de 0 a 3,5 segundos, a
+citação de 3,5 a 12,3 e a referência de 12,3 a 15 segundos; não existe CTA. A seleção remota recebe
+somente combinações que passam os pisos de força do hook, valor da mensagem, replay e duração. O
+áudio nunca é estendido com silêncio. Cobertura do alvo preferencial, pausa e silêncio terminal são
+avisos em `completion_first_v1`; integridade e duração solicitada continuam bloqueantes. A música é selecionada exclusivamente
 entre `Aloboi .mp3` e `Leaning.mp3` na biblioteca compacta.
 
 O modelo não varia: coordenador e especialistas usam Sol. O esforço varia somente pelo contrato da
@@ -50,11 +55,11 @@ Cada cena segue a política retomável: prompt original, repetição idêntica a
 `moderation_blocked` e, somente após o segundo bloqueio, uma alternativa que preserve personagem,
 idade aparente, rosto, cabelo, figurino, proporções, estilo, paleta, ambiente e sentido narrativo.
 
-A fila de crescimento declara exatamente um título e uma thumbnail. Em Shorts, o bitmap nasce no
-Imagegen com texto e elemento narrativo incorporados, editando a imagem ativa da abertura. Em vídeos
-longos, nasce como `generated_theme_art`: horizontal 16:9, sem imagem de referência, sem texto ou
-marcações e baseada exclusivamente no tema central inserido no prompt versionado. Não há compositor,
-overlay ou reutilização silenciosa de cenas como fallback.
+A fila de crescimento declara exatamente um título. No perfil pintado de Shorts, o modelo devolve
+somente um rascunho compacto de metadados, não chama Imagegen e o YouTube escolhe um frame do vídeo.
+No perfil 3D legado, o bitmap nasce no Imagegen editando a abertura. Em vídeos longos, nasce como
+`generated_theme_art`: horizontal 16:9, sem imagem de referência, texto ou marcações e baseada no
+tema central. Não há compositor nem overlay local.
 
 ## Estados e publicação
 
@@ -67,11 +72,10 @@ failed -> queued (retry de jobs legados)
 queued/waiting_youtube -> cancelled
 ```
 
-Falhas de execuÃ§Ã£o nÃ£o encerram novos jobs. Erros editoriais ou determinÃ­sticos corrigÃ­veis
-acionam um checkpoint de reparo na mesma sessÃ£o e reimportam somente o staging necessÃ¡rio. Se a
-tentativa ainda nÃ£o concluir, o job volta para `queued` (ou permanece em `waiting_youtube`) com
-backoff exponencial entre um minuto e seis horas, preservando projeto, sessÃ£o, artefatos e causa do
-erro. O estado `failed` permanece apenas para compatibilidade e retry manual de jobs antigos.
+Falhas de execução não encerram novos jobs. Erros corrigíveis acionam no máximo um checkpoint de
+reparo agregado. No compacto, uma segunda falha materializa o fallback determinístico de roteiro
+visual ou metadados e continua a produção. Somente falhas técnicas realmente bloqueantes voltam para
+`queued` (ou permanecem em `waiting_youtube`) com backoff, preservando projeto, sessão e artefatos.
 
 No crescimento, o checkpoint de reparo é limitado a uma execução por tentativa. O validador exige
 o padrão 3D como estilo positivo e ignora termos fotográficos presentes dentro de seções negativas

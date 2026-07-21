@@ -91,6 +91,20 @@ def test_new_shorts_use_only_the_six_literal_hook_structures() -> None:
     )
 
 
+def test_compact_curated_hook_can_interrupt_before_the_viewer_yields() -> None:
+    assert hook_matches_family(
+        "Antes de ceder ao medo, lembre-se de quem segura você.",
+        "emotional_interruption",
+    )
+
+
+def test_compact_curated_hook_can_directly_reorder_the_viewers_priority() -> None:
+    assert hook_matches_family(
+        "Você precisa rever o que colocou em primeiro lugar hoje.",
+        "emotional_interruption",
+    )
+
+
 def test_evidence_rules_separate_factual_narration_from_interpretation() -> None:
     factual_errors = creative_evidence_errors(
         _document("biblical_text", "interpretation"),
