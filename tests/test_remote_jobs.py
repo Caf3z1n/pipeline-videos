@@ -70,6 +70,8 @@ def test_remote_request_applies_safe_defaults_and_requires_explicit_external_aut
     assert request.creative_mode == "auto"
     assert request.hook_policy == "auto"
     assert request.hook_family == "auto"
+    assert request.editorial_profile == "verse_led_v1"
+    assert request.music_track is None
     assert request.voice_variant == "jesus_1"
 
     store = RemoteJobStore(tmp_path / "jobs")
@@ -91,6 +93,17 @@ def test_remote_request_applies_safe_defaults_and_requires_explicit_external_aut
         _request(duration_seconds=15, character="Pedro")
     with pytest.raises(ValueError, match="Vídeos longos precisam"):
         _request(video_format="long", duration_seconds=15)
+    with pytest.raises(ValueError, match="45 e 60"):
+        _request(editorial_profile="high_stakes_biblical_question_v1", duration_seconds=30)
+    with pytest.raises(ValueError, match="pergunta curada automaticamente"):
+        _request(editorial_profile="high_stakes_biblical_question_v1", topic="Tema manual")
+    with pytest.raises(ValueError, match="família investigativa"):
+        _request(
+            editorial_profile="high_stakes_biblical_question_v1",
+            hook_family="never_do_this",
+        )
+    with pytest.raises(ValueError, match="exclusivas de Shorts"):
+        _request(video_format="long", duration_seconds=540, music_track="leaning")
 
 
 def test_scheduled_request_requires_timezone_and_publish_at() -> None:
@@ -146,7 +159,7 @@ def test_prepare_job_project_enables_local_specialists_without_human_approval(tm
 
     assert manifest.config.production.mode == "final_candidate_one_shot"
     assert manifest.config.production.use_subagents is True
-    assert manifest.config.production.image_workers == 3
+    assert manifest.config.production.image_workers == 2
     assert manifest.config.production.optimization_profile == "token_optimized_v1"
     assert manifest.config.shorts_script.use_specialist_subagent is True
     assert manifest.config.shorts_script.narrative_standard == "creative_retention_v3"
@@ -216,6 +229,40 @@ def test_remote_job_can_select_second_jesus_voice(tmp_path) -> None:
     assert manifest.config.audio.voice_id == ELEVENLABS_VOICE_VARIANTS["jesus_2"]
     decisions = layout.decisions.read_text(encoding="utf-8")
     assert '"voice_variant": "jesus_2"' in decisions
+
+
+@pytest.mark.parametrize(
+    ("music_track", "expected_filename"),
+    (("leaning", "Leaning.mp3"), ("aloboi", "Aloboi .mp3")),
+)
+def test_remote_high_stakes_job_persists_profile_voice_and_requested_music(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    music_track: str,
+    expected_filename: str,
+) -> None:
+    monkeypatch.setenv("PIPELINE_VIDEOS_CONTENT_REGISTRY_MODE", "local")
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(
+        _request(
+            duration_seconds=50,
+            editorial_profile="high_stakes_biblical_question_v1",
+            voice_variant="jesus_2",
+            music_track=music_track,
+        )
+    )
+
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+    manifest = layout.load_manifest()
+
+    assert manifest.config.shorts_script.editorial_profile == ("high_stakes_biblical_question_v1")
+    assert manifest.config.shorts_script.require_independent_biblical_review is True
+    assert manifest.config.audio.voice_id == ELEVENLABS_VOICE_VARIANTS["jesus_2"]
+    assert manifest.config.render.background_music_path is not None
+    assert manifest.config.render.background_music_path.endswith(expected_filename)
+    summary = job_summary(job)
+    assert summary["editorial_profile"] == "high_stakes_biblical_question_v1"
+    assert summary["music_track"] == music_track
 
 
 def test_remote_character_request_bootstraps_verified_portrait_sources(tmp_path) -> None:
@@ -1089,6 +1136,8 @@ def test_not_before_delays_immediate_job(tmp_path) -> None:
     assert summary["duration_seconds"] == 50
     assert summary["not_before"] == (now + timedelta(hours=1)).isoformat()
     assert summary["voice_variant"] == "jesus_1"
+    assert summary["editorial_profile"] == "verse_led_v1"
+    assert summary["music_track"] is None
 
 
 def test_next_retry_at_delays_automatic_recovery(tmp_path) -> None:

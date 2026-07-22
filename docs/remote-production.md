@@ -15,9 +15,12 @@ Cada pedido declara:
 - `hook_policy`: `auto`, `required`, `optional` ou `none`; Shorts não aceitam `none`;
 - `hook_family`: família concreta ou `auto`; Shorts padrão aceitam somente as seis famílias de
   `hook_contract=user_six_v1`; Shorts compactos aceitam somente `emotional_interruption`;
+- `editorial_profile`: `verse_led_v1` (padrão) ou `high_stakes_biblical_question_v1`; o segundo
+  seleciona automaticamente uma pergunta curada e aceita somente Shorts de 45 a 60 segundos;
 - `duration_seconds`: opcional, mínimo de 15 s e padrão de 50 s para Short; mínimo de 30 s e padrão
   de 540 s para longo;
 - `voice_variant`: `jesus_1` (padrão) ou `jesus_2`;
+- `music_track`: `leaning` ou `aloboi` quando o pedido exigir uma das faixas verificadas;
 - `start_policy`: `immediate` ou `overnight`;
 - `publication_mode`: `private_review` ou `scheduled`;
 - `publish_at`: obrigatório somente em `scheduled`, sempre com fuso;

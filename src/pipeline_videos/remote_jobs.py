@@ -29,6 +29,7 @@ from pipeline_videos.imagegen_retry import imagegen_retry_instructions
 from pipeline_videos.models import (
     APPLICATION_REQUIRED_CREATIVE_MODES,
     COMPACT_SHORT_THRESHOLD_SECONDS,
+    HIGH_STAKES_HOOK_FAMILIES,
     MIN_LONG_DURATION_SECONDS,
     MIN_SHORT_DURATION_SECONDS,
     USER_SIX_HOOK_FAMILIES,
@@ -40,6 +41,7 @@ from pipeline_videos.models import (
     HookPolicy,
     PipelineModel,
     ScriptDocument,
+    ShortsEditorialProfile,
     SourceEntry,
     SourceLibrary,
     StageStatus,
@@ -48,6 +50,7 @@ from pipeline_videos.models import (
     default_elevenlabs_model_id,
     elevenlabs_voice_id_for_variant,
 )
+from pipeline_videos.music import import_music
 from pipeline_videos.project import create_project
 from pipeline_videos.publication import (
     authenticated_client,
@@ -98,6 +101,12 @@ RemoteJobStatus = Literal[
     "cancelled",
 ]
 RemoteReasoningEffort = Literal["minimal", "low", "medium", "high", "xhigh"]
+RemoteMusicTrack = Literal["leaning", "aloboi"]
+
+REMOTE_MUSIC_TRACK_PATHS: dict[RemoteMusicTrack, Path] = {
+    "leaning": REPO_ROOT / "music-library" / "adaptive-compact-v1" / "Leaning.mp3",
+    "aloboi": REPO_ROOT / "music-library" / "adaptive-compact-v1" / "Aloboi .mp3",
+}
 
 
 class RemoteCodexRun(PipelineModel):
@@ -143,6 +152,8 @@ class RemoteVideoRequest(PipelineModel):
     creative_mode: CreativeMode = "auto"
     hook_policy: HookPolicy = "auto"
     hook_family: HookFamily = "auto"
+    editorial_profile: ShortsEditorialProfile = "verse_led_v1"
+    music_track: RemoteMusicTrack | None = None
     duration_seconds: int | None = Field(default=None, ge=MIN_SHORT_DURATION_SECONDS, le=3600)
     exact_duration: bool = False
     start_policy: Literal["immediate", "overnight"] = "immediate"
@@ -175,6 +186,18 @@ class RemoteVideoRequest(PipelineModel):
         compact = (
             self.video_format == "short" and self.duration_seconds < COMPACT_SHORT_THRESHOLD_SECONDS
         )
+        high_stakes = self.editorial_profile == "high_stakes_biblical_question_v1"
+        if self.video_format == "long" and high_stakes:
+            raise ValueError("O perfil high-stakes é exclusivo de Shorts.")
+        if high_stakes and not COMPACT_SHORT_THRESHOLD_SECONDS <= self.duration_seconds <= 60:
+            raise ValueError("O perfil high-stakes exige duração entre 45 e 60 segundos.")
+        if high_stakes and (self.topic or self.character):
+            raise ValueError(
+                "O perfil high-stakes seleciona uma pergunta curada automaticamente; "
+                "não informe topic ou character."
+            )
+        if self.video_format == "long" and self.music_track is not None:
+            raise ValueError("As faixas Leaning e Aloboi deste contrato são exclusivas de Shorts.")
         if compact and self.character:
             raise ValueError(
                 "Histórias de personagens exigem Short de ao menos "
@@ -194,9 +217,12 @@ class RemoteVideoRequest(PipelineModel):
             raise ValueError("Shorts exigem hook inicial; use auto ou uma família concreta.")
         if compact and self.hook_family not in {"auto", "emotional_interruption"}:
             raise ValueError("Shorts compactos exigem hook emocional de interrupção.")
+        if high_stakes and self.hook_family not in {"auto", *HIGH_STAKES_HOOK_FAMILIES}:
+            raise ValueError("O perfil high-stakes exige uma família investigativa de hook.")
         if (
             self.video_format == "short"
             and not compact
+            and not high_stakes
             and self.hook_family
             not in {
                 "auto",
@@ -424,6 +450,7 @@ def prepare_job_project(
             ),
             hook_family_override=(request.hook_family if request.hook_family != "auto" else None),
             requested_character=request.character,
+            editorial_profile=request.editorial_profile,
         )
     elif request.topic:
         layout = create_project(
@@ -446,6 +473,7 @@ def prepare_job_project(
                 request.creative_mode if request.creative_mode != "auto" else None
             ),
             hook_family_override=(request.hook_family if request.hook_family != "auto" else None),
+            editorial_profile=request.editorial_profile,
         )
     briefing = Briefing.model_validate(read_json(layout.briefing))
     briefing_updates: dict[str, Any] = {}
@@ -480,7 +508,7 @@ def prepare_job_project(
     manifest = layout.load_manifest()
     manifest.config.production.use_subagents = True
     if manifest.config.shorts_script.duration_profile != "adaptive_compact_v1":
-        manifest.config.production.image_workers = 3
+        manifest.config.production.image_workers = 2
     manifest.config.shorts_script.use_specialist_subagent = True
     manifest.config.youtube_growth.use_specialist_subagent = True
     manifest.config.audio.provider = request.audio_provider
@@ -494,6 +522,9 @@ def prepare_job_project(
         request.publication_mode == "scheduled"
     )
     layout.save_manifest(manifest)
+    if request.music_track is not None:
+        import_music(layout, REMOTE_MUSIC_TRACK_PATHS[request.music_track])
+        manifest = layout.load_manifest()
     layout.append_decision(
         {
             "type": "remote_local_parity_job",
@@ -506,6 +537,8 @@ def prepare_job_project(
             "creative_mode": request.creative_mode,
             "hook_policy": request.hook_policy,
             "hook_family": request.hook_family,
+            "editorial_profile": request.editorial_profile,
+            "music_track": request.music_track,
             "voice_variant": request.voice_variant,
             "voice_id": manifest.config.audio.voice_id,
             "voice_model_id": manifest.config.audio.model_id,
@@ -3016,6 +3049,8 @@ def job_summary(job: RemoteVideoJob) -> dict[str, Any]:
         "not_before": (job.request.not_before.isoformat() if job.request.not_before else None),
         "publication_mode": job.request.publication_mode,
         "voice_variant": job.request.voice_variant,
+        "editorial_profile": job.request.editorial_profile,
+        "music_track": job.request.music_track,
         "project_path": job.project_path,
         "youtube_url": job.youtube_url,
         "publish_at": job.publish_at,
