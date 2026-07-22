@@ -18,6 +18,7 @@ from pipeline_videos.models import (
     SourceLibrary,
 )
 from pipeline_videos.remote_jobs import (
+    REMOTE_MUSIC_TRACK_PATHS,
     CodexPhaseSpec,
     RemoteCodexRun,
     RemoteJobStore,
@@ -242,6 +243,9 @@ def test_remote_high_stakes_job_persists_profile_voice_and_requested_music(
     expected_filename: str,
 ) -> None:
     monkeypatch.setenv("PIPELINE_VIDEOS_CONTENT_REGISTRY_MODE", "local")
+    music_source = tmp_path / expected_filename
+    music_source.write_bytes(b"ID3-test-track")
+    monkeypatch.setitem(REMOTE_MUSIC_TRACK_PATHS, music_track, music_source)
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(
         _request(
