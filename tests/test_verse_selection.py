@@ -25,18 +25,225 @@ from pipeline_videos.verse_selection import (
     DEFAULT_NARRATIVE_CHARACTER_BANK,
     build_usage_index,
     catalog_capacity_summary,
+    compact_hook_editorial_features,
     compact_package_word_count,
     create_auto_short,
     create_auto_video,
     eligible_main_candidate_ids,
     load_verse_catalog,
+    merge_usage_indexes,
+    recent_compact_hook_count,
     reference_tokens,
     references_overlap,
+    reserve_project_candidates,
     select_creative_mode,
     select_hook_family,
     select_retention_archetype,
     select_unused_verse,
 )
+
+
+def test_compact_hook_prior_prefers_concrete_tension_over_generic_imperative() -> None:
+    generic = compact_hook_editorial_features(
+        "Olhe para mim. Você precisa lembrar quem está diante de você."
+    )
+    concrete = compact_hook_editorial_features(
+        "Antes de ceder ao medo, lembre-se de quem segura você."
+    )
+
+    assert generic["generic_opener"] is True
+    assert generic["has_tension"] is False
+    assert concrete["has_situation"] is True
+    assert concrete["has_tension"] is True
+    assert concrete["quality"] > generic["quality"]
+    assert concrete["concreteness"] >= 0.7
+
+
+def test_compact_selector_penalizes_the_persisted_hook_not_a_catalog_guess() -> None:
+    base = next(
+        candidate
+        for candidate in load_verse_catalog().candidates
+        if candidate.compact_hook and candidate.spoken_by == "jesus"
+    )
+    first_hook = "Antes de ceder ao medo, lembre-se de quem segura você."
+    second_hook = "Antes de ceder à culpa, lembre-se de quem chama você."
+    first = base.model_copy(
+        update={
+            "candidate_id": "first-hook",
+            "source_id": "first-hook",
+            "reference": "Mateus 99:1",
+            "context_reference": "Mateus 99:1",
+            "compact_hook": first_hook,
+        }
+    )
+    second = base.model_copy(
+        update={
+            "candidate_id": "second-hook",
+            "source_id": "second-hook",
+            "reference": "João 99:1",
+            "context_reference": "João 99:1",
+            "compact_hook": second_hook,
+        }
+    )
+    catalog = VerseCatalog(
+        catalog_id="hook-repeat-test",
+        translation=base.translation,
+        publisher="fixture",
+        source_url="https://example.invalid",
+        rights_note=base.rights_note,
+        accessed_at=base.accessed_at,
+        candidates=[first, second],
+    )
+    usage = VerseUsageIndex(
+        generated_at="2026-07-21T12:00:00Z",
+        records=[
+            VerseUsageRecord(
+                project_id="previous-compact",
+                project_path="shorts/previous-compact",
+                video_format="short",
+                duration_profile="adaptive_compact_v1",
+                status="used",
+                opening_hook=first_hook,
+                created_at="2026-07-21T11:00:00Z",
+            )
+        ],
+    )
+
+    selected, _score = select_unused_verse(
+        catalog,
+        usage,
+        video_format="short",
+        minimum_package_words=1,
+        maximum_package_words=200,
+    )
+
+    assert selected.candidate_id == "second-hook"
+
+
+def test_usage_merge_preserves_reservation_fields_until_real_values_replace_them() -> None:
+    shared_record = VerseUsageRecord.model_validate(
+        {
+            "registry_id": "prod:compact-01",
+            "environment": "prod",
+            "project_id": "compact-01",
+            "project_path": "shorts/compact-01",
+            "candidate_id": "reserved-candidate",
+            "video_format": "short",
+            "duration_profile": "adaptive_compact_v1",
+            "status": "reserved",
+            "main_passage": "João 14:1-2",
+            "opening_hook": "Antes de ceder ao medo, lembre-se de quem segura você.",
+            "created_at": "2026-07-21T10:00:00Z",
+            "future_registry_field": "preserve-me",
+        }
+    )
+    incomplete_local = VerseUsageRecord(
+        registry_id="prod:compact-01",
+        environment="prod",
+        project_id="compact-01",
+        project_path="shorts/compact-01",
+        video_format="short",
+        status="reserved",
+        created_at="2026-07-21T10:01:00Z",
+    )
+
+    preserved = merge_usage_indexes(
+        VerseUsageIndex(generated_at="2026-07-21T10:00:00Z", records=[shared_record]),
+        VerseUsageIndex(generated_at="2026-07-21T10:01:00Z", records=[incomplete_local]),
+    ).records[0]
+
+    assert preserved.candidate_id == "reserved-candidate"
+    assert preserved.main_passage == "João 14:1-2"
+    assert preserved.opening_hook == shared_record.opening_hook
+    assert preserved.duration_profile == "adaptive_compact_v1"
+    assert preserved.model_extra["future_registry_field"] == "preserve-me"
+
+    completed_local = incomplete_local.model_copy(
+        update={
+            "candidate_id": "used-candidate",
+            "main_passage": "João 15:1-2",
+            "opening_hook": "Uma nova abertura concreta.",
+            "status": "used",
+        }
+    )
+    updated = merge_usage_indexes(
+        VerseUsageIndex(generated_at="2026-07-21T10:00:00Z", records=[preserved]),
+        VerseUsageIndex(generated_at="2026-07-21T10:02:00Z", records=[completed_local]),
+    ).records[0]
+
+    assert updated.status == "used"
+    assert updated.candidate_id == "used-candidate"
+    assert updated.main_passage == "João 15:1-2"
+    assert updated.opening_hook == "Uma nova abertura concreta."
+
+
+def test_usage_merge_preserves_forward_compatible_envelope_fields() -> None:
+    shared = VerseUsageIndex.model_validate(
+        {
+            "generated_at": "2026-07-21T10:00:00Z",
+            "records": [],
+            "future_envelope_field": {"revision": 2},
+        }
+    )
+    incomplete_local = VerseUsageIndex.model_validate(
+        {
+            "generated_at": "2026-07-21T10:01:00Z",
+            "records": [],
+            "future_envelope_field": {},
+            "local_registry_hint": "projects/shorts",
+        }
+    )
+
+    merged = merge_usage_indexes(shared, incomplete_local)
+
+    assert merged.model_extra["future_envelope_field"] == {"revision": 2}
+    assert merged.model_extra["local_registry_hint"] == "projects/shorts"
+
+
+def test_compact_reservation_persists_duration_profile(tmp_path) -> None:
+    candidate = next(
+        item for item in load_verse_catalog().candidates if item.catalog_segment == "compact_jesus"
+    )
+
+    usage = reserve_project_candidates(
+        tmp_path,
+        project_id="compact-reservation",
+        video_format="short",
+        candidates=[candidate],
+        duration_profile="adaptive_compact_v1",
+    )
+    record = next(item for item in usage.records if item.project_id == "compact-reservation")
+
+    assert record.duration_profile == "adaptive_compact_v1"
+    assert record.opening_hook == candidate.compact_hook
+
+
+def test_recent_compact_hook_window_ignores_incomplete_reservations() -> None:
+    target_hook = "Antes de ceder ao medo, lembre-se de quem segura você."
+    records = [
+        VerseUsageRecord(
+            project_id="blank-reservation",
+            project_path="shorts/blank-reservation",
+            video_format="short",
+            status="reserved",
+            created_at="2026-07-21T12:10:00Z",
+        )
+    ]
+    records.extend(
+        VerseUsageRecord(
+            project_id=f"compact-{index}",
+            project_path=f"shorts/compact-{index}",
+            video_format="short",
+            duration_profile="adaptive_compact_v1",
+            status="used",
+            opening_hook=target_hook if index == 7 else f"Hook compacto distinto {index}",
+            created_at=f"2026-07-21T12:0{9 - index}:00Z",
+        )
+        for index in range(8)
+    )
+    usage = VerseUsageIndex(generated_at="2026-07-21T12:11:00Z", records=records)
+
+    assert recent_compact_hook_count(usage, target_hook, limit=8) == 1
 
 
 def test_shared_git_registry_prevents_repetition_between_project_roots(

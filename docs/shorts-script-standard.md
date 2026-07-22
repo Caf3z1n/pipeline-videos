@@ -27,6 +27,23 @@ O roteiro usa de 105 a 130 palavras por padrão e produz de 8 a 10 cenas no perf
 informação nova, mudança visual, função e tempo. Reformular a mesma tese não conta como
 progressão.
 
+### Perfil de grandes perguntas bíblicas
+
+`high_stakes_biblical_question_v1` é opt-in com `new-short --profile high-stakes` e aceita de 45 a
+60 segundos. Ele escolhe primeiro uma dúvida conhecida e visualmente forte; a passagem é evidência,
+não o ponto de partida editorial. Cada candidato sela `opening_hook`, pergunta implícita, resposta
+prometida, pontos obrigatórios, fontes de apoio, estado da resposta (`direct`, `bounded_inference` ou
+`open`) e limites de incerteza.
+
+O contrato `high_stakes_opening_v1` não obriga o hook a ser pergunta. Ele alterna fato surpreendente,
+contradição, reversão de crença, consequência primeiro, cena em andamento, citação ou pergunta
+direta. O hook curado é copiado literalmente. A citação usa `adaptive_payoff_v1`: pode entrar como
+tensão, prova da virada ou recompensa, entre 0 e 44 segundos, sem janela universal de 8–20 segundos.
+O perfil sempre exige revisão bíblica independente.
+O catálogo funciona em ciclo único. Quando todos os candidatos da rodada tiverem ao menos um uso ou
+reserva, `new-short` informa a exaustão e não cria projeto, reserva, briefing ou roteiro. Reutilização
+automática permanece proibida até a inclusão de uma nova rodada curada.
+
 Pedidos entre 15 e 44 segundos usam `adaptive_compact_v1`. O pipeline deriva e persiste os limites
 antes de preparar a fila; o Python sela a locução e os validadores leem esses valores em vez de
 comprimir o contrato de 50 segundos depois da escrita. O modelo recebe apenas os blocos de narração
@@ -104,10 +121,21 @@ primeira fala, com no máximo 12 palavras, precisa corresponder literalmente à 
 6. `Nunca faça [X].`
 
 Abertura em cena, fato surpreendente, pergunta específica, contradição, consequência primeiro e
-outras famílias permanecem disponíveis apenas para contratos legados e vídeos longos. No contrato
-novo, uma frase apenas parecida ou classificada com outro nome não passa no preflight. Não use as
-seis formas para inventar perda, risco, proibição ou promessa. Registre de uma a três técnicas
-éticas em `hook_techniques`.
+reversão de crença também pertencem ao contrato opt-in `high_stakes_opening_v1`; fora dele,
+permanecem disponíveis apenas para contratos legados e vídeos longos. Em qualquer contrato, uma
+frase apenas parecida ou classificada com outro nome não passa no preflight. Não invente perda,
+risco, proibição ou promessa. Registre de uma a três técnicas éticas em `hook_techniques`.
+
+O hook é avaliado como porta de entrada, não como sinônimo de retenção inteira. A fila registra o
+modelo `appeal_engagement_satisfaction_v1`: concretude e primeiro quadro influenciam a escolha no
+feed; progressão e payoff influenciam o consumo; reação e retorno sustentam satisfação. Não use
+erro deliberado, comentário por conta alternativa, ameaça inventada ou estímulo visual aleatório.
+
+O roteiro abre um único loop central. Cada beat entre hook e resolução acrescenta informação,
+mudança, evidência ou consequência real; reformular a mesma tese não conta como progressão. A
+resolução fecha a promessa inicial. No contrato novo, o preflight exige que o beat inicial grave a
+pergunta/promessa em `opens_loop` e que o beat de resolução feche o mesmo valor em `resolves_loop`.
+Nenhum versículo pode ser cortado, atrasado ou retirado de contexto para fabricar suspense.
 
 O perfil compacto salva `hook_contract=cinematic_interruption_v1` e
 `hook_family=emotional_interruption`. A primeira fala tem de 10 a 12 palavras, não é pergunta, soa
@@ -117,8 +145,8 @@ hook forte curado para a passagem.
 ## Citação e precisão bíblica
 
 Todo Short cita literalmente pelo menos um versículo verificado. A janela é de 8 a 20 segundos no
-perfil padrão e vem de `shorts_script.scripture_citation_*` no perfil compacto. No perfil padrão,
-use:
+perfil padrão, vem de `shorts_script.scripture_citation_*` no perfil compacto e é adaptativa entre
+0 e 44 segundos no perfil de grandes perguntas. No perfil padrão, use:
 
 > Em Salmos, capítulo 56, versículo 3, lemos: “Quando eu tiver medo, colocarei a minha confiança em
 > ti.”
@@ -173,6 +201,21 @@ reservar área para legendas ou bordas. Ele não gera thumbnail nem capa no fram
 seleciona um frame do vídeo. `cinematic-family-3d-animation` continua disponível explicitamente e
 preserva a edição da abertura, o texto integrado e o frame zero. O título usa
 `Enfoque concreto | Passagem` sem obrigar o enfoque a ser motivacional.
+
+Projetos novos também persistem `opening_visual_standard=scroll_stop_concrete_v1`. O primeiro bloco
+deve mostrar sujeito ou objeto dominante, ação observável já em curso e uma tensão, escolha ou
+contraste coerente com o hook. Use plano médio, close ou objeto específico dominante; evite plano
+geral contemplativo, pose parada e acolhimento genérico sem conflito legível. No perfil
+`unrestricted_scene_v1`, esse enquadramento não cria faixa segura, centro vazio ou restrições de
+borda: a composição continua artisticamente livre.
+
+No plano compacto, o primeiro conceito também declara de forma estruturada
+`attention_role=scroll_stop_opening`, `dominant_subject_or_object`, `observable_action`,
+`action_kind`, `initial_state`, `resulting_state`, `concrete_tension` e
+`shot_scale=close|medium`. O preflight exige que `observable_action` comece pelo verbo físico
+principal e que os estados visíveis sejam distintos; rejeita campo ausente, ação negada, plano amplo,
+pose parada ou descrição contemplativa contraditória; o fallback determinístico cumpre o mesmo
+contrato.
 
 Em `adaptive_compact_v1`, o item que aponta para
 `strategy.cinematic_devotional.reference_section_id` continua obrigatório para preservar a divisão

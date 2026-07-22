@@ -434,11 +434,16 @@ def build_one_shot_plan(
         enabled=shorts_enabled,
     )
     script_generation_task_id = "shorts_script_generation"
+    visual_plan_only = (
+        manifest.config.shorts_script.generation_mode == "deterministic_compact_visual_plan_v1"
+    )
     script_tasks = [
         _task(
             script_generation_task_id,
             owner=(
-                "shorts_script_specialist"
+                "shorts_visual_planner"
+                if visual_plan_only
+                else "shorts_script_specialist"
                 if manifest.config.shorts_script.use_specialist_subagent
                 else "main"
             ),

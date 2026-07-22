@@ -170,6 +170,7 @@ def _ready_project(
         "video-publicavel",
         "Vídeo publicável",
         projects_dir=tmp_path,
+        target_duration_seconds=60 if video_format == "short" else 540,
         video_format=video_format,
         style_id=(
             "cinematic-family-3d-animation"
@@ -407,7 +408,42 @@ def test_new_short_upload_needs_no_thumbnail_file_and_leaves_frame_selection_to_
     assert record.thumbnail.status == "skipped"
     assert record.thumbnail.source_path is None
     assert record.thumbnail.source_hash is None
+    assert record.short_analytics_context is not None
+    assert record.short_analytics_context.opening_visual_standard == ("scroll_stop_concrete_v1")
+    assert record.short_analytics_context.video_duration_seconds == 60.0
+    assert record.short_analytics_context.video_duration_source == "manifest_fallback"
     assert "YouTube selecionará um frame" in layout.load_manifest().stages["publication"].note
+
+
+def test_short_analytics_fingerprint_is_validated_before_external_upload(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    layout = _ready_project(
+        tmp_path,
+        video_format="short",
+        legacy_short_profile=False,
+    )
+    client = FakeYouTubeClient()
+
+    def fail_context(_layout, **_kwargs):
+        raise ValueError("fingerprint inválido")
+
+    monkeypatch.setattr(
+        "pipeline_videos.publication._short_publication_analytics_context",
+        fail_context,
+    )
+
+    with pytest.raises(ValueError, match="fingerprint inválido"):
+        upload_project(
+            layout,
+            client=client,
+            allow_external=True,
+            confirmation=layout.load_manifest().project_id,
+            verify_validation=False,
+        )
+
+    assert client.upload_calls == 0
 
 
 def test_retry_after_thumbnail_failure_reuses_uploaded_video(tmp_path) -> None:

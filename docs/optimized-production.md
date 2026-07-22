@@ -27,6 +27,18 @@ válido tornam a retomada idempotente. `--wait-external` monitora os stagings no
 não abra novas rodadas do coordenador apenas para consultar arquivos. `status --json` entrega o
 estado compacto quando uma integração realmente precisar consultar o projeto.
 
+## Política de duração e voz natural
+
+Uma duração simples é persistida como `preferred_target_v1`: ela orienta roteiro e planejamento,
+mas não cria obrigação de fechar o arquivo naquele segundo. A janela preferencial padrão é de 85%
+a 115% do alvo. Dentro dela não há finding; fora dela há apenas aviso, nunca correção automática.
+
+`exact_target_v1` existe somente para pedidos explicitamente exatos e precisa ser ativado com
+`--exact-duration`. `adaptive_range_v1` continua reservado a limites mínimo e máximo declarados.
+A ElevenLabs usa velocidade natural `1.0`; duração não autoriza mudar `speed`, aplicar time-stretch,
+padding, silêncio ou prolongamento visual. Um override de velocidade requer autorização específica
+e `speech_rate_policy=explicit_user_override_v1`.
+
 `--upload-private` exige `--allow-external`, validação final aprovada e confirmação com o ID exato.
 Ele usa o caminho de revisão automatizada privada e nunca registra aprovação humana.
 
@@ -86,6 +98,15 @@ trecho literal e contíguo da locução, `section_id`, uma descrição concreta 
 o áudio preserva `scene_id` e `narration_block_id`, permitindo gerar imagens e voz em paralelo sem
 perder o vínculo entre o que é narrado e o que aparece.
 
+`opening_visual_standard=scroll_stop_concrete_v1` trata o primeiro item de forma explícita: plano
+médio/close ou objeto dominante, ação já em curso, tipo de mudança e estados inicial/final
+concretos, tensão e correspondência semântica com o hook. Esse contrato é incorporado ao primeiro
+prompt tanto no ramo por blocos quanto no ramo por seção; o compacto 3D usa os blocos importados
+mesmo quando preserva `section_visual_direction_v1`. No perfil pintado, o construtor mantém
+`unrestricted_scene_v1`; não cria faixa segura,
+centro vazio nem regras de borda. Advisories confirmados de Analytics podem orientar esse plano,
+mas snapshots crus ou provisórios não entram na fila e nunca alteram o texto bíblico selado.
+
 No compacto, a quantidade configurada de cenas é um limite máximo. A citação é separada primeiro
 em frases e, quando necessário, em vírgulas que preservem duas orações legíveis. Se não houver
 fronteiras naturais suficientes, o plano usa menos cenas; divisão uniforme por quantidade de
@@ -95,6 +116,11 @@ Projetos novos usam `creative_retention_v3`. O seletor resolve modo criativo, po
 hook antes de abrir a fila. No perfil padrão, `hook_contract=user_six_v1` aceita exclusivamente as
 seis estruturas documentadas; uma família declarada que não corresponda à primeira fala bloqueia o
 preflight antes de imagens, áudio, render ou upload. A citação literal entra entre 8 e 20 segundos.
+Como opção separada, `new-short --profile high-stakes --duration 50` ativa
+`high_stakes_biblical_question_v1`: banco próprio de grandes perguntas, hook curado declarativo ou
+interrogativo, pontos obrigatórios de resposta, incerteza preservada e revisão bíblica independente.
+Nesse perfil, `adaptive_payoff_v1` substitui a janela fixa: a citação pode entrar entre 0 e 44
+segundos conforme sua função de tensão, prova ou recompensa.
 O perfil compacto usa `cinematic_interruption_v1`, restringe a seleção a fala direta de Jesus e
 reduz palavras, cenas e orçamento do coordenador sem reduzir a qualidade final. Em 15 segundos, o
 hook curado vai de 0 a 3,5, a citação de 3,5 a 12,3 e a referência de 12,3 a 15 segundos; o limite

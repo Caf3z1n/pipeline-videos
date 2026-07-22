@@ -95,9 +95,54 @@ def test_local_coordinator_job_is_isolated_and_completion_first(tmp_path) -> Non
     assert job["orchestration"]["coordinator_role"] == "local_video_coordinator"
     assert job["orchestration"]["fork_turns"] == "none"
     assert job["external_roles"]["image_workers"]["maximum_parallel"] == 2
+    assert job["external_roles"]["shorts_visual_planner"]["reasoning_effort"] == "medium"
+    assert "shorts_script_specialist" not in job["external_roles"]
+    assert "biblical_reviewer" not in job["external_roles"]
     assert job["policies"]["validation_policy"] == "completion_first_v1"
     assert job["policies"]["token_budget_behavior"] == "fallback_then_continue"
     assert layout.coordinator_job.is_file()
+
+
+def test_noncompact_short_coordinator_uses_script_specialist(tmp_path) -> None:
+    layout = create_project(
+        "coordenador-padrao",
+        "Coordenador padrão",
+        projects_dir=tmp_path,
+        target_duration_seconds=60,
+        video_format="short",
+        project_date=date(2026, 7, 21),
+    )
+
+    job = prepare_local_coordinator_job(layout)
+
+    assert job["external_roles"]["shorts_script_specialist"]["reasoning_effort"] == "high"
+    assert job["external_roles"]["biblical_reviewer"]["reasoning_effort"] == "high"
+    assert job["external_roles"]["biblical_reviewer"]["queue"].endswith(
+        "reviews/shorts-review-queue.json"
+    )
+    assert "shorts_visual_planner" not in job["external_roles"]
+
+
+def test_noncompact_main_agent_short_does_not_declare_external_script_specialist(
+    tmp_path,
+) -> None:
+    layout = create_project(
+        "coordenador-agente-principal",
+        "Coordenador no agente principal",
+        projects_dir=tmp_path,
+        target_duration_seconds=60,
+        video_format="short",
+        project_date=date(2026, 7, 21),
+    )
+    project = layout.load_manifest()
+    project.config.shorts_script.use_specialist_subagent = False
+    layout.save_manifest(project)
+
+    job = prepare_local_coordinator_job(layout)
+
+    assert "shorts_script_specialist" not in job["external_roles"]
+    assert "shorts_visual_planner" not in job["external_roles"]
+    assert job["external_roles"]["biblical_reviewer"]["reasoning_effort"] == "high"
 
 
 def test_autopilot_cli_reports_compact_external_pause(tmp_path, monkeypatch) -> None:

@@ -108,6 +108,26 @@ Para um Short vertical 9:16, o fluxo recomendado agora não exige tema, título 
 uv run pipeline-videos new-short
 ```
 
+Para uma investigação bíblica de alto interesse — dúvida conhecida primeiro, evidências depois — use:
+
+```powershell
+uv run pipeline-videos new-short --profile high-stakes --duration 50
+```
+
+Esse perfil seleciona uma das grandes perguntas verificadas do banco próprio, abre com uma afirmação,
+contradição, consequência, reversão de crença ou pergunta curada e obriga o roteiro a entregar todos
+os pontos de resposta. A citação continua literal e verificada, mas sua posição é escolhida pela
+função narrativa dentro de `0–44s`; ela pode estabelecer a tensão, comprovar uma virada ou ser a
+recompensa. Inferências e lacunas permanecem explícitas e passam por revisão bíblica independente.
+O banco é de ciclo único: depois que os oito temas forem usados ou reservados, a próxima criação é
+bloqueada com uma mensagem explícita. O pipeline não inicia um segundo ciclo até que uma nova rodada
+curada seja incluída e validada.
+
+`--duration` define uma meta aproximada. Assim, `new-short --duration 50` preserva a interpretação
+natural da voz e aceita uma duração próxima sem tentar desacelerar a locução, inserir silêncio ou
+refazer o vídeo por poucos segundos. Somente um pedido explicitamente exato deve usar
+`--exact-duration`; limites declarados usam `--duration-min` e `--duration-max`.
+
 Esse comando usa `biblical-midcentury-gouache-v1`: ilustração editorial cristã em guache opaco e
 têmpera, com aparência de impressão offset limpa de aproximadamente 1955. O roteirista divide a
 locução em `strategy.visual_scenes`; cada item copia um bloco contíguo da narração e descreve uma
@@ -595,10 +615,21 @@ Métricas observadas podem ser registradas de forma idempotente sem executar nov
 
 ```powershell
 uv run pipeline-videos analytics import salmo-121 .\experimento.json
+
+# Para Shorts, importe uma observação imutável do Studio/API e gere alertas separados:
+uv run pipeline-videos analytics metrics-import meu-short .\snapshot-72h.json
+uv run pipeline-videos analytics diagnose meu-short
 ```
 
-Percentuais conhecidos são validados entre 0 e 100; conclusões continuam sendo hipóteses, sem inferir
-causalidade a partir de poucos dados.
+O diagnóstico de Shorts não cria um “score viral”. Ele separa apelo
+(`Continuaram assistindo`/`Deslizaram`), engajamento (duração e percentual assistido) e satisfação
+(likes, comentários, compartilhamentos e inscritos). Apelo exige ao menos 200 exposições e
+engajamento exige ao menos 200 `engaged_views`; resultados em processamento ou cuja janela termina
+antes de 48 horas permanecem provisórios. Uploads novos congelam o fingerprint editorial usado para
+comparabilidade. A linha de base inicial de 30,5% foi calibrada no canal e está versionada, não é um
+número universal. `engaged_views/views` nunca é apresentado como se fosse a métrica do Studio.
+Detalhes, schema e matriz de alertas estão em
+[Loop de desempenho para Shorts](docs/shorts-performance-loop.md).
 
 O objetivo é aumentar relevância, clareza e probabilidade de clique sem clickbait enganoso. Não há
 garantia de viralização: o próprio YouTube considera relevância, satisfação, watch time, histórico do
@@ -724,6 +755,11 @@ diretamente na primeira cena narrativa; somente o perfil 3D legado mantém a thu
 frame zero. As legendas `active_card_v2` entram progressivamente, palavra por palavra,
 com animação curta de posição, escala e opacidade, sem alterar tipografia, card ou sincronização.
 
+O primeiro bloco visual de todo Short novo usa `scroll_stop_concrete_v1`: sujeito dominante, ação
+já em curso, transição visível entre estados concretos, tensão coerente com o hook e enquadramento de leitura imediata. No perfil pintado
+`unrestricted_scene_v1`, isso usa plano médio/close sem reintroduzir área vazia obrigatória para
+legendas ou thumbnail. A imagem e a primeira fala devem abrir a mesma pergunta que o payoff resolve.
+
 Nos Shorts novos, `visual_scenes` define os blocos antes do áudio e cada segmento guarda tanto
 `scene_id` quanto `narration_block_id`. As filas continuam usando
 schemas compactados e arquivos de contexto dedicados. Em `completion_first_v1`, somente mídia,
@@ -810,7 +846,10 @@ projects/
 │   ├── thumbnail-vNNN.png
 │   ├── thumbnail.png
 │   └── publication.json
-├── analytics/experiments.json
+├── analytics/
+│   ├── experiments.json
+│   ├── shorts-snapshots.json
+│   └── shorts-diagnostics.json
 ├── audit/
 │   ├── production-metrics.json
 │   └── report.md

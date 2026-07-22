@@ -44,6 +44,7 @@ from pipeline_videos.models import (
     SourceLibrary,
     StageStatus,
     VerseCandidate,
+    VerseUsageIndex,
     default_elevenlabs_model_id,
     elevenlabs_voice_id_for_variant,
 )
@@ -143,6 +144,7 @@ class RemoteVideoRequest(PipelineModel):
     hook_policy: HookPolicy = "auto"
     hook_family: HookFamily = "auto"
     duration_seconds: int | None = Field(default=None, ge=MIN_SHORT_DURATION_SECONDS, le=3600)
+    exact_duration: bool = False
     start_policy: Literal["immediate", "overnight"] = "immediate"
     not_before: datetime | None = None
     publication_mode: Literal["private_review", "scheduled"] = "private_review"
@@ -414,6 +416,7 @@ def prepare_job_project(
         layout, _, _ = create_auto_video(
             projects_dir=root,
             target_duration_seconds=request.duration_seconds,
+            exact_duration=request.exact_duration,
             video_format=video_format,
             production_mode="final_candidate_one_shot",
             creative_mode_override=(
@@ -428,6 +431,7 @@ def prepare_job_project(
             request.title or request.topic,
             projects_dir=root,
             target_duration_seconds=request.duration_seconds,
+            exact_duration=request.exact_duration,
             video_format=video_format,
             production_mode="final_candidate_one_shot",
         )
@@ -435,6 +439,7 @@ def prepare_job_project(
         layout, _, _ = create_auto_video(
             projects_dir=root,
             target_duration_seconds=request.duration_seconds,
+            exact_duration=request.exact_duration,
             video_format=video_format,
             production_mode="final_candidate_one_shot",
             creative_mode_override=(
@@ -598,7 +603,7 @@ def _available_verse_candidates(
     *,
     projects_root: Path,
     requested_character: str | None = None,
-) -> tuple[list[VerseCandidate], str | None, set[str]]:
+) -> tuple[list[VerseCandidate], str | None, set[str], VerseUsageIndex]:
     from pipeline_videos.verse_selection import (
         eligible_main_candidate_ids,
         load_verse_catalog,
@@ -674,7 +679,7 @@ def _available_verse_candidates(
             for candidate in catalog.candidates
             if candidate.catalog_segment != "narrative_story"
         ]
-    return available, current_main, main_eligible
+    return available, current_main, main_eligible, usage
 
 
 def _editorial_context_ready(layout: ProjectLayout) -> bool:
@@ -730,9 +735,13 @@ def _editorial_sources_phase_spec(
     projects_root: Path,
 ) -> CodexPhaseSpec:
     from pipeline_videos.editorial import citation_target_range
+    from pipeline_videos.verse_selection import (
+        compact_hook_editorial_features,
+        recent_compact_hook_count,
+    )
 
     project = layout.load_manifest()
-    candidates, current_main, main_eligible = _available_verse_candidates(
+    candidates, current_main, main_eligible, usage = _available_verse_candidates(
         layout,
         projects_root=projects_root,
         requested_character=job.request.character,
@@ -793,6 +802,27 @@ def _editorial_sources_phase_spec(
                     "compact_hook_strength_score": candidate.compact_hook_strength_score,
                     "compact_message_value_score": candidate.compact_message_value_score,
                     "compact_rewatch_value_score": candidate.compact_rewatch_value_score,
+                    "compact_hook_editorial_features": (
+                        compact_hook_editorial_features(candidate.compact_hook)
+                        if candidate.compact_hook
+                        else None
+                    ),
+                    "compact_hook_prior": (
+                        "concrete_scroll_stop_v1"
+                        if project.video_format == "short"
+                        and project.config.shorts_script.duration_profile == "adaptive_compact_v1"
+                        else None
+                    ),
+                    "recent_exact_hook_count": (
+                        recent_compact_hook_count(usage, candidate.compact_hook)
+                        if candidate.compact_hook
+                        else 0
+                    ),
+                    "recent_exact_hook_penalty": (
+                        -28 * recent_compact_hook_count(usage, candidate.compact_hook)
+                        if candidate.compact_hook
+                        else 0
+                    ),
                 }
                 for candidate in candidates
             ],
@@ -807,6 +837,9 @@ def _editorial_sources_phase_spec(
                 "Escolha o principal somente entre main_eligible_candidate_ids.",
                 "Selecione exatamente desired_candidate_count IDs distintos contando o principal.",
                 "Prefira passagens complementares coerentes, sem transformar promessa em garantia.",
+                "No perfil compacto, trate compact_hook_editorial_features como prior suave e "
+                "rebaixe recent_exact_hook_count acima de zero; não reescreva o hook nem a "
+                "citação.",
                 f"Grave apenas JSON válido em {output}.",
             ],
         },
@@ -852,7 +885,7 @@ def _import_editorial_source_selection(
     )
 
     selection = read_json(selection_path)
-    candidates, current_main, main_eligible = _available_verse_candidates(
+    candidates, current_main, main_eligible, _usage = _available_verse_candidates(
         layout,
         projects_root=projects_root,
         requested_character=job.request.character,
@@ -940,6 +973,11 @@ def _import_editorial_source_selection(
         retention_archetype=retention_archetype,
         creative_mode=creative_mode,
         hook_family=hook_family,
+        duration_profile=(
+            project.config.shorts_script.duration_profile
+            if project.video_format == "short"
+            else None
+        ),
     )
     suggested_title = main.title_seed.strip() or main.title
     title = job.request.title or job.request.topic or current.title or suggested_title
@@ -1090,7 +1128,9 @@ def _shorts_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
         payload={
             "delegation": {
                 "required": True,
-                "role": "shorts_script_specialist",
+                "role": (
+                    "shorts_visual_planner" if visual_plan_only else "shorts_script_specialist"
+                ),
                 "count": 1,
                 "fork_turns": "none",
                 "reasoning_effort": specialist_effort,
@@ -1342,6 +1382,8 @@ def _shorts_script_correction_checkpoint(
 ) -> CodexPhaseSpec:
     queue = read_json(layout.shorts_script_queue)
     package = _project_file(layout, queue["outputs"]["package"])
+    context_value = queue.get("inputs", {}).get("compact_context")
+    context = _project_file(layout, context_value) if context_value else None
     visual_plan_only = queue.get("generation_mode") == "deterministic_compact_visual_plan_v1"
     return CodexPhaseSpec(
         phase="shorts_script_correction",
@@ -1351,13 +1393,19 @@ def _shorts_script_correction_checkpoint(
         payload={
             "delegation": {
                 "required": True,
-                "role": "shorts_script_specialist",
+                "role": (
+                    "shorts_visual_planner" if visual_plan_only else "shorts_script_specialist"
+                ),
                 "count": 1,
                 "fork_turns": "none",
                 "reasoning_effort": "medium" if visual_plan_only else "high",
                 "model": DEFAULT_REMOTE_CODEX_MODEL,
             },
-            "allowed_inputs": [str(layout.shorts_script_queue), str(package)],
+            "allowed_inputs": [
+                str(layout.shorts_script_queue),
+                *([str(context)] if context is not None else []),
+                str(package),
+            ],
             "task": {
                 "kind": (
                     "correct_compact_visual_plan"
@@ -1365,6 +1413,7 @@ def _shorts_script_correction_checkpoint(
                     else "correct_shorts_script_package"
                 ),
                 "queue_path": str(layout.shorts_script_queue),
+                "compact_context_path": str(context) if context is not None else None,
                 "package_path": str(package),
                 "validation_error": str(validation_error)[:4000],
                 "instructions": [

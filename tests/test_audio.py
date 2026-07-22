@@ -578,6 +578,21 @@ def test_legacy_sapi_config_migrates_to_elevenlabs() -> None:
     )
 
 
+def test_elevenlabs_speed_defaults_and_bounds() -> None:
+    assert AudioConfig().speed == 1.0
+    with pytest.raises(ValueError, match="pedido explícito"):
+        AudioConfig(speed=0.87)
+    explicit = AudioConfig(
+        speed=0.87,
+        speech_rate_policy="explicit_user_override_v1",
+    )
+    assert explicit.speed == 0.87
+    with pytest.raises(ValueError):
+        AudioConfig(speed=0.69)
+    with pytest.raises(ValueError):
+        AudioConfig(speed=1.21)
+
+
 def test_elevenlabs_defaults_and_named_voice_variants(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

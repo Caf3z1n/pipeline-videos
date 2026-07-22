@@ -150,6 +150,38 @@ def prepare_local_coordinator_job(layout: ProjectLayout) -> dict[str, Any]:
     """Persist the compact hand-off used by an isolated local coordinator task."""
 
     project = layout.load_manifest()
+    external_roles: dict[str, Any] = {
+        "image_workers": {
+            "jobs_directory": relative_posix(layout.image_jobs, layout.root),
+            "maximum_parallel": min(2, project.config.production.image_workers),
+            "reasoning_effort": "low",
+        },
+        "youtube_growth_specialist": {
+            "queue": relative_posix(layout.growth_queue, layout.root),
+            "reasoning_effort": "medium",
+            "when_present": True,
+        },
+    }
+    if project.video_format == "short":
+        visual_plan_only = (
+            project.config.shorts_script.generation_mode == "deterministic_compact_visual_plan_v1"
+        )
+        if visual_plan_only or project.config.shorts_script.use_specialist_subagent:
+            role = "shorts_visual_planner" if visual_plan_only else "shorts_script_specialist"
+            external_roles[role] = {
+                "queue": relative_posix(layout.shorts_script_queue, layout.root),
+                "reasoning_effort": "medium" if visual_plan_only else "high",
+                "when_present": True,
+            }
+        if (
+            not visual_plan_only
+            and project.config.shorts_script.require_independent_biblical_review
+        ):
+            external_roles["biblical_reviewer"] = {
+                "queue": relative_posix(layout.shorts_biblical_review_queue, layout.root),
+                "reasoning_effort": "high",
+                "when_present": True,
+            }
     payload = {
         "schema_version": "1.0",
         "generated_at": utc_now(),
@@ -172,23 +204,7 @@ def prepare_local_coordinator_job(layout: ProjectLayout) -> dict[str, Any]:
                 else "--allow-external --wait-external"
             )
         ),
-        "external_roles": {
-            "shorts_visual_planner": {
-                "queue": relative_posix(layout.shorts_script_queue, layout.root),
-                "reasoning_effort": "medium",
-                "when_present": True,
-            },
-            "image_workers": {
-                "jobs_directory": relative_posix(layout.image_jobs, layout.root),
-                "maximum_parallel": min(2, project.config.production.image_workers),
-                "reasoning_effort": "low",
-            },
-            "youtube_growth_specialist": {
-                "queue": relative_posix(layout.growth_queue, layout.root),
-                "reasoning_effort": "medium",
-                "when_present": True,
-            },
-        },
+        "external_roles": external_roles,
         "policies": {
             "repair_policy": project.config.production.repair_policy,
             "max_model_repairs_per_stage": (project.config.production.max_model_repairs_per_stage),
@@ -196,6 +212,11 @@ def prepare_local_coordinator_job(layout: ProjectLayout) -> dict[str, Any]:
             "validation_policy": project.config.production.validation_policy,
             "publication_authorized": False,
             "one_final_render": True,
+            "duration_policy": project.duration_policy,
+            "duration_target_is_advisory": project.duration_policy == "preferred_target_v1",
+            "natural_voice_speed": project.config.audio.speed,
+            "forbid_duration_based_speech_rate_changes": True,
+            "forbid_duration_padding_or_time_stretch": True,
         },
     }
     write_json(layout.coordinator_job, payload)

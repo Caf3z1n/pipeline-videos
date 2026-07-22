@@ -128,6 +128,25 @@ def test_plan_is_read_only_serializable_and_exposes_dependency_waves(tmp_path) -
     assert all(line.encode("cp1252") for line in format_plan_lines(first))
 
 
+def test_compact_one_shot_plan_assigns_visual_planner_without_script_reviewer(tmp_path) -> None:
+    layout = create_project(
+        "compacto-visual",
+        "Compacto visual",
+        projects_dir=tmp_path,
+        target_duration_seconds=18,
+        duration_min_seconds=15,
+        duration_max_seconds=20,
+        video_format="short",
+        project_date=date(2026, 7, 21),
+    )
+
+    plan = build_one_shot_plan(layout)
+    task_ids = {task["task_id"] for wave in plan["waves"] for task in wave["tasks"]}
+
+    assert _task(plan, "shorts_script_generation")["owner"] == "shorts_visual_planner"
+    assert "independent_biblical_review" not in task_ids
+
+
 def test_plan_pauses_for_independent_review_before_the_single_script_import(tmp_path) -> None:
     layout = _short_layout(tmp_path)
     package = layout.shorts_script_package_staging

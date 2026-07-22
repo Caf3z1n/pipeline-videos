@@ -1,0 +1,871 @@
+{
+  "schema_version": "1.0",
+  "catalog_id": "high-stakes-biblical-question-bank-v1",
+  "translation": "Bíblia Portuguesa Mundial (BPM)",
+  "publisher": "eBible.org / Bíblia Portuguesa Mundial",
+  "source_url": "https://ebible.org/details.php?id=porbrbsl",
+  "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+  "accessed_at": "2026-07-21",
+  "source_artifact_url": "https://ebible.org/Scriptures/porbrbsl_vpl.zip",
+  "source_artifact_sha256": "a98e7b7d3f977b80716a5a7ecd443ece474593ca3d1770cf278a448b37b97287",
+  "source_revision": "2026-04-25",
+  "candidates": [
+    {
+      "candidate_id": "jesus-between-death-and-resurrection",
+      "source_id": "high-stakes-primary-jesus-between-death-and-resurrection",
+      "reference": "Atos 2:27",
+      "context_reference": "Atos 2:22-32",
+      "book": "Atos",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "porque não deixarás a minha alma no Hades, nem permitirás que o teu Santo veja a corrupção.",
+      "source_url": "https://ebible.org/porbrbsl/ACT02.htm",
+      "accessed_at": "2026-07-21",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "O que aconteceu antes da ressurreição",
+      "slug": "o-que-aconteceu-com-jesus-antes-da-ressurreição",
+      "central_theme": "O intervalo entre a morte e a ressurreição de Jesus",
+      "practical_application": "",
+      "audience": "pessoas com dúvidas frequentes sobre Jesus e os relatos bíblicos",
+      "emotional_intent": "provocar curiosidade honesta e entregar uma explicação bíblica clara",
+      "narration_tone": "investigativo, direto, cinematográfico e intelectualmente honesto",
+      "themes": [
+        "Jesus",
+        "grande pergunta bíblica",
+        "curiosidade bíblica"
+      ],
+      "characters": [
+        "Jesus"
+      ],
+      "related_passages": [
+        {
+          "passage_id": "high-stakes-jesus-between-death-and-resurrection-luk-23-43",
+          "reference": "Lucas 23:43",
+          "context_reference": "Lucas 23:39-46",
+          "verse_text": "Jesus lhe disse: “Em verdade te digo, hoje estarás comigo no Paraíso.",
+          "source_url": "https://ebible.org/porbrbsl/LUK23.htm",
+          "role": "supporting_fact",
+          "spoken_by": "jesus"
+        },
+        {
+          "passage_id": "high-stakes-jesus-between-death-and-resurrection-1pe-3-18-20",
+          "reference": "1 Pedro 3:18-20",
+          "context_reference": "1 Pedro 3:18-22",
+          "verse_text": "Porque Cristo também sofreu pelos pecados uma vez, o justo pelos injustos, para conduzir vocês a Deus, sendo morto na carne, mas vivificado no Espírito, no qual ele também foi e pregou aos espíritos em prisão, os quais antes foram desobedientes, quando Deus esperou pacientemente nos dias de Noé, enquanto a arca estava sendo construída. Nela, poucos, isto é, oito almas, foram salvos através da água.",
+          "source_url": "https://ebible.org/porbrbsl/1PE03.htm",
+          "role": "uncertainty_boundary",
+          "spoken_by": "other"
+        }
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Nao afirmar que os Evangelhos descrevem uma cronologia detalhada do intervalo.",
+        "Nao apresentar uma interpretação de 1 Pedro 3 como consenso bíblico unanime."
+      ],
+      "claims_to_avoid": [
+        "Nao afirmar que os Evangelhos descrevem uma cronologia detalhada do intervalo.",
+        "Nao apresentar uma interpretação de 1 Pedro 3 como consenso bíblico unanime."
+      ],
+      "visual_notes": [
+        "Representar apenas acontecimentos documentados como fatos."
+      ],
+      "retention_archetypes": [
+        "counterintuitive_reveal",
+        "stair_step_progression"
+      ],
+      "human_conflict": "Se os Evangelhos narram a morte e depois o túmulo vazio, o que a Bíblia permite afirmar sobre o intervalo?",
+      "central_question": "O que aconteceu com Jesus entre a morte e a ressurreição?",
+      "visual_progression": [
+        "A cruz vazia ao cair da tarde.",
+        "O túmulo selado e guardado.",
+        "Pistas textuais surgindo em ambientes distintos, sem representar especulacao como fato.",
+        "O túmulo aberto ao amanhecer como resolucao documentada."
+      ],
+      "possible_reveal": "A Bíblia oferece pistas reais, mas não uma cronologia completa; o valor esta em separar texto explícito de interpretação.",
+      "title_seed": "O que aconteceu antes da ressurreição",
+      "retention_potential_score": 0.96,
+      "selection_weight": 2.0,
+      "familiarity_score": 0.95,
+      "clarity_score": 0.9,
+      "catalog_segment": "high_stakes_question",
+      "recommended_formats": [
+        "short"
+      ],
+      "source_text_scope": "verse",
+      "spoken_by": "other",
+      "editorial_profile": "high_stakes_biblical_question_v1",
+      "opening_hooks": {
+        "surprising_fact": "O dia mais misterioso da história de Jesus quase não aparece nos Evangelhos.",
+        "contradiction": "Jesus morreu na cruz, mas a Bíblia não encerra a história no túmulo.",
+        "unanswered_question": "O que aconteceu com Jesus entre a morte e a ressurreição?"
+      },
+      "implicit_viewer_question": "Se os Evangelhos narram a morte e depois o túmulo vazio, o que a Bíblia permite afirmar sobre o intervalo?",
+      "required_answer_points": [
+        "Confirmar a morte real de Jesus e a ressurreição ao terceiro dia.",
+        "Comparar as pistas de Lucas 23, Atos 2 e 1 Pedro 3 sem fundi-las em uma cronologia inventada.",
+        "Explicar por que o destino exato de cada movimento nesse intervalo permanece debatido."
+      ],
+      "uncertainty_boundaries": [
+        "Nao afirmar que os Evangelhos descrevem uma cronologia detalhada do intervalo.",
+        "Nao apresentar uma interpretação de 1 Pedro 3 como consenso bíblico unanime."
+      ],
+      "answer_status": "open",
+      "preferred_creative_mode": "question_driven_essay"
+    },
+    {
+      "candidate_id": "why-jesus-waited-for-lazarus",
+      "source_id": "high-stakes-primary-why-jesus-waited-for-lazarus",
+      "reference": "João 11:5-6",
+      "context_reference": "João 11:1-16",
+      "book": "João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Ora, Jesus amava Marta, e sua irmã, e Lázaro. Quando, pois, ouviu que ele estava doente, ficou ainda dois dias no lugar onde estava.",
+      "source_url": "https://ebible.org/porbrbsl/JHN11.htm",
+      "accessed_at": "2026-07-21",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Por que Jesus esperou por Lázaro",
+      "slug": "por-que-jesus-esperou-antes-de-ajudar-lazaro",
+      "central_theme": "A demora deliberada de Jesus antes de ir a Betânia",
+      "practical_application": "",
+      "audience": "pessoas com dúvidas frequentes sobre Jesus e os relatos bíblicos",
+      "emotional_intent": "provocar curiosidade honesta e entregar uma explicação bíblica clara",
+      "narration_tone": "investigativo, direto, cinematográfico e intelectualmente honesto",
+      "themes": [
+        "Jesus",
+        "grande pergunta bíblica",
+        "curiosidade bíblica"
+      ],
+      "characters": [
+        "Jesus"
+      ],
+      "related_passages": [
+        {
+          "passage_id": "high-stakes-why-jesus-waited-for-lazarus-joh-11-14-15",
+          "reference": "João 11:14-15",
+          "context_reference": "João 11:11-16",
+          "verse_text": "Então, Jesus lhes disse claramente: “Lázaro está morto. E me alegro por causa de vocês de não ter estado lá, para que creiam. No entanto, vamos até ele.",
+          "source_url": "https://ebible.org/porbrbsl/JHN11.htm",
+          "role": "supporting_fact",
+          "spoken_by": "jesus"
+        },
+        {
+          "passage_id": "high-stakes-why-jesus-waited-for-lazarus-joh-11-40-44",
+          "reference": "João 11:40-44",
+          "context_reference": "João 11:38-44",
+          "verse_text": "Jesus lhe disse: “Não te disse eu que, se creres, verás a glória de Deus?” Então tiraram a pedra do lugar onde o morto jazia. Jesus levantou os olhos e disse: “Pai, graças te dou porque me ouviste. Eu sei que sempre me ouves, mas por causa da multidão que está ao redor eu disse isso, para que creiam que tu me enviaste.” Tendo dito isso, clamou em alta voz: “Lázaro, vem para fora!” Aquele que estava morto saiu, com as mãos e os pés amarrados com faixas, e o seu rosto envolto num lenço. Jesus lhes disse: “Desatem-no e deixem-no ir.",
+          "source_url": "https://ebible.org/porbrbsl/JHN11.htm",
+          "role": "supporting_fact",
+          "spoken_by": "jesus"
+        }
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Nao dizer que Jesus sentia prazer no sofrimento da familia.",
+        "Nao transformar o episodio em promessa de ressurreição imediata para todo fiel."
+      ],
+      "claims_to_avoid": [
+        "Nao dizer que Jesus sentia prazer no sofrimento da familia.",
+        "Nao transformar o episodio em promessa de ressurreição imediata para todo fiel."
+      ],
+      "visual_notes": [
+        "Representar apenas acontecimentos documentados como fatos."
+      ],
+      "retention_archetypes": [
+        "counterintuitive_reveal",
+        "stair_step_progression"
+      ],
+      "human_conflict": "Como Jesus podia amar Lázaro e ainda assim permanecer dois dias onde estava?",
+      "central_question": "Por que Jesus esperou antes de ajudar Lázaro?",
+      "visual_progression": [
+        "O mensageiro chega a Jesus com urgencia.",
+        "Jesus permanece onde esta enquanto os discípulos aguardam.",
+        "Marta e Maria diante do luto em Betânia.",
+        "A pedra e retirada e Lázaro sai do túmulo."
+      ],
+      "possible_reveal": "O próprio relato une amor, demora e uma revelacao maior, sem tratar a dor das irmãs como irrelevante.",
+      "title_seed": "Por que Jesus esperou por Lázaro",
+      "retention_potential_score": 0.96,
+      "selection_weight": 2.0,
+      "familiarity_score": 0.95,
+      "clarity_score": 0.9,
+      "catalog_segment": "high_stakes_question",
+      "recommended_formats": [
+        "short"
+      ],
+      "source_text_scope": "verse_range",
+      "spoken_by": "other",
+      "editorial_profile": "high_stakes_biblical_question_v1",
+      "opening_hooks": {
+        "contradiction": "Jesus amava Lázaro, mas decidiu esperar antes de ir ajuda-lo.",
+        "surprising_fact": "A demora de Jesus diante de Lázaro não foi um acidente de viagem.",
+        "unanswered_question": "Por que Jesus esperou se sabia que Lázaro estava morrendo?"
+      },
+      "implicit_viewer_question": "Como Jesus podia amar Lázaro e ainda assim permanecer dois dias onde estava?",
+      "required_answer_points": [
+        "Mostrar que João declara o amor de Jesus imediatamente antes da demora.",
+        "Explicar a finalidade revelada por Jesus sem prometer que toda demora humana termina em milagre.",
+        "Entregar a ressurreição de Lázaro como desfecho do episodio, não como formula universal."
+      ],
+      "uncertainty_boundaries": [
+        "Nao dizer que Jesus sentia prazer no sofrimento da familia.",
+        "Nao transformar o episodio em promessa de ressurreição imediata para todo fiel."
+      ],
+      "answer_status": "direct",
+      "preferred_creative_mode": "cause_and_consequence"
+    },
+    {
+      "candidate_id": "why-jesus-did-not-raise-everyone",
+      "source_id": "high-stakes-primary-why-jesus-did-not-raise-everyone",
+      "reference": "João 11:25",
+      "context_reference": "João 11:17-27",
+      "book": "João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Jesus lhe disse: “Eu sou a ressurreição e a vida. Aquele que crê em mim, ainda que morra, viverá.",
+      "source_url": "https://ebible.org/porbrbsl/JHN11.htm",
+      "accessed_at": "2026-07-21",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Por que Jesus não ressuscitou todos",
+      "slug": "por-que-jesus-não-ressuscitou-todos-os-mortos",
+      "central_theme": "Os sinais de ressurreição e o limite de sua finalidade nos Evangelhos",
+      "practical_application": "",
+      "audience": "pessoas com dúvidas frequentes sobre Jesus e os relatos bíblicos",
+      "emotional_intent": "provocar curiosidade honesta e entregar uma explicação bíblica clara",
+      "narration_tone": "investigativo, direto, cinematográfico e intelectualmente honesto",
+      "themes": [
+        "Jesus",
+        "grande pergunta bíblica",
+        "curiosidade bíblica"
+      ],
+      "characters": [
+        "Jesus"
+      ],
+      "related_passages": [
+        {
+          "passage_id": "high-stakes-why-jesus-did-not-raise-everyone-luk-7-14-15",
+          "reference": "Lucas 7:14-15",
+          "context_reference": "Lucas 7:11-17",
+          "verse_text": "Ele se aproximou e tocou no caixão, e os que o carregavam pararam. Ele disse: “Jovem, eu lhe digo, levante-se!” Aquele que estava morto sentou-se e começou a falar. Então ele o entregou à sua mãe.",
+          "source_url": "https://ebible.org/porbrbsl/LUK07.htm",
+          "role": "supporting_fact",
+          "spoken_by": "jesus"
+        },
+        {
+          "passage_id": "high-stakes-why-jesus-did-not-raise-everyone-mar-5-41-42",
+          "reference": "Marcos 5:41-42",
+          "context_reference": "Marcos 5:35-43",
+          "verse_text": "Tomando a criança pela mão, disse-lhe: “Talita cumi!” que significa, sendo traduzido, “Menina, eu lhe digo, levante-se!” Imediatamente a menina se levantou e começou a andar, pois tinha doze anos de idade. Eles ficaram maravilhados com grande espanto.",
+          "source_url": "https://ebible.org/porbrbsl/MRK05.htm",
+          "role": "supporting_fact",
+          "spoken_by": "jesus"
+        },
+        {
+          "passage_id": "high-stakes-why-jesus-did-not-raise-everyone-joh-5-28-29",
+          "reference": "João 5:28-29",
+          "context_reference": "João 5:19-29",
+          "verse_text": "Não se maravilhem com isso, pois vem a hora em que todos os que estão nos túmulos ouvirão a sua voz e sairão; os que fizeram o bem, para a ressurreição da vida; e os que fizeram o mal, para a ressurreição do julgamento.",
+          "source_url": "https://ebible.org/porbrbsl/JHN05.htm",
+          "role": "supporting_fact",
+          "spoken_by": "jesus"
+        }
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Nao inventar quantas pessoas Jesus poderia ou deveria ter ressuscitado.",
+        "Nao sugerir falta de compaixao como explicação bíblica."
+      ],
+      "claims_to_avoid": [
+        "Nao inventar quantas pessoas Jesus poderia ou deveria ter ressuscitado.",
+        "Nao sugerir falta de compaixao como explicação bíblica."
+      ],
+      "visual_notes": [
+        "Representar apenas acontecimentos documentados como fatos."
+      ],
+      "retention_archetypes": [
+        "counterintuitive_reveal",
+        "stair_step_progression"
+      ],
+      "human_conflict": "Por que os milagres de ressurreição foram sinais seletivos em vez do fim imediato de toda morte?",
+      "central_question": "Se Jesus podia ressuscitar mortos, por que não ressuscitou todos?",
+      "visual_progression": [
+        "Uma cidade cercada por sepulturas enquanto Jesus entra em cena.",
+        "O filho da viuva volta a respirar.",
+        "A filha de Jairo se levanta.",
+        "Lázaro sai do túmulo e a imagem se abre para a promessa futura."
+      ],
+      "possible_reveal": "As ressurreições funcionam como sinais da identidade e da promessa de Jesus; a ressurreição universal aparece como evento futuro.",
+      "title_seed": "Por que Jesus não ressuscitou todos",
+      "retention_potential_score": 0.96,
+      "selection_weight": 2.0,
+      "familiarity_score": 0.95,
+      "clarity_score": 0.9,
+      "catalog_segment": "high_stakes_question",
+      "recommended_formats": [
+        "short"
+      ],
+      "source_text_scope": "verse",
+      "spoken_by": "jesus",
+      "editorial_profile": "high_stakes_biblical_question_v1",
+      "opening_hooks": {
+        "contradiction": "Jesus ressuscitou mortos, mas não esvaziou todos os túmulos de Israel.",
+        "belief_reversal": "Os mortos que Jesus levantou não eram o fim da morte.",
+        "unanswered_question": "Se Jesus podia ressuscitar mortos, por que não ressuscitou todos?"
+      },
+      "implicit_viewer_question": "Por que os milagres de ressurreição foram sinais seletivos em vez do fim imediato de toda morte?",
+      "required_answer_points": [
+        "Distinguir os sinais individuais narrados nos Evangelhos da ressurreição final prometida.",
+        "Mostrar que os sinais apontam para a identidade de Jesus e não para favoritismo arbitrário.",
+        "Preservar que o texto não fornece uma lista de motivos para cada pessoa que não foi ressuscitada."
+      ],
+      "uncertainty_boundaries": [
+        "Nao inventar quantas pessoas Jesus poderia ou deveria ter ressuscitado.",
+        "Nao sugerir falta de compaixao como explicação bíblica."
+      ],
+      "answer_status": "bounded_inference",
+      "preferred_creative_mode": "thematic_investigation"
+    },
+    {
+      "candidate_id": "why-jesus-prayed",
+      "source_id": "high-stakes-primary-why-jesus-prayed",
+      "reference": "João 17:1",
+      "context_reference": "João 17:1-5",
+      "book": "João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Jesus disse estas coisas e, levantando os olhos ao céu, disse: “Pai, chegou a hora. Glorifica o teu Filho, para que o teu Filho também te glorifique;",
+      "source_url": "https://ebible.org/porbrbsl/JHN17.htm",
+      "accessed_at": "2026-07-21",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Se Jesus é Deus, por que ele orava",
+      "slug": "se-jesus-e-deus-por-que-ele-orava",
+      "central_theme": "A oração de Jesus e sua relacao com o Pai",
+      "practical_application": "",
+      "audience": "pessoas com dúvidas frequentes sobre Jesus e os relatos bíblicos",
+      "emotional_intent": "provocar curiosidade honesta e entregar uma explicação bíblica clara",
+      "narration_tone": "investigativo, direto, cinematográfico e intelectualmente honesto",
+      "themes": [
+        "Jesus",
+        "grande pergunta bíblica",
+        "curiosidade bíblica"
+      ],
+      "characters": [
+        "Jesus"
+      ],
+      "related_passages": [
+        {
+          "passage_id": "high-stakes-why-jesus-prayed-luk-22-41-44",
+          "reference": "Lucas 22:41-44",
+          "context_reference": "Lucas 22:39-46",
+          "verse_text": "Ele se afastou deles cerca de um tiro de pedra, ajoelhou-se e orou, dizendo: “Pai, se for da tua vontade, afasta de mim este cálice. Contudo, não seja feita a minha vontade, mas a tua.” Um anjo do céu lhe apareceu, fortalecendo-o. Estando em agonia, ele orava mais intensamente. O seu suor tornou-se como grandes gotas de sangue caindo no chão.",
+          "source_url": "https://ebible.org/porbrbsl/LUK22.htm",
+          "role": "supporting_fact",
+          "spoken_by": "jesus"
+        },
+        {
+          "passage_id": "high-stakes-why-jesus-prayed-heb-5-7-9",
+          "reference": "Hebreus 5:7-9",
+          "context_reference": "Hebreus 5:5-10",
+          "verse_text": "Ele, nos dias da sua carne, tendo oferecido orações e súplicas com forte clamor e lágrimas àquele que era capaz de salvá-lo da morte, e tendo sido ouvido por causa do seu temor a Deus, embora fosse Filho, aprendeu a obediência por meio das coisas que sofreu. Tendo sido aperfeiçoado, tornou-se para todos os que lhe obedecem o autor da salvação eterna,",
+          "source_url": "https://ebible.org/porbrbsl/HEB05.htm",
+          "role": "supporting_fact",
+          "spoken_by": "other"
+        }
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Nao afirmar que Jesus orava apenas para encenar um exemplo.",
+        "Nao tentar resolver toda a doutrina da Trindade em uma frase especulativa."
+      ],
+      "claims_to_avoid": [
+        "Nao afirmar que Jesus orava apenas para encenar um exemplo.",
+        "Nao tentar resolver toda a doutrina da Trindade em uma frase especulativa."
+      ],
+      "visual_notes": [
+        "Representar apenas acontecimentos documentados como fatos."
+      ],
+      "retention_archetypes": [
+        "counterintuitive_reveal",
+        "stair_step_progression"
+      ],
+      "human_conflict": "A oração de Jesus contradiz sua divindade ou revela sua relacao com o Pai?",
+      "central_question": "Se Jesus é Deus, por que ele orava?",
+      "visual_progression": [
+        "Jesus se afasta da multidao ao cair da noite.",
+        "Jesus ergue os olhos antes da oração de João 17.",
+        "O Getsêmani mostra obediencia sob angustia real.",
+        "A relacao Pai e Filho encerra a investigacao sem diagrama abstrato."
+      ],
+      "possible_reveal": "As orações de Jesus mostram comunhão, obediencia e sua humanidade real; não sao prova de que fingia falar com alguém.",
+      "title_seed": "Se Jesus é Deus, por que ele orava",
+      "retention_potential_score": 0.96,
+      "selection_weight": 2.0,
+      "familiarity_score": 0.95,
+      "clarity_score": 0.9,
+      "catalog_segment": "high_stakes_question",
+      "recommended_formats": [
+        "short"
+      ],
+      "source_text_scope": "verse",
+      "spoken_by": "jesus",
+      "editorial_profile": "high_stakes_biblical_question_v1",
+      "opening_hooks": {
+        "belief_reversal": "A oração de Jesus não e uma prova contra sua divindade.",
+        "contradiction": "Jesus recebe adoracao, mas ainda se ajoelha para orar ao Pai.",
+        "unanswered_question": "Se Jesus é Deus, com quem ele estava falando quando orava?"
+      },
+      "implicit_viewer_question": "A oração de Jesus contradiz sua divindade ou revela sua relacao com o Pai?",
+      "required_answer_points": [
+        "Mostrar a relacao pessoal de Jesus com o Pai nas proprias orações.",
+        "Reconhecer sua obediencia e humanidade real sem negar as afirmações bíblicas sobre sua identidade.",
+        "Evitar reduzir a Trindade a uma analogia simplista."
+      ],
+      "uncertainty_boundaries": [
+        "Nao afirmar que Jesus orava apenas para encenar um exemplo.",
+        "Nao tentar resolver toda a doutrina da Trindade em uma frase especulativa."
+      ],
+      "answer_status": "bounded_inference",
+      "preferred_creative_mode": "misconception_correction"
+    },
+    {
+      "candidate_id": "why-jesus-chose-judas",
+      "source_id": "high-stakes-primary-why-jesus-chose-judas",
+      "reference": "João 6:70-71",
+      "context_reference": "João 6:66-71",
+      "book": "João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Jesus lhes respondeu: “Não escolhi eu a vocês, os doze, e um de vocês é um diabo?” Ora, ele falava de Judas, filho de Simão Iscariotes, pois era ele quem o trairia, sendo um dos doze.",
+      "source_url": "https://ebible.org/porbrbsl/JHN06.htm",
+      "accessed_at": "2026-07-21",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Se Jesus sabia, por que escolheu Judas",
+      "slug": "se-jesus-sabia-por-que-escolheu-judas",
+      "central_theme": "A escolha de Judas apesar do conhecimento de Jesus",
+      "practical_application": "",
+      "audience": "pessoas com dúvidas frequentes sobre Jesus e os relatos bíblicos",
+      "emotional_intent": "provocar curiosidade honesta e entregar uma explicação bíblica clara",
+      "narration_tone": "investigativo, direto, cinematográfico e intelectualmente honesto",
+      "themes": [
+        "Jesus",
+        "grande pergunta bíblica",
+        "curiosidade bíblica"
+      ],
+      "characters": [
+        "Jesus"
+      ],
+      "related_passages": [
+        {
+          "passage_id": "high-stakes-why-jesus-chose-judas-joh-13-21-27",
+          "reference": "João 13:21-27",
+          "context_reference": "João 13:18-30",
+          "verse_text": "Quando Jesus disse isso, ele angustiou-se em espírito e testificou: “Com toda a certeza lhes digo que um de vocês me trairá.” Os discípulos olhavam uns para os outros, perplexos sobre de quem ele falava. Um dos seus discípulos, a quem Jesus amava, estava à mesa, reclinado no peito de Jesus. Simão Pedro, portanto, fez-lhe um sinal e disse-lhe: “Diga-nos quem é aquele de quem ele fala.” Ele, reclinando-se, assim como estava, no peito de Jesus, perguntou-lhe: “Senhor, quem é?” Jesus, portanto, respondeu: “É aquele a quem eu der este pedaço de pão depois de molhá-lo.” Então, tendo molhado o pedaço de pão, ele o deu a Judas, filho de Simão Iscariotes. Depois do pedaço de pão, então Satanás entrou nele. Então Jesus lhe disse: “O que você vai fazer, faça depressa.",
+          "source_url": "https://ebible.org/porbrbsl/JHN13.htm",
+          "role": "tension",
+          "spoken_by": "jesus"
+        },
+        {
+          "passage_id": "high-stakes-why-jesus-chose-judas-luk-22-21-22",
+          "reference": "Lucas 22:21-22",
+          "context_reference": "Lucas 22:14-23",
+          "verse_text": "Mas eis que a mão daquele que me trai está comigo à mesa. O Filho do Homem, na verdade, vai como foi determinado, mas ai daquele homem por quem ele é traído!",
+          "source_url": "https://ebible.org/porbrbsl/LUK22.htm",
+          "role": "uncertainty_boundary",
+          "spoken_by": "jesus"
+        }
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Nao dizer que Judas não tinha escolha como se isso fosse afirmação explícita do texto.",
+        "Nao inventar motivações secretas de Jesus além das passagens usadas."
+      ],
+      "claims_to_avoid": [
+        "Nao dizer que Judas não tinha escolha como se isso fosse afirmação explícita do texto.",
+        "Nao inventar motivações secretas de Jesus além das passagens usadas."
+      ],
+      "visual_notes": [
+        "Representar apenas acontecimentos documentados como fatos."
+      ],
+      "retention_archetypes": [
+        "counterintuitive_reveal",
+        "stair_step_progression"
+      ],
+      "human_conflict": "Judas foi escolhido para ser forçado a trair ou sua responsabilidade permaneceu real?",
+      "central_question": "Se Jesus sabia que Judas o trairia, por que o escolheu?",
+      "visual_progression": [
+        "Jesus escolhe os doze entre muitos seguidores.",
+        "Judas permanece no grupo enquanto a tensao cresce.",
+        "A mesa da ultima ceia coloca traidor e mestre no mesmo quadro.",
+        "Judas sai para a noite sem representar determinismo como fato."
+      ],
+      "possible_reveal": "O texto mostra conhecimento previo e responsabilidade de Judas, mas não transforma o conhecimento de Jesus em coação.",
+      "title_seed": "Se Jesus sabia, por que escolheu Judas",
+      "retention_potential_score": 0.96,
+      "selection_weight": 2.0,
+      "familiarity_score": 0.95,
+      "clarity_score": 0.9,
+      "catalog_segment": "high_stakes_question",
+      "recommended_formats": [
+        "short"
+      ],
+      "source_text_scope": "verse_range",
+      "spoken_by": "jesus",
+      "editorial_profile": "high_stakes_biblical_question_v1",
+      "opening_hooks": {
+        "surprising_fact": "Jesus escolheu Judas sabendo que a traicao chegaria a sua propria mesa.",
+        "contradiction": "Jesus conhecia o traidor, mas ainda lhe deu lugar entre os doze.",
+        "unanswered_question": "Se Jesus sabia de Judas, por que o escolheu como discipulo?"
+      },
+      "implicit_viewer_question": "Judas foi escolhido para ser forçado a trair ou sua responsabilidade permaneceu real?",
+      "required_answer_points": [
+        "Confirmar que Jesus demonstra conhecimento da traicao antes de ela acontecer.",
+        "Distinguir conhecimento previo de obrigacao moral ou coação.",
+        "Admitir que a Bíblia não entrega uma explicação filosófica completa da escolha."
+      ],
+      "uncertainty_boundaries": [
+        "Nao dizer que Judas não tinha escolha como se isso fosse afirmação explícita do texto.",
+        "Nao inventar motivações secretas de Jesus além das passagens usadas."
+      ],
+      "answer_status": "open",
+      "preferred_creative_mode": "ethical_dilemma"
+    },
+    {
+      "candidate_id": "why-jesus-did-not-call-angels",
+      "source_id": "high-stakes-primary-why-jesus-did-not-call-angels",
+      "reference": "Mateus 26:53-54",
+      "context_reference": "Mateus 26:47-56",
+      "book": "Mateus",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Ou você acha que eu não poderia pedir a meu Pai, e ele me enviaria agora mesmo mais de doze legiões de anjos? Como, então, se cumpririam as Escrituras, que dizem que assim deve acontecer?",
+      "source_url": "https://ebible.org/porbrbsl/MAT26.htm",
+      "accessed_at": "2026-07-21",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Por que Jesus não chamou os anjos",
+      "slug": "por-que-jesus-não-chamou-os-anjos-na-cruz",
+      "central_theme": "A entrega voluntária de Jesus quando podia evitar a prisão",
+      "practical_application": "",
+      "audience": "pessoas com dúvidas frequentes sobre Jesus e os relatos bíblicos",
+      "emotional_intent": "provocar curiosidade honesta e entregar uma explicação bíblica clara",
+      "narration_tone": "investigativo, direto, cinematográfico e intelectualmente honesto",
+      "themes": [
+        "Jesus",
+        "grande pergunta bíblica",
+        "curiosidade bíblica"
+      ],
+      "characters": [
+        "Jesus"
+      ],
+      "related_passages": [
+        {
+          "passage_id": "high-stakes-why-jesus-did-not-call-angels-joh-10-17-18",
+          "reference": "João 10:17-18",
+          "context_reference": "João 10:14-18",
+          "verse_text": "Por isso o Pai me ama, porque eu dou a minha vida, para que eu possa tomá-la de novo. Ninguém a tira de mim, mas eu a dou por mim mesmo. Tenho poder para dá-la, e tenho poder para tomá-la de novo. Recebi este mandamento de meu Pai.",
+          "source_url": "https://ebible.org/porbrbsl/JHN10.htm",
+          "role": "supporting_fact",
+          "spoken_by": "jesus"
+        },
+        {
+          "passage_id": "high-stakes-why-jesus-did-not-call-angels-mat-20-28",
+          "reference": "Mateus 20:28",
+          "context_reference": "Mateus 20:20-28",
+          "verse_text": "assim como o Filho do Homem não veio para ser servido, mas para servir, e para dar a sua vida em resgate por muitos.",
+          "source_url": "https://ebible.org/porbrbsl/MAT20.htm",
+          "role": "supporting_fact",
+          "spoken_by": "jesus"
+        }
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Nao inventar uma batalha angelical que o texto não narra.",
+        "Nao descrever detalhes fisicos da crucificação além do necessario ao argumento."
+      ],
+      "claims_to_avoid": [
+        "Nao inventar uma batalha angelical que o texto não narra.",
+        "Nao descrever detalhes fisicos da crucificação além do necessario ao argumento."
+      ],
+      "visual_notes": [
+        "Representar apenas acontecimentos documentados como fatos."
+      ],
+      "retention_archetypes": [
+        "counterintuitive_reveal",
+        "stair_step_progression"
+      ],
+      "human_conflict": "A prisão de Jesus aconteceu por falta de poder ou por entrega voluntária?",
+      "central_question": "Se Jesus podia chamar anjos, por que aceitou a cruz?",
+      "visual_progression": [
+        "A prisão com espadas e tochas no jardim.",
+        "Pedro ergue a espada e Jesus interrompe a violencia.",
+        "A possibilidade dos anjos e sugerida sem mostrar um evento inexistente.",
+        "Jesus segue voluntariamente para cumprir a missão."
+      ],
+      "possible_reveal": "Jesus afirma que tinha como evitar a prisão e liga sua decisão ao cumprimento de sua missão.",
+      "title_seed": "Por que Jesus não chamou os anjos",
+      "retention_potential_score": 0.96,
+      "selection_weight": 2.0,
+      "familiarity_score": 0.95,
+      "clarity_score": 0.9,
+      "catalog_segment": "high_stakes_question",
+      "recommended_formats": [
+        "short"
+      ],
+      "source_text_scope": "verse_range",
+      "spoken_by": "jesus",
+      "editorial_profile": "high_stakes_biblical_question_v1",
+      "opening_hooks": {
+        "consequence_first": "A cruz só aconteceu porque Jesus recusou a saída que tinha.",
+        "contradiction": "Jesus podia chamar um exército de anjos, mas mandou guardar a espada.",
+        "unanswered_question": "Por que Jesus não chamou os anjos para impedir a crucificação?"
+      },
+      "implicit_viewer_question": "A prisão de Jesus aconteceu por falta de poder ou por entrega voluntária?",
+      "required_answer_points": [
+        "Mostrar que Jesus declara poder pedir ajuda angelical.",
+        "Ligar sua recusa ao cumprimento das Escrituras e a entrega voluntária.",
+        "Evitar retratar a cruz como acidente ou impotencia."
+      ],
+      "uncertainty_boundaries": [
+        "Nao inventar uma batalha angelical que o texto não narra.",
+        "Nao descrever detalhes fisicos da crucificação além do necessario ao argumento."
+      ],
+      "answer_status": "direct",
+      "preferred_creative_mode": "cause_and_consequence"
+    },
+    {
+      "candidate_id": "why-resurrected-jesus-kept-wounds",
+      "source_id": "high-stakes-primary-why-resurrected-jesus-kept-wounds",
+      "reference": "João 20:27",
+      "context_reference": "João 20:24-29",
+      "book": "João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Então ele disse a Tomé: “Coloque o seu dedo aqui, e veja as minhas mãos. Estenda a sua mão, e coloque-a no meu lado. Não seja incrédulo, mas crente.",
+      "source_url": "https://ebible.org/porbrbsl/JHN20.htm",
+      "accessed_at": "2026-07-21",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Por que Jesus ressuscitado tinha feridas",
+      "slug": "por-que-jesus-ressuscitado-ainda-tinha-feridas",
+      "central_theme": "As feridas reconheciveis no corpo ressuscitado de Jesus",
+      "practical_application": "",
+      "audience": "pessoas com dúvidas frequentes sobre Jesus e os relatos bíblicos",
+      "emotional_intent": "provocar curiosidade honesta e entregar uma explicação bíblica clara",
+      "narration_tone": "investigativo, direto, cinematográfico e intelectualmente honesto",
+      "themes": [
+        "Jesus",
+        "grande pergunta bíblica",
+        "curiosidade bíblica"
+      ],
+      "characters": [
+        "Jesus"
+      ],
+      "related_passages": [
+        {
+          "passage_id": "high-stakes-why-resurrected-jesus-kept-wounds-joh-20-19-20",
+          "reference": "João 20:19-20",
+          "context_reference": "João 20:19-23",
+          "verse_text": "Ao cair da tarde daquele dia, o primeiro dia da semana, estando trancadas as portas do lugar onde os discípulos estavam reunidos, por medo dos judeus, Jesus chegou, pôs-se no meio deles e lhes disse: “Paz seja com vocês.” Tendo dito isso, ele lhes mostrou as suas mãos e o seu lado. Os discípulos, então, se alegraram ao ver o Senhor.",
+          "source_url": "https://ebible.org/porbrbsl/JHN20.htm",
+          "role": "supporting_fact",
+          "spoken_by": "jesus"
+        },
+        {
+          "passage_id": "high-stakes-why-resurrected-jesus-kept-wounds-luk-24-39-40",
+          "reference": "Lucas 24:39-40",
+          "context_reference": "Lucas 24:36-43",
+          "verse_text": "Vejam as minhas mãos e os meus pés, que sou eu mesmo. Toquem-me e vejam, pois um espírito não tem carne e ossos, como vocês veem que eu tenho.” Tendo dito isso, ele lhes mostrou as mãos e os pés.",
+          "source_url": "https://ebible.org/porbrbsl/LUK24.htm",
+          "role": "supporting_fact",
+          "spoken_by": "jesus"
+        }
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Nao declarar um motivo único que a Bíblia não formula explicitamente.",
+        "Nao generalizar as marcas de Jesus para todos os corpos ressuscitados."
+      ],
+      "claims_to_avoid": [
+        "Nao declarar um motivo único que a Bíblia não formula explicitamente.",
+        "Nao generalizar as marcas de Jesus para todos os corpos ressuscitados."
+      ],
+      "visual_notes": [
+        "Representar apenas acontecimentos documentados como fatos."
+      ],
+      "retention_archetypes": [
+        "counterintuitive_reveal",
+        "stair_step_progression"
+      ],
+      "human_conflict": "Se a ressurreição venceu a morte, por que os sinais da crucificação continuaram visíveis?",
+      "central_question": "Por que Jesus ressuscitado ainda tinha as feridas da cruz?",
+      "visual_progression": [
+        "Os discípulos reunidos atras de portas fechadas.",
+        "Jesus aparece vivo entre eles.",
+        "Tomé se aproxima das marcas nas maos.",
+        "O reconhecimento substitui a duvida sem explorar gore."
+      ],
+      "possible_reveal": "As feridas identificam o ressuscitado como o mesmo Jesus crucificado e se tornam evidência para os discípulos.",
+      "title_seed": "Por que Jesus ressuscitado tinha feridas",
+      "retention_potential_score": 0.96,
+      "selection_weight": 2.0,
+      "familiarity_score": 0.95,
+      "clarity_score": 0.9,
+      "catalog_segment": "high_stakes_question",
+      "recommended_formats": [
+        "short"
+      ],
+      "source_text_scope": "verse",
+      "spoken_by": "jesus",
+      "editorial_profile": "high_stakes_biblical_question_v1",
+      "opening_hooks": {
+        "surprising_fact": "Jesus venceu a morte, mas as marcas dos cravos continuaram visíveis.",
+        "contradiction": "O corpo de Jesus ressuscitou glorioso, mas não voltou sem cicatrizes.",
+        "unanswered_question": "Por que Jesus ressuscitado ainda mostrou as feridas da cruz?"
+      },
+      "implicit_viewer_question": "Se a ressurreição venceu a morte, por que os sinais da crucificação continuaram visíveis?",
+      "required_answer_points": [
+        "Mostrar que Jesus oferece as marcas como evidência de identidade e realidade corporal.",
+        "Distinguir o que o texto mostra das conclusões simbólicas posteriores.",
+        "Evitar afirmar que toda ferida humana permanecera na ressurreição."
+      ],
+      "uncertainty_boundaries": [
+        "Nao declarar um motivo único que a Bíblia não formula explicitamente.",
+        "Nao generalizar as marcas de Jesus para todos os corpos ressuscitados."
+      ],
+      "answer_status": "bounded_inference",
+      "preferred_creative_mode": "biblical_curiosity"
+    },
+    {
+      "candidate_id": "why-jesus-left-after-resurrection",
+      "source_id": "high-stakes-primary-why-jesus-left-after-resurrection",
+      "reference": "Atos 1:3",
+      "context_reference": "Atos 1:1-5",
+      "book": "Atos",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "A estes ele também se apresentou vivo depois de ter padecido, com muitas provas, aparecendo-lhes por um período de quarenta dias e falando sobre o Reino de Deus.",
+      "source_url": "https://ebible.org/porbrbsl/ACT01.htm",
+      "accessed_at": "2026-07-21",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "Por que Jesus não ficou após ressuscitar",
+      "slug": "por-que-jesus-não-ficou-na-terra-após-ressuscitar",
+      "central_theme": "Os quarenta dias e a ascensao de Jesus",
+      "practical_application": "",
+      "audience": "pessoas com dúvidas frequentes sobre Jesus e os relatos bíblicos",
+      "emotional_intent": "provocar curiosidade honesta e entregar uma explicação bíblica clara",
+      "narration_tone": "investigativo, direto, cinematográfico e intelectualmente honesto",
+      "themes": [
+        "Jesus",
+        "grande pergunta bíblica",
+        "curiosidade bíblica"
+      ],
+      "characters": [
+        "Jesus"
+      ],
+      "related_passages": [
+        {
+          "passage_id": "high-stakes-why-jesus-left-after-resurrection-act-1-8-11",
+          "reference": "Atos 1:8-11",
+          "context_reference": "Atos 1:6-11",
+          "verse_text": "Mas vocês receberão poder quando o Espírito Santo descer sobre vocês. E serão minhas testemunhas em Jerusalém, em toda a Judeia e Samaria, e até os confins da terra.” Tendo dito estas coisas, enquanto eles olhavam, ele foi elevado, e uma nuvem o ocultou dos seus olhos. Enquanto olhavam fixamente para o céu durante a sua subida, eis que, dois homens vestidos de branco se colocaram ao lado deles, os quais também disseram: “Homens galileus, por que vocês estão olhando para o céu? Este Jesus, que dentre vocês foi elevado ao céu, voltará do mesmo modo como o viram subir ao céu.",
+          "source_url": "https://ebible.org/porbrbsl/ACT01.htm",
+          "role": "supporting_fact",
+          "spoken_by": "jesus"
+        },
+        {
+          "passage_id": "high-stakes-why-jesus-left-after-resurrection-joh-16-7",
+          "reference": "João 16:7",
+          "context_reference": "João 16:5-15",
+          "verse_text": "No entanto, eu lhes digo a verdade: É para o bem de vocês que eu vá; pois, se eu não for, o Consolador não virá a vocês. Mas, se eu for, eu o enviarei a vocês.",
+          "source_url": "https://ebible.org/porbrbsl/JHN16.htm",
+          "role": "supporting_fact",
+          "spoken_by": "jesus"
+        }
+      ],
+      "preferred_development_modes": [
+        "context",
+        "cross_reference",
+        "promise_limits"
+      ],
+      "interpretation_limits": [
+        "Nao dizer que Jesus morreu novamente depois dos quarenta dias.",
+        "Nao inventar uma agenda completa de aparições que o texto não fornece."
+      ],
+      "claims_to_avoid": [
+        "Nao dizer que Jesus morreu novamente depois dos quarenta dias.",
+        "Nao inventar uma agenda completa de aparições que o texto não fornece."
+      ],
+      "visual_notes": [
+        "Representar apenas acontecimentos documentados como fatos."
+      ],
+      "retention_archetypes": [
+        "counterintuitive_reveal",
+        "stair_step_progression"
+      ],
+      "human_conflict": "Se Jesus voltou da morte, por que apareceu por um período limitado e depois ascendeu?",
+      "central_question": "Por que Jesus não permaneceu visivelmente na terra depois de ressuscitar?",
+      "visual_progression": [
+        "O túmulo vazio abre a sequencia.",
+        "Jesus encontra os discípulos em diferentes momentos.",
+        "O ensino e a comissão preparam a transicao.",
+        "A ascensao encerra a cronologia e entrega a missão aos discípulos."
+      ],
+      "possible_reveal": "Atos apresenta quarenta dias de provas e ensino, seguidos por missão, promessa do Espirito e ascensao.",
+      "title_seed": "Por que Jesus não ficou após ressuscitar",
+      "retention_potential_score": 0.96,
+      "selection_weight": 2.0,
+      "familiarity_score": 0.95,
+      "clarity_score": 0.9,
+      "catalog_segment": "high_stakes_question",
+      "recommended_formats": [
+        "short"
+      ],
+      "source_text_scope": "verse",
+      "spoken_by": "other",
+      "editorial_profile": "high_stakes_biblical_question_v1",
+      "opening_hooks": {
+        "belief_reversal": "Jesus não voltou da morte para retomar a vida de antes.",
+        "surprising_fact": "A ressurreição de Jesus foi seguida por quarenta dias de encontros verificaveis.",
+        "unanswered_question": "Se Jesus ressuscitou, por que não continuou visivelmente entre todos?"
+      },
+      "implicit_viewer_question": "Se Jesus voltou da morte, por que apareceu por um período limitado e depois ascendeu?",
+      "required_answer_points": [
+        "Corrigir a ideia de apenas três dias vivo após a ressurreição: Atos fala em quarenta dias.",
+        "Organizar ensino, comissão, promessa do Espirito e ascensao em sequencia.",
+        "Explicar que o texto desloca a missão para as testemunhas, sem alegar ausencia de Jesus."
+      ],
+      "uncertainty_boundaries": [
+        "Nao dizer que Jesus morreu novamente depois dos quarenta dias.",
+        "Nao inventar uma agenda completa de aparições que o texto não fornece."
+      ],
+      "answer_status": "direct",
+      "preferred_creative_mode": "chronological_reconstruction"
+    }
+  ]
+}

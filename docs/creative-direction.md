@@ -14,6 +14,11 @@ conselho prático.
 
 Shorts novos usam `creative_retention_v3`; longos novos usam `creative_retention_long_v2`.
 
+O perfil opt-in `high_stakes_biblical_question_v1` continua usando `creative_retention_v3`, mas
+inverte a autoridade editorial: seleciona primeiro uma dúvida bíblica conhecida e depois sela as
+passagens capazes de respondê-la. `required_answer_points`, `answer_status` e
+`uncertainty_boundaries` impedem que curiosidade vire especulação.
+
 Nos Shorts, a direção criativa também entrega `strategy.visual_scenes`: blocos literais da locução
 com uma cena concreta por bloco e relação `literal`, `contextual` ou `symbolic`. A descrição deve
 variar ação, ambiente, personagem ou objeto quando isso beneficiar a continuidade, sem transformar
@@ -72,6 +77,10 @@ aceitas. Shorts em `adaptive_compact_v1` usam `cinematic_interruption_v1`: a pri
 10 a 12 palavras, começa como uma interrupção direta — por exemplo, “Olhe para mim.” — e continua
 com uma tensão específica ligada ao versículo. O hook é curado no catálogo e não pode ser
 reescrito pelo roteirista.
+O perfil de grandes perguntas usa `hook_contract=high_stakes_opening_v1`. Seu hook também é curado,
+mas pode ser fato surpreendente, contradição, reversão de crença, consequência, cena em andamento,
+citação ou pergunta. A regra é criar uma pergunta na mente do espectador, não necessariamente
+pronunciar uma pergunta.
 Vídeos longos resolvem `hook_policy` como `required`, `optional` ou `none` conforme o modo e o tema.
 Quando não há hook, `opening_line` ainda precisa orientar a cena e entregar valor nos primeiros 40
 segundos; saudação genérica continua proibida.
@@ -102,7 +111,9 @@ Independentemente do modo:
 - a direção visual representa um momento, ambiente e ação por imagem.
 
 Shorts mantêm ao menos uma citação literal verificada. O perfil padrão usa 8 a 20 segundos. O perfil
-compacto aceita somente fala direta de Jesus, iniciada imediatamente após o hook, e termina com a
+de grandes perguntas usa `adaptive_payoff_v1` entre 0 e 44 segundos e posiciona a citação como
+tensão, prova ou recompensa conforme o roteiro. O perfil compacto aceita somente fala direta de
+Jesus, iniciada imediatamente após o hook, e termina com a
 referência fora das aspas; em 15 segundos, o hook vai de 0 a 3,5, a citação de 3,5 a 12,3 segundos e
 a referência de 12,3 a 15 segundos. Vídeos longos
 mantêm o alvo de 0,8 a 1,2 citação por minuto, primeira âncora até 75 segundos, intervalo máximo

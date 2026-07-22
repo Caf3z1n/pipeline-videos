@@ -8,20 +8,22 @@ from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from subprocess import CalledProcessError
+from typing import Any, Literal, Protocol
 
 from PIL import Image
 
 from pipeline_videos.models import (
     ApprovalStatus,
+    ShortPublicationAnalyticsContext,
     StageStatus,
     YouTubeMetadata,
     YouTubePublicationAsset,
     YouTubePublicationRecord,
 )
 from pipeline_videos.state import complete_stage, fail_stage, start_stage
-from pipeline_videos.storage import ProjectLayout, read_model, write_json
-from pipeline_videos.utils import relative_posix, sha256_file, sha256_value, utc_now
+from pipeline_videos.storage import ProjectLayout, read_json, read_model, write_json
+from pipeline_videos.utils import media_duration, relative_posix, sha256_file, sha256_value, utc_now
 
 YOUTUBE_SCOPES = (
     "https://www.googleapis.com/auth/youtube.upload",
@@ -29,6 +31,44 @@ YOUTUBE_SCOPES = (
 )
 MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024
 DEFAULT_TOKEN_FILE = Path.home() / ".config" / "pipeline-videos" / "youtube" / "token.json"
+
+
+def _short_publication_analytics_context(
+    layout: ProjectLayout,
+    *,
+    video_duration_seconds: float | None = None,
+    video_duration_source: Literal["ffprobe", "manifest_fallback"] = "ffprobe",
+) -> ShortPublicationAnalyticsContext | None:
+    project = layout.load_manifest()
+    if project.video_format != "short":
+        return None
+    briefing = read_json(layout.briefing) if layout.briefing.is_file() else {}
+    strategy = (
+        read_json(layout.shorts_script_strategy) if layout.shorts_script_strategy.is_file() else {}
+    )
+
+    def optional_text(source: dict[str, Any], key: str) -> str | None:
+        value = source.get(key)
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    return ShortPublicationAnalyticsContext(
+        duration_profile=project.config.shorts_script.duration_profile,
+        video_duration_seconds=(
+            video_duration_seconds
+            if video_duration_seconds is not None
+            else project.effective_duration_seconds or float(project.target_duration_seconds)
+        ),
+        video_duration_source=video_duration_source,
+        hook_contract=optional_text(briefing, "hook_contract")
+        if isinstance(briefing, dict)
+        else None,
+        visual_standard_id=project.config.images.visual_standard_id,
+        hook_text=optional_text(strategy, "hook") if isinstance(strategy, dict) else None,
+        hook_mechanism=(
+            optional_text(briefing, "hook_family") if isinstance(briefing, dict) else None
+        ),
+        opening_visual_standard=project.config.images.opening_visual_standard,
+    )
 
 
 class YouTubeClient(Protocol):
@@ -494,6 +534,23 @@ def upload_project(
         raise RuntimeError(
             "Confirmação inválida. --confirm-upload precisa ser exatamente o ID do projeto."
         )
+    short_analytics_context = None
+    if plan.video_format == "short":
+        duration_source: Literal["ffprobe", "manifest_fallback"] = "ffprobe"
+        try:
+            video_duration_seconds = media_duration(plan.video_path)
+        except (CalledProcessError, OSError, RuntimeError, ValueError):
+            if plan_options.get("verify_validation", True):
+                raise
+            video_duration_seconds = layout.load_manifest().effective_duration_seconds or float(
+                layout.load_manifest().target_duration_seconds
+            )
+            duration_source = "manifest_fallback"
+        short_analytics_context = _short_publication_analytics_context(
+            layout,
+            video_duration_seconds=video_duration_seconds,
+            video_duration_source=duration_source,
+        )
     input_hash = plan.input_hash()
     existing = (
         read_model(layout.publication, YouTubePublicationRecord)
@@ -535,6 +592,7 @@ def upload_project(
                 made_for_kids=plan.made_for_kids,
                 contains_synthetic_media=plan.contains_synthetic_media,
                 notify_subscribers=plan.notify_subscribers,
+                short_analytics_context=short_analytics_context,
                 video=YouTubePublicationAsset(
                     status="uploaded",
                     source_path=relative_posix(plan.video_path, layout.root),

@@ -225,6 +225,7 @@ def test_new_short_project_uses_painterly_block_profile_without_custom_cover(tmp
     assert manifest.config.images.visual_standard_id == "biblical-midcentury-gouache-v1"
     assert manifest.config.images.enforce_visual_standard is True
     assert manifest.config.images.scene_planning_standard == "narration_block_visual_v1"
+    assert manifest.config.images.opening_visual_standard == "scroll_stop_concrete_v1"
     assert manifest.config.images.composition_safety_mode == "unrestricted_scene_v1"
     assert manifest.config.images.spoken_reference_image_mode == "fixed_profile_asset_v1"
     assert (
@@ -262,6 +263,7 @@ def test_short_can_explicitly_use_the_legacy_3d_thumbnail_profile(tmp_path) -> N
     manifest = layout.load_manifest()
     assert manifest.config.images.visual_standard_id == "cinematic-family-3d-v1"
     assert manifest.config.images.scene_planning_standard == "section_visual_direction_v1"
+    assert manifest.config.images.opening_visual_standard == "scroll_stop_concrete_v1"
     assert manifest.config.images.composition_safety_mode == "caption_safe_area_v1"
     assert manifest.config.images.spoken_reference_image_mode == "generated"
     assert manifest.config.images.spoken_reference_image_path is None
@@ -382,6 +384,55 @@ def test_twenty_second_short_scales_literal_quote_limit_without_padding(tmp_path
     assert (config.min_words, config.max_words) == (55, 62)
     assert config.max_literal_verse_words == 47
     assert config.minimum_audio_duration_ratio == 0.94
+
+
+def test_plain_duration_is_a_flexible_target_and_keeps_natural_voice(tmp_path) -> None:
+    layout = create_project(
+        "short-cinquenta",
+        "Short com alvo aproximado",
+        projects_dir=tmp_path,
+        target_duration_seconds=50,
+        video_format="short",
+        project_date=date(2026, 7, 21),
+    )
+
+    manifest = layout.load_manifest()
+
+    assert manifest.duration_policy == "preferred_target_v1"
+    assert manifest.requested_duration_min_seconds == 42.5
+    assert manifest.requested_duration_max_seconds == 57.5
+    assert manifest.config.audio.speed == 1.0
+    assert manifest.config.audio.speech_rate_policy == "natural_voice_v1"
+
+
+def test_exact_duration_requires_an_explicit_flag(tmp_path) -> None:
+    layout = create_project(
+        "short-exato",
+        "Short explicitamente exato",
+        projects_dir=tmp_path,
+        target_duration_seconds=50,
+        exact_duration=True,
+        video_format="short",
+        project_date=date(2026, 7, 21),
+    )
+
+    manifest = layout.load_manifest()
+
+    assert manifest.duration_policy == "exact_target_v1"
+    assert manifest.requested_duration_min_seconds == 50
+    assert manifest.requested_duration_max_seconds == 50
+
+    with pytest.raises(ValueError, match="não pode ser combinada"):
+        create_project(
+            "short-exato-e-faixa",
+            "Contrato ambíguo",
+            projects_dir=tmp_path,
+            target_duration_seconds=50,
+            duration_min_seconds=45,
+            duration_max_seconds=55,
+            exact_duration=True,
+            video_format="short",
+        )
 
 
 def test_compact_short_can_persist_an_adaptive_duration_range(tmp_path) -> None:

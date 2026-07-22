@@ -14,6 +14,7 @@ from pipeline_videos.models import (
     SceneManifest,
     ScriptDocument,
     ScriptSection,
+    ShortsOpeningVisualContract,
     ShortsScriptStrategy,
     StyleProfile,
 )
@@ -47,7 +48,8 @@ UNRESTRICTED_SHOTS = (
     "plano baixo suave que valorize a ação principal",
 )
 
-SCENE_ALGORITHM_VERSION = "6.1"
+LEGACY_SCENE_ALGORITHM_VERSION = "6.1"
+SCENE_ALGORITHM_VERSION = "6.2"
 LEGACY_ENFORCED_VISUAL_STANDARD_IDS = {"davi-poupa-saul-flat-v1"}
 FIXED_SPOKEN_REFERENCE_VISUAL_BRIEF = (
     "A imagem padrão do perfil mostra uma Bíblia aberta sobre uma mesa de madeira diante de "
@@ -289,6 +291,7 @@ def _scene_from_chunk(
     canvas_height: int,
     *,
     high_impact_opening: bool = False,
+    scroll_stop_opening: bool = False,
     opening_anchor: bool = False,
     retention_reset: bool = False,
     visual_brief: str | None = None,
@@ -313,7 +316,36 @@ def _scene_from_chunk(
         "application": "clareza, coragem e esperança prática",
         "closing": "paz e continuidade",
     }[section.role]
-    if high_impact_opening:
+    if scroll_stop_opening:
+        subject = (
+            f"{subject}. Quadro inicial de interrupção do scroll: um sujeito ou objeto dominante, "
+            "uma ação observável já em curso e uma tensão concreta coerente com o hook; emoção "
+            "legível imediatamente e um único foco visual, sem acolhimento genérico ou pose parada"
+            + (
+                ". Esta é também a imagem-âncora e base da capa: acabamento especialmente "
+                "caprichado, limpo e intencional"
+                if opening_anchor
+                else ""
+            )
+        )
+        shot = (
+            "composição vertical de alto impacto, plano médio ou close, assunto dominante e ação "
+            "concreta legível em tela pequena, ocupando 45% a 65% do quadro, com luz direcional "
+            "forte e espaço negativo real, preservando organicamente a área das legendas"
+            if reserve_caption_safe_area
+            else "plano médio ou close de alto impacto, sujeito e ação dominantes, gesto ou emoção "
+            "imediatamente legível, tensão visual simples e enquadramento livre sem área vazia "
+            "decorativa obrigatória"
+        )
+        emotional_intent = (
+            "tensão e curiosidade imediatas, emoção clara e reverência; leitura visual em menos "
+            "de um segundo, sem choque gratuito"
+        )
+        anchor_function = "imagem-âncora da abertura; " if opening_anchor else ""
+        function = (
+            f"{anchor_function}interromper o scroll com ação concreta alinhada ao hook; {function}"
+        )
+    elif high_impact_opening:
         is_vertical = canvas_height > canvas_width
         role = "imagem-âncora e base da capa" if opening_anchor else "continuação visual dinâmica"
         subject = (
@@ -394,6 +426,23 @@ def _scene_from_chunk(
     )
 
 
+def _opening_contract_visual_brief(
+    base_description: str | None,
+    contract: ShortsOpeningVisualContract,
+) -> str:
+    return " ".join(
+        (
+            *((base_description.rstrip(" .") + ".",) if base_description else ()),
+            f"Sujeito dominante: {contract.dominant_subject_or_object}.",
+            f"Ação já em curso: {contract.observable_action}.",
+            f"Mudança visível ({contract.action_kind}), em um único momento de transição: "
+            f"{contract.initial_state} cedendo a {contract.resulting_state}.",
+            f"Tensão visual concreta: {contract.concrete_tension}.",
+            f"Enquadramento: {contract.shot_scale}.",
+        )
+    )
+
+
 def build_scenes(
     layout: ProjectLayout,
     *,
@@ -413,39 +462,60 @@ def build_scenes(
     continuity = read_model(layout.continuity, ContinuityBible)
     project = layout.load_manifest()
     render_config = project.config.render
+    compact_visual_planning = (
+        project.video_format == "short"
+        and project.config.shorts_script.generation_mode == "deterministic_compact_visual_plan_v1"
+        and project.config.images.opening_visual_standard == "scroll_stop_concrete_v1"
+    )
     narration_block_planning = (
         project.video_format == "short"
-        and project.config.images.scene_planning_standard == "narration_block_visual_v1"
+        and (
+            project.config.images.scene_planning_standard == "narration_block_visual_v1"
+            or compact_visual_planning
+        )
         and target_scene_seconds is None
     )
-    visual_strategy = (
+    shorts_strategy = (
         read_model(layout.shorts_script_strategy, ShortsScriptStrategy)
-        if narration_block_planning
+        if project.video_format == "short" and layout.shorts_script_strategy.is_file()
         else None
     )
-    input_hash = sha256_value(
-        {
-            "algorithm": SCENE_ALGORITHM_VERSION,
-            "script": script,
-            "briefing": briefing,
-            "style": style,
-            "palette": palette,
-            "continuity": continuity,
-            "creative_contract": contract,
-            "scene_planning_standard": project.config.images.scene_planning_standard,
-            "composition_safety_mode": project.config.images.composition_safety_mode,
-            "spoken_reference_image_mode": (project.config.images.spoken_reference_image_mode),
-            "spoken_reference_image_path": (project.config.images.spoken_reference_image_path),
-            "visual_scenes": visual_strategy.visual_scenes if visual_strategy else None,
-            "target_scene_seconds": target_scene_seconds,
-            "short_verse_visual_change_seconds": (
-                project.config.shorts_script.verse_visual_change_seconds
-                if project.video_format == "short"
-                else None
-            ),
-            "render_canvas": [render_config.width, render_config.height],
-        }
+    visual_strategy = shorts_strategy if narration_block_planning else None
+    opening_visual_contract = (
+        shorts_strategy.creative_direction.opening_visual_contract
+        if shorts_strategy is not None and shorts_strategy.creative_direction is not None
+        else None
     )
+    scroll_stop_contract = (
+        project.config.images.opening_visual_standard == "scroll_stop_concrete_v1"
+    )
+    stable_inputs = {
+        "algorithm": (
+            SCENE_ALGORITHM_VERSION if scroll_stop_contract else LEGACY_SCENE_ALGORITHM_VERSION
+        ),
+        "script": script,
+        "briefing": briefing,
+        "style": style,
+        "palette": palette,
+        "continuity": continuity,
+        "creative_contract": contract,
+        "scene_planning_standard": project.config.images.scene_planning_standard,
+        "composition_safety_mode": project.config.images.composition_safety_mode,
+        "spoken_reference_image_mode": (project.config.images.spoken_reference_image_mode),
+        "spoken_reference_image_path": (project.config.images.spoken_reference_image_path),
+        "visual_scenes": visual_strategy.visual_scenes if visual_strategy else None,
+        "target_scene_seconds": target_scene_seconds,
+        "short_verse_visual_change_seconds": (
+            project.config.shorts_script.verse_visual_change_seconds
+            if project.video_format == "short"
+            else None
+        ),
+        "render_canvas": [render_config.width, render_config.height],
+    }
+    if scroll_stop_contract:
+        stable_inputs["opening_visual_standard"] = project.config.images.opening_visual_standard
+        stable_inputs["opening_visual_contract"] = opening_visual_contract
+    input_hash = sha256_value(stable_inputs)
     if stage_is_current(layout, "scenes", input_hash, force=force):
         return read_model(layout.scenes, SceneManifest)
     start_stage(layout, "scenes", input_hash, provider="deterministic-scene-builder")
@@ -475,6 +545,28 @@ def build_scenes(
                     )
                 retention_reset = "reengagement" in contract_beats[section.section_id].functions
                 uses_fixed_reference_image = planned.section_id == fixed_reference_section_id
+                scroll_stop_opening = (
+                    len(scenes) == 0
+                    and section.role == "opening"
+                    and project.config.images.opening_visual_standard == "scroll_stop_concrete_v1"
+                )
+                opening_anchor = (
+                    scroll_stop_opening
+                    and project.config.youtube_growth.thumbnail_generation_mode
+                    == "integrated_imagegen_v1"
+                    and project.config.youtube_growth.thumbnail_reference_mode
+                    == "opening_scene_edit_v1"
+                )
+                planned_visual_brief = (
+                    FIXED_SPOKEN_REFERENCE_VISUAL_BRIEF
+                    if uses_fixed_reference_image
+                    else planned.scene_description
+                )
+                if scroll_stop_opening and opening_visual_contract is not None:
+                    planned_visual_brief = _opening_contract_visual_brief(
+                        planned_visual_brief,
+                        opening_visual_contract,
+                    )
                 scenes.append(
                     _scene_from_chunk(
                         section,
@@ -486,11 +578,9 @@ def build_scenes(
                         render_config.width,
                         render_config.height,
                         retention_reset=retention_reset,
-                        visual_brief=(
-                            FIXED_SPOKEN_REFERENCE_VISUAL_BRIEF
-                            if uses_fixed_reference_image
-                            else planned.scene_description
-                        ),
+                        scroll_stop_opening=scroll_stop_opening,
+                        opening_anchor=opening_anchor,
+                        visual_brief=planned_visual_brief,
                         visual_relation=(
                             "contextual" if uses_fixed_reference_image else planned.visual_relation
                         ),
@@ -544,6 +634,18 @@ def build_scenes(
                     allow_clause_breaks=high_impact_opening,
                 )
                 for chunk_index, chunk in enumerate(chunks):
+                    scroll_stop_opening = (
+                        high_impact_opening
+                        and chunk_index == 0
+                        and project.config.images.opening_visual_standard
+                        == "scroll_stop_concrete_v1"
+                    )
+                    opening_visual_brief = None
+                    if scroll_stop_opening and opening_visual_contract is not None:
+                        opening_visual_brief = _opening_contract_visual_brief(
+                            None,
+                            opening_visual_contract,
+                        )
                     scenes.append(
                         _scene_from_chunk(
                             section,
@@ -555,8 +657,10 @@ def build_scenes(
                             render_config.width,
                             render_config.height,
                             high_impact_opening=high_impact_opening,
+                            scroll_stop_opening=scroll_stop_opening,
                             opening_anchor=high_impact_opening and chunk_index == 0,
                             retention_reset=retention_reset,
+                            visual_brief=opening_visual_brief,
                             reserve_caption_safe_area=reserve_caption_safe_area,
                         )
                     )

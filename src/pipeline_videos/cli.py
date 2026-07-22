@@ -8,7 +8,7 @@ import subprocess
 import sys
 from datetime import time
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from dotenv import load_dotenv
@@ -20,6 +20,7 @@ from pipeline_videos.models import (
     COMPACT_SHORT_THRESHOLD_SECONDS,
     DEFAULT_ELEVENLABS_MODEL_ID,
     DEFAULT_ELEVENLABS_VOICE_ID,
+    HIGH_STAKES_HOOK_FAMILIES,
     MIN_LONG_DURATION_SECONDS,
     MIN_SHORT_DURATION_SECONDS,
     USER_SIX_HOOK_FAMILIES,
@@ -60,7 +61,12 @@ from pipeline_videos.storage import (
     resolve_project,
     write_json,
 )
-from pipeline_videos.verse_selection import create_auto_short, create_auto_video, sync_shared_usage
+from pipeline_videos.verse_selection import (
+    HighStakesQuestionCatalogExhaustedError,
+    create_auto_short,
+    create_auto_video,
+    sync_shared_usage,
+)
 
 load_dotenv()
 console = Console()
@@ -79,7 +85,9 @@ captions_app = typer.Typer(help="Geração das legendas visuais e do arquivo par
 metadata_app = typer.Typer(help="Rascunhos de metadados e thumbnail.")
 youtube_app = typer.Typer(help="OAuth, upload, status e publicação segura no YouTube.")
 remote_app = typer.Typer(help="Fila remota de produção, revisão privada e agendamento.")
-analytics_app = typer.Typer(help="Importa métricas observadas para aprendizado editorial.")
+analytics_app = typer.Typer(
+    help="Importa métricas observadas e diagnostica apelo, engajamento e satisfação."
+)
 catalog_app = typer.Typer(help="Capacidade e ciclos do catálogo bíblico verificado.")
 audit_app = typer.Typer(help="Auditoria local de tokens, contextos e orçamento de produção.")
 app.add_typer(images_app, name="images")
@@ -431,6 +439,44 @@ def analytics_import(project: str, source: Path) -> None:
     console.print(f"[green]{len(memory.experiments)} experimento(s) registrado(s).[/green]")
 
 
+@analytics_app.command("metrics-import")
+def analytics_metrics_import(project: str, source: Path) -> None:
+    """Importa snapshots imutáveis de Shorts e atualiza alertas idempotentes."""
+
+    from pipeline_videos.analytics import active_short_notifications, import_short_metric_file
+
+    memory, diagnostics = import_short_metric_file(_project(project), source)
+    active = [
+        {
+            "video_id": diagnostic.video_id,
+            "snapshot_id": diagnostic.snapshot_id,
+            "evidence_status": diagnostic.evidence_status,
+            **notification.model_dump(mode="json"),
+        }
+        for diagnostic, notification in active_short_notifications(diagnostics)
+    ]
+    console.print_json(
+        json.dumps(
+            {
+                "snapshots": len(memory.snapshots),
+                "diagnostics": len(diagnostics.diagnostics),
+                "active_alerts": active,
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+@analytics_app.command("diagnose")
+def analytics_diagnose(project: str) -> None:
+    """Mostra o diagnóstico atual sem alterar snapshots nem estado editorial."""
+
+    from pipeline_videos.analytics import load_short_performance_diagnostics
+
+    result = load_short_performance_diagnostics(_project(project))
+    console.print_json(json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
+
+
 def _save_provider(
     layout: ProjectLayout, *, audio: str | None = None, images: str | None = None
 ) -> None:
@@ -511,6 +557,7 @@ def _validate_short_bootstrap_options(
     voice_variant: str,
     music_file: Path | None,
     duration: int,
+    editorial_profile: str = "verse_led_v1",
 ) -> tuple[str | None, str | None, str]:
     from pipeline_videos.creative_direction import CREATIVE_MODE_SPECS
     from pipeline_videos.music import SUPPORTED_MUSIC_EXTENSIONS
@@ -520,6 +567,9 @@ def _validate_short_bootstrap_options(
         raise typer.BadParameter(f"Modo criativo desconhecido: {creative_mode}")
     family = None if hook_family == "auto" else hook_family
     compact = duration < COMPACT_SHORT_THRESHOLD_SECONDS
+    high_stakes = editorial_profile == "high_stakes_biblical_question_v1"
+    if high_stakes and not COMPACT_SHORT_THRESHOLD_SECONDS <= duration <= 60:
+        raise typer.BadParameter("O perfil high-stakes exige --duration entre 45 e 60 segundos.")
     if compact and mode not in {None, "devotional_application", "pastoral_encouragement"}:
         raise typer.BadParameter(
             "Shorts compactos aceitam somente devotional_application ou pastoral_encouragement."
@@ -528,10 +578,18 @@ def _validate_short_bootstrap_options(
         raise typer.BadParameter(
             "Shorts compactos usam somente --hook-family emotional_interruption."
         )
-    if not compact and family is not None and family not in USER_SIX_HOOK_FAMILIES:
+    if high_stakes and family is not None and family not in HIGH_STAKES_HOOK_FAMILIES:
+        choices = ", ".join(HIGH_STAKES_HOOK_FAMILIES)
+        raise typer.BadParameter(f"Use uma familia investigativa: {choices}")
+    if (
+        not compact
+        and not high_stakes
+        and family is not None
+        and family not in USER_SIX_HOOK_FAMILIES
+    ):
         choices = ", ".join(USER_SIX_HOOK_FAMILIES)
         raise typer.BadParameter(f"Use uma das seis famílias oficiais: {choices}")
-    if family is not None and mode is None:
+    if family is not None and mode is None and not high_stakes:
         raise typer.BadParameter("--hook-family exige também --creative-mode.")
     try:
         variant = normalize_elevenlabs_voice_variant(voice_variant)
@@ -553,6 +611,7 @@ def _apply_short_bootstrap_settings(
     hook_family: str | None,
     voice_variant: str,
     music_file: Path | None,
+    editorial_profile: str = "verse_led_v1",
 ) -> None:
     from pipeline_videos.creative_direction import (
         CREATIVE_MODE_SPECS,
@@ -564,7 +623,9 @@ def _apply_short_bootstrap_settings(
 
     manifest = layout.load_manifest()
     compact = manifest.config.shorts_script.duration_profile == "adaptive_compact_v1"
-    if creative_mode is not None or compact:
+    if editorial_profile != "high_stakes_biblical_question_v1" and (
+        creative_mode is not None or compact
+    ):
         briefing = read_model(layout.briefing, Briefing)
         selected_mode = creative_mode or (
             briefing.creative_mode
@@ -606,7 +667,17 @@ def _apply_short_bootstrap_settings(
 def new_project(
     project_id: Annotated[str, typer.Argument(help="Identificador curto do vídeo.")],
     title: Annotated[str, typer.Option("--title", "-t", help="Título editorial inicial.")],
-    duration: Annotated[int, typer.Option("--duration", help="Duração-alvo em segundos.")] = 540,
+    duration: Annotated[
+        int,
+        typer.Option("--duration", help="Meta aproximada de duração em segundos."),
+    ] = 540,
+    exact_duration: Annotated[
+        bool,
+        typer.Option(
+            "--exact-duration",
+            help="Exige o alvo informado; use somente quando a duração for explicitamente exata.",
+        ),
+    ] = False,
     style: Annotated[str | None, typer.Option("--style")] = None,
     palette: Annotated[str | None, typer.Option("--palette")] = None,
     video_format: Annotated[
@@ -645,6 +716,7 @@ def new_project(
         title,
         projects_dir=projects_dir,
         target_duration_seconds=duration,
+        exact_duration=exact_duration,
         style_id=style,
         palette_id=palette,
         video_format=video_format,
@@ -670,7 +742,7 @@ def new_short(
         int,
         typer.Option(
             "--duration",
-            help="Duração-alvo em segundos.",
+            help="Meta aproximada de duração em segundos.",
             min=MIN_SHORT_DURATION_SECONDS,
             max=180,
         ),
@@ -683,6 +755,17 @@ def new_short(
         float | None,
         typer.Option("--duration-max", help="Limite máximo aceito para a duração real."),
     ] = None,
+    exact_duration: Annotated[
+        bool,
+        typer.Option(
+            "--exact-duration",
+            help="Exige o alvo informado; não use para pedidos como 'um Short de 50 segundos'.",
+        ),
+    ] = False,
+    profile: Annotated[
+        str,
+        typer.Option("--profile", help="Perfil editorial: verse-led ou high-stakes."),
+    ] = "verse-led",
     creative_mode: Annotated[str, typer.Option("--creative-mode")] = "auto",
     hook_family: Annotated[str, typer.Option("--hook-family")] = "auto",
     voice_variant: Annotated[str, typer.Option("--voice-variant")] = "jesus_1",
@@ -690,28 +773,45 @@ def new_short(
     json_output: Annotated[bool, typer.Option("--json")] = False,
     projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
 ) -> None:
-    """Cria um Short com versículo inédito, briefing e fonte verificada."""
+    """Cria um Short com pacote bíblico verificado e perfil editorial persistido."""
+    profile_aliases = {
+        "verse-led": "verse_led_v1",
+        "verse_led_v1": "verse_led_v1",
+        "high-stakes": "high_stakes_biblical_question_v1",
+        "high_stakes_biblical_question_v1": "high_stakes_biblical_question_v1",
+        "biblical-investigation": "high_stakes_biblical_question_v1",
+    }
+    editorial_profile = profile_aliases.get(profile.strip().casefold())
+    if editorial_profile is None:
+        raise typer.BadParameter("Use verse-led ou high-stakes em --profile.")
     mode, family, variant = _validate_short_bootstrap_options(
         creative_mode=creative_mode,
         hook_family=hook_family,
         voice_variant=voice_variant,
         music_file=music_file,
         duration=duration,
+        editorial_profile=editorial_profile,
     )
-    layout, candidate, score = create_auto_short(
-        projects_dir=projects_dir,
-        target_duration_seconds=duration,
-        duration_min_seconds=duration_min,
-        duration_max_seconds=duration_max,
-        creative_mode_override=mode,
-        hook_family_override=family,
-    )
+    try:
+        layout, candidate, score = create_auto_short(
+            projects_dir=projects_dir,
+            target_duration_seconds=duration,
+            duration_min_seconds=duration_min,
+            duration_max_seconds=duration_max,
+            exact_duration=exact_duration,
+            creative_mode_override=mode,
+            hook_family_override=family,
+            editorial_profile=editorial_profile,
+        )
+    except HighStakesQuestionCatalogExhaustedError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     _apply_short_bootstrap_settings(
         layout,
         creative_mode=mode,
         hook_family=family,
         voice_variant=variant,
         music_file=music_file,
+        editorial_profile=editorial_profile,
     )
     if json_output:
         console.print_json(
@@ -720,6 +820,18 @@ def new_short(
                     "project_id": layout.load_manifest().project_id,
                     "project_path": str(layout.root),
                     "passage": candidate.reference,
+                    "editorial_profile": editorial_profile,
+                    "question_id": (
+                        candidate.candidate_id
+                        if editorial_profile == "high_stakes_biblical_question_v1"
+                        else None
+                    ),
+                    "central_question": (
+                        candidate.central_question
+                        if editorial_profile == "high_stakes_biblical_question_v1"
+                        else None
+                    ),
+                    "opening_hook": read_model(layout.briefing, Briefing).opening_hook or None,
                     "duration_policy": layout.load_manifest().duration_policy,
                     "duration_min_seconds": layout.load_manifest().requested_duration_min_seconds,
                     "duration_max_seconds": layout.load_manifest().requested_duration_max_seconds,
@@ -735,7 +847,12 @@ def new_short(
         )
         return
     console.print(f"[green]Short criado:[/green] {layout.root}")
-    console.print(f"[bold]Versículo reservado:[/bold] {candidate.reference}")
+    if editorial_profile == "high_stakes_biblical_question_v1":
+        console.print(f"[bold]Grande pergunta reservada:[/bold] {candidate.central_question}")
+        console.print(
+            f"[bold]Abertura curada:[/bold] {read_model(layout.briefing, Briefing).opening_hook}"
+        )
+    console.print(f"[bold]Versículo literal reservado:[/bold] {candidate.reference}")
     console.print(candidate.verse_text, markup=False)
     console.print(f"Seleção editorial: {candidate.title} (pontuação {score:g})")
     console.print(
@@ -753,8 +870,15 @@ def new_character_video(
     ] = "long",
     duration: Annotated[
         int | None,
-        typer.Option("--duration", help="Duração-alvo em segundos."),
+        typer.Option("--duration", help="Meta aproximada de duração em segundos."),
     ] = None,
+    exact_duration: Annotated[
+        bool,
+        typer.Option(
+            "--exact-duration",
+            help="Exige o alvo informado somente quando o pedido disser que a duração é exata.",
+        ),
+    ] = False,
     voice_variant: Annotated[str, typer.Option("--voice-variant")] = "jesus_1",
     json_output: Annotated[bool, typer.Option("--json")] = False,
     projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
@@ -782,6 +906,7 @@ def new_character_video(
     layout, candidate, score = create_auto_video(
         projects_dir=projects_dir,
         target_duration_seconds=target_duration,
+        exact_duration=exact_duration,
         video_format="short" if normalized_format == "short" else "landscape",
         creative_mode_override="character_portrait",
         requested_character=character,
@@ -828,17 +953,25 @@ def new_short_audio_manual(
         int,
         typer.Option(
             "--duration",
-            help="Duração-alvo em segundos.",
+            help="Meta aproximada de duração em segundos.",
             min=MIN_SHORT_DURATION_SECONDS,
             max=180,
         ),
     ] = 50,
+    exact_duration: Annotated[
+        bool,
+        typer.Option(
+            "--exact-duration",
+            help="Exige o alvo informado somente quando o pedido disser que a duração é exata.",
+        ),
+    ] = False,
     projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
 ) -> None:
     """Cria um Short que aguarda a narração anexada e a alinha localmente."""
     layout, candidate, score = create_auto_short(
         projects_dir=projects_dir,
         target_duration_seconds=duration,
+        exact_duration=exact_duration,
     )
     manifest = layout.load_manifest()
     manifest.config.audio.provider = "local_manual"
@@ -862,6 +995,30 @@ def status(
 ) -> None:
     layout = _project(project, projects_dir)
     manifest = layout.load_manifest()
+    analytics_summary: dict[str, Any] | None = None
+    if manifest.video_format == "short":
+        from pipeline_videos.analytics import (
+            active_short_notifications,
+            load_short_performance_diagnostics,
+        )
+
+        diagnostics = load_short_performance_diagnostics(layout)
+        active_alerts = [
+            {
+                "video_id": diagnostic.video_id,
+                "snapshot_id": diagnostic.snapshot_id,
+                "code": notification.code,
+                "severity": notification.severity,
+                "stage": notification.stage,
+                "title": notification.title,
+                "evidence_status": diagnostic.evidence_status,
+            }
+            for diagnostic, notification in active_short_notifications(diagnostics)
+        ]
+        analytics_summary = {
+            "diagnostics": len(diagnostics.diagnostics),
+            "active_alerts": active_alerts,
+        }
     if json_output:
         console.print_json(
             json.dumps(
@@ -871,6 +1028,7 @@ def status(
                     "format": manifest.video_format,
                     "stages": stage_summary(layout),
                     "next_actions": next_actions(layout),
+                    "analytics": analytics_summary,
                     "autopilot_state": (
                         read_json(layout.autopilot_state)
                         if layout.autopilot_state.is_file()
@@ -900,6 +1058,24 @@ def status(
     console.print("[bold]Próximas ações[/bold]")
     for item in next_actions(layout):
         console.print(f"- {item}")
+    if analytics_summary and analytics_summary["active_alerts"]:
+        alerts = Table(title="Alertas de desempenho do Short")
+        alerts.add_column("Vídeo")
+        alerts.add_column("Estágio")
+        alerts.add_column("Severidade")
+        alerts.add_column("Código")
+        alerts.add_column("Evidência")
+        alerts.add_column("Diagnóstico")
+        for item in analytics_summary["active_alerts"]:
+            alerts.add_row(
+                item["video_id"],
+                item["stage"],
+                item["severity"],
+                item["code"],
+                item["evidence_status"],
+                item["title"],
+            )
+        console.print(alerts)
 
 
 @app.command("resume-prompt")

@@ -30,12 +30,14 @@ from pipeline_videos.git_registry import (
 )
 from pipeline_videos.models import (
     COMPACT_SHORT_THRESHOLD_SECONDS,
+    HIGH_STAKES_HOOK_FAMILIES,
     USER_SIX_HOOK_FAMILIES,
     Briefing,
     CreativeMode,
     HookContract,
     HookFamily,
     ProductionMode,
+    ShortsEditorialProfile,
     SourceEntry,
     SourceLibrary,
     VerseCandidate,
@@ -48,6 +50,7 @@ from pipeline_videos.project import (
     COMPACT_MINIMUM_MESSAGE_VALUE_SCORE,
     COMPACT_MINIMUM_REWATCH_VALUE_SCORE,
     compact_narration_word_range,
+    configure_high_stakes_question_profile,
     create_project,
     project_directory_name,
     short_literal_verse_word_limit,
@@ -66,6 +69,9 @@ from pipeline_videos.utils import relative_posix, sha256_value, tokenize_words, 
 DEFAULT_VERSE_CATALOG = REPO_ROOT / "config" / "bible" / "shorts-verse-catalog.json"
 DEFAULT_VERSE_EXPANSION_BANK = REPO_ROOT / "config" / "bible" / "shorts-verse-expansion-bank.json"
 DEFAULT_CURATED_VERSE_BANK = REPO_ROOT / "config" / "bible" / "curated-verse-bank-v2.json"
+DEFAULT_HIGH_STAKES_QUESTION_BANK = (
+    REPO_ROOT / "config" / "bible" / "high-stakes-question-bank-v1.json"
+)
 DEFAULT_NARRATIVE_CHARACTER_BANK = (
     REPO_ROOT / "config" / "bible" / "narrative-character-bank-v1.json"
 )
@@ -85,6 +91,11 @@ COMPACT_DEVOTIONAL_MODES: tuple[CreativeMode, ...] = (
     "devotional_application",
     "pastoral_encouragement",
 )
+
+
+class HighStakesQuestionCatalogExhaustedError(RuntimeError):
+    """Raised before a high-stakes topic would be repeated without a curated new round."""
+
 
 BOOK_ALIASES = {
     "genesis": "genesis",
@@ -357,6 +368,44 @@ def build_usage_index(
                 "A seleção foi bloqueada para evitar repetição."
             ) from exc
         main_passage = str(briefing.get("main_passage", "")).strip() or None
+        manifest_config = manifest.get("config")
+        shorts_config = (
+            manifest_config.get("shorts_script") if isinstance(manifest_config, dict) else None
+        )
+        duration_profile = (
+            str(shorts_config.get("duration_profile") or "").strip() or None
+            if isinstance(shorts_config, dict)
+            else None
+        )
+        source_entries = []
+        if layout.sources.is_file():
+            source_payload = _json_object(layout.sources)
+            source_entries = [
+                item
+                for item in _json_list(
+                    source_payload.get("entries"),
+                    field=f"{layout.sources}: entries",
+                )
+                if isinstance(item, dict)
+            ]
+        main_source = next(
+            (
+                item
+                for item in source_entries
+                if main_passage and references_overlap(str(item.get("passage") or ""), main_passage)
+            ),
+            None,
+        )
+        candidate_id = None
+        opening_hook = None
+        if main_source is not None:
+            source_id = str(main_source.get("source_id") or "").strip()
+            source_candidate = next(
+                (candidate for candidate in catalog.candidates if candidate.source_id == source_id),
+                None,
+            )
+            candidate_id = source_candidate.candidate_id if source_candidate else None
+            opening_hook = str(main_source.get("compact_hook") or "").strip() or None
         supporting_references = [
             reference
             for reference in references
@@ -377,6 +426,7 @@ def build_usage_index(
         engagement_mode = None
         if layout.shorts_script_strategy.is_file():
             strategy = _json_object(layout.shorts_script_strategy)
+            opening_hook = str(strategy.get("hook") or "").strip() or opening_hook
             retention_story = strategy.get("retention_story")
             if isinstance(retention_story, dict):
                 retention_archetype = (
@@ -417,7 +467,9 @@ def build_usage_index(
                 environment=registry_environment(),
                 project_id=project_id,
                 project_path=manifest_path.parent.relative_to(root).as_posix(),
+                candidate_id=candidate_id,
                 video_format=video_format,
+                duration_profile=duration_profile,
                 status="used" if layout.script.is_file() else "reserved",
                 references=references,
                 supporting_references=supporting_references,
@@ -438,6 +490,7 @@ def build_usage_index(
                 ),
                 retention_archetype=retention_archetype,
                 hook_family=hook_family,
+                opening_hook=opening_hook,
                 creative_mode=creative_mode,
                 engagement_mode=engagement_mode,
                 created_at=created_at,
@@ -448,7 +501,11 @@ def build_usage_index(
 
 def merge_usage_indexes(*indexes: VerseUsageIndex) -> VerseUsageIndex:
     merged: dict[str, VerseUsageRecord] = {}
+    envelope_extras: dict[str, object] = {}
     for index in indexes:
+        for field_name, value in (index.model_extra or {}).items():
+            if field_name not in envelope_extras or value not in (None, "", [], {}):
+                envelope_extras[field_name] = value
         for record in index.records:
             key = record.registry_id or f"legacy:{record.project_id}"
             current = merged.get(key)
@@ -459,8 +516,12 @@ def merge_usage_indexes(*indexes: VerseUsageIndex) -> VerseUsageIndex:
             supporting_references = list(
                 dict.fromkeys([*current.supporting_references, *record.supporting_references])
             )
-            merged[key] = record.model_copy(
-                update={
+            payload = current.model_dump(mode="python")
+            for field_name, value in record.model_dump(mode="python").items():
+                if value not in (None, "", [], {}):
+                    payload[field_name] = value
+            payload.update(
+                {
                     "status": "used" if "used" in {current.status, record.status} else "reserved",
                     "references": references,
                     "supporting_references": supporting_references,
@@ -473,9 +534,13 @@ def merge_usage_indexes(*indexes: VerseUsageIndex) -> VerseUsageIndex:
                     "updated_at": record.updated_at or current.updated_at,
                 }
             )
-    return VerseUsageIndex(
-        generated_at=utc_now(),
-        records=sorted(merged.values(), key=lambda item: (item.created_at, item.project_id)),
+            merged[key] = VerseUsageRecord.model_validate(payload)
+    return VerseUsageIndex.model_validate(
+        {
+            **envelope_extras,
+            "generated_at": utc_now(),
+            "records": sorted(merged.values(), key=lambda item: (item.created_at, item.project_id)),
+        }
     )
 
 
@@ -523,6 +588,8 @@ def _reservation_record(
     retention_archetype: str | None = None,
     creative_mode: CreativeMode | None = None,
     hook_family: HookFamily | None = None,
+    opening_hook: str | None = None,
+    duration_profile: str | None = None,
 ) -> VerseUsageRecord:
     category = "shorts" if video_format == "short" else "videos-longos"
     now = utc_now()
@@ -533,7 +600,9 @@ def _reservation_record(
         environment=environment,
         project_id=project_id,
         project_path=f"{category}/{project_id}",
+        candidate_id=candidate.candidate_id,
         video_format=video_format,
+        duration_profile=duration_profile,
         status="reserved",
         references=references,
         supporting_references=[],
@@ -547,6 +616,7 @@ def _reservation_record(
         characters=candidate.characters,
         retention_archetype=retention_archetype,
         hook_family=hook_family or retention_archetype,
+        opening_hook=opening_hook or candidate.compact_hook.strip() or None,
         creative_mode=creative_mode,
         created_at=now,
         updated_at=now,
@@ -563,6 +633,7 @@ def reserve_project_candidates(
     retention_archetype: str | None = None,
     creative_mode: CreativeMode | None = None,
     hook_family: HookFamily | None = None,
+    duration_profile: str | None = None,
 ) -> VerseUsageIndex:
     if not candidates:
         raise ValueError("Informe ao menos uma passagem para reservar.")
@@ -600,6 +671,7 @@ def reserve_project_candidates(
             retention_archetype=retention_archetype,
             creative_mode=creative_mode,
             hook_family=hook_family,
+            duration_profile=duration_profile,
         )
         references = list(
             dict.fromkeys(
@@ -811,6 +883,50 @@ def select_hook_family(
     )  # type: ignore[return-value]
 
 
+def select_high_stakes_hook(
+    candidate: VerseCandidate,
+    usage: VerseUsageIndex,
+    *,
+    hook_family_override: HookFamily | None = None,
+) -> tuple[HookFamily, str]:
+    """Choose only a fact-checked opening stored with the selected big question."""
+
+    available = [
+        family
+        for family in HIGH_STAKES_HOOK_FAMILIES
+        if candidate.opening_hooks.get(family, "").strip()
+    ]
+    if hook_family_override is not None:
+        if hook_family_override not in available:
+            raise ValueError(
+                f"A pergunta {candidate.candidate_id} nao possui hook verificado da familia "
+                f"{hook_family_override}."
+            )
+        family = hook_family_override
+    else:
+        recent = sorted(
+            (record for record in usage.records if record.video_format == "short"),
+            key=lambda item: item.created_at,
+            reverse=True,
+        )
+        last_three = {record.hook_family for record in recent[:3] if record.hook_family}
+        frequencies = Counter(record.hook_family for record in recent)
+        family = min(
+            available,
+            key=lambda item: (
+                item in last_three,
+                frequencies[item],
+                available.index(item),
+            ),
+        )
+    opening = candidate.opening_hooks[family].strip()
+    if not hook_matches_family(opening, family):
+        raise ValueError(
+            f"Hook curado de {candidate.candidate_id} nao corresponde a familia {family}."
+        )
+    return family, opening
+
+
 def _main_candidate_usage(
     catalog: VerseCatalog,
     usage: VerseUsageIndex,
@@ -874,6 +990,141 @@ def compact_package_word_count(candidate: VerseCandidate) -> int:
         + len(tokenize_words(candidate.verse_text))
         + spoken_reference_words
     )
+
+
+_COMPACT_HOOK_TENSION_STEMS = (
+    "abandon",
+    "ansied",
+    "briga",
+    "cans",
+    "culpa",
+    "desab",
+    "dor",
+    "duvid",
+    "ferida",
+    "medo",
+    "noite",
+    "peso",
+    "preocup",
+    "preso",
+    "raiva",
+    "sozinh",
+    "vergonh",
+)
+_COMPACT_HOOK_ACTION_STEMS = (
+    "atravess",
+    "busc",
+    "carreg",
+    "ced",
+    "conden",
+    "corr",
+    "decid",
+    "entreg",
+    "escolh",
+    "fech",
+    "lut",
+    "perdo",
+    "procur",
+    "respond",
+    "segu",
+    "solt",
+)
+_COMPACT_HOOK_SITUATION_MARKERS = (
+    "antes de ",
+    "depois de ",
+    "enquanto ",
+    "quando ",
+    "se voce ",
+    "ainda nao ",
+    "ate desabar",
+    "agora",
+    "amanha",
+    "hoje",
+)
+_COMPACT_HOOK_GENERIC_OPENERS = (
+    "escute",
+    "lembre se",
+    "olhe para mim",
+    "pare um instante",
+    "preste atencao",
+    "respire",
+    "voce precisa",
+)
+
+
+def compact_hook_editorial_features(hook: str) -> dict[str, float | bool]:
+    """Reproducible soft prior for concretude; observed metrics still outrank this heuristic."""
+
+    normalized = _plain(hook)
+    words = normalized.split()
+    has_tension = any(stem in word for stem in _COMPACT_HOOK_TENSION_STEMS for word in words)
+    has_action = any(stem in word for stem in _COMPACT_HOOK_ACTION_STEMS for word in words)
+    has_situation = any(marker in f"{normalized} " for marker in _COMPACT_HOOK_SITUATION_MARKERS)
+    generic_opener = any(normalized.startswith(value) for value in _COMPACT_HOOK_GENERIC_OPENERS)
+    has_consequence = any(
+        marker in f" {normalized} "
+        for marker in (
+            " antes que ",
+            " nao deixe ",
+            " nao precisa ",
+            " pode escolher ",
+            " vai ",
+            " ate ",
+            " sem ",
+        )
+    )
+    clause_count = len([item for item in re.split(r"[.!?;:]+", hook) if item.strip()])
+    concreteness = 0.3
+    concreteness += 0.2 if has_situation else 0.0
+    concreteness += 0.2 if has_tension else 0.0
+    concreteness += 0.2 if has_action else 0.0
+    concreteness += 0.08 if has_consequence else 0.0
+    concreteness += 0.05 if clause_count >= 2 else 0.0
+    if generic_opener and not (has_situation or has_tension or has_action):
+        concreteness -= 0.22
+    visualizability = 0.25
+    visualizability += 0.35 if has_action else 0.0
+    visualizability += 0.2 if has_tension else 0.0
+    visualizability += 0.1 if has_situation else 0.0
+    visualizability += 0.05 if clause_count >= 2 else 0.0
+    if generic_opener and not has_action:
+        visualizability -= 0.12
+    word_count = len(tokenize_words(hook))
+    clarity = 0.95 if 8 <= word_count <= 12 else 0.8 if 5 <= word_count <= 14 else 0.6
+    concreteness = min(1.0, max(0.0, concreteness))
+    visualizability = min(1.0, max(0.0, visualizability))
+    quality = concreteness * 0.6 + visualizability * 0.25 + clarity * 0.15
+    return {
+        "concreteness": round(concreteness, 4),
+        "visualizability": round(visualizability, 4),
+        "clarity": round(clarity, 4),
+        "quality": round(quality, 4),
+        "generic_opener": generic_opener,
+        "has_situation": has_situation,
+        "has_tension": has_tension,
+        "has_action": has_action,
+    }
+
+
+def recent_compact_hook_count(
+    usage: VerseUsageIndex,
+    hook: str,
+    *,
+    limit: int = 8,
+) -> int:
+    recent = sorted(
+        (
+            record
+            for record in usage.records
+            if record.video_format == "short"
+            and record.duration_profile == "adaptive_compact_v1"
+            and bool(record.opening_hook)
+        ),
+        key=lambda record: record.created_at,
+        reverse=True,
+    )[:limit]
+    normalized_hook = _plain(hook)
+    return sum(_plain(record.opening_hook or "") == normalized_hook for record in recent)
 
 
 def _candidate_matches_compact_package(
@@ -993,6 +1244,7 @@ def select_unused_verse(
     minimum_message_value_score: float = 0.0,
     minimum_rewatch_value_score: float = 0.0,
     requested_character: str | None = None,
+    single_cycle: bool = False,
 ) -> tuple[VerseCandidate, float]:
     counts, reserved = _main_candidate_usage(catalog, usage, video_format=video_format)
     candidate_pool = [
@@ -1034,6 +1286,12 @@ def select_unused_verse(
             else "O catálogo não possui versículo curto o bastante para a duração solicitada."
         )
     minimum_usage = min(counts[candidate.candidate_id] for candidate in candidate_pool)
+    if single_cycle and minimum_usage > 0:
+        raise HighStakesQuestionCatalogExhaustedError(
+            f"Os {len(candidate_pool)} temas da rodada high-stakes já foram usados ou reservados. "
+            "Nenhum novo Short foi criado. Inclua e valide uma nova rodada de grandes perguntas "
+            "bíblicas antes de continuar."
+        )
     available = [
         candidate
         for candidate in candidate_pool
@@ -1082,6 +1340,9 @@ def select_unused_verse(
             score += candidate.compact_hook_strength_score * 24
             score += candidate.compact_message_value_score * 28
             score += candidate.compact_rewatch_value_score * 20
+            hook_features = compact_hook_editorial_features(candidate.compact_hook)
+            score += float(hook_features["quality"]) * 24
+            score -= recent_compact_hook_count(usage, candidate.compact_hook) * 28
         if candidate.human_conflict.strip() and candidate.central_question.strip():
             score += 6
         if len(candidate.visual_progression) >= 2:
@@ -1190,6 +1451,7 @@ def create_auto_video(
     target_duration_seconds: int,
     duration_min_seconds: float | None = None,
     duration_max_seconds: float | None = None,
+    exact_duration: bool = False,
     video_format: Literal["landscape", "short"],
     project_date: date | None = None,
     catalog_path: Path = DEFAULT_VERSE_CATALOG,
@@ -1197,6 +1459,7 @@ def create_auto_video(
     creative_mode_override: CreativeMode | None = None,
     hook_family_override: HookFamily | None = None,
     requested_character: str | None = None,
+    editorial_profile: ShortsEditorialProfile = "verse_led_v1",
 ) -> tuple[ProjectLayout, VerseCandidate, float]:
     if creative_mode_override == "auto":
         creative_mode_override = None
@@ -1205,6 +1468,16 @@ def create_auto_video(
     compact_profile = (
         video_format == "short" and target_duration_seconds < COMPACT_SHORT_THRESHOLD_SECONDS
     )
+    high_stakes_profile = editorial_profile == "high_stakes_biblical_question_v1"
+    if high_stakes_profile:
+        if video_format != "short":
+            raise ValueError("O perfil de grandes perguntas biblicas e exclusivo de Shorts.")
+        if not COMPACT_SHORT_THRESHOLD_SECONDS <= target_duration_seconds <= 60:
+            raise ValueError(
+                "O perfil de grandes perguntas biblicas exige duracao entre 45 e 60 segundos."
+            )
+        if catalog_path.resolve() == DEFAULT_VERSE_CATALOG.resolve():
+            catalog_path = DEFAULT_HIGH_STAKES_QUESTION_BANK
     requested_character = requested_character.strip() if requested_character else None
     if compact_profile and requested_character:
         raise ValueError(
@@ -1220,15 +1493,23 @@ def create_auto_video(
     else:
         selection_maximum_seconds = target_duration_seconds
         compact_word_range = (None, None)
+    if compact_profile and high_stakes_profile:
+        raise ValueError("O perfil de grandes perguntas nao pode usar o contrato compacto.")
     if compact_profile and creative_mode_override not in {None, *COMPACT_DEVOTIONAL_MODES}:
         raise ValueError(
             "Shorts compactos aceitam somente devotional_application ou pastoral_encouragement."
         )
     if compact_profile and hook_family_override not in {None, "emotional_interruption"}:
         raise ValueError("Shorts compactos exigem hook_family=emotional_interruption.")
+    if high_stakes_profile and hook_family_override not in {
+        None,
+        *HIGH_STAKES_HOOK_FAMILIES,
+    }:
+        raise ValueError("O perfil de grandes perguntas exige uma familia investigativa de hook.")
     if (
         video_format == "short"
         and not compact_profile
+        and not high_stakes_profile
         and hook_family_override
         not in {
             None,
@@ -1238,6 +1519,11 @@ def create_auto_video(
         raise ValueError("Novos Shorts aceitam somente uma das seis famílias oficiais de hook.")
     root = (projects_dir or DEFAULT_PROJECTS_DIR).expanduser().resolve()
     catalog = load_verse_catalog(catalog_path)
+    if high_stakes_profile and any(
+        candidate.editorial_profile != "high_stakes_biblical_question_v1"
+        for candidate in catalog.candidates
+    ):
+        raise ValueError("O catalogo selecionado nao pertence ao perfil de grandes perguntas.")
     with _selection_lock(root):
         local = build_usage_index(root, catalog=catalog)
 
@@ -1277,6 +1563,7 @@ def create_auto_video(
                     COMPACT_MINIMUM_REWATCH_VALUE_SCORE if compact_profile else 0.0
                 ),
                 requested_character=requested_character,
+                single_cycle=high_stakes_profile,
             )
             retention_archetype = (
                 select_retention_archetype(candidate, usage) if video_format == "short" else None
@@ -1286,25 +1573,35 @@ def create_auto_video(
                 if requested_character
                 else select_compact_devotional_mode(usage)
                 if compact_profile
+                else candidate.preferred_creative_mode
+                if high_stakes_profile and candidate.preferred_creative_mode is not None
                 else select_creative_mode(candidate, usage, video_format=video_format)
             )
             hook_policy = (
                 "required" if video_format == "short" else default_long_hook_policy(creative_mode)
             )
-            hook_family = (
-                "emotional_interruption"
-                if compact_profile
-                else hook_family_override
-                or select_hook_family(
-                    creative_mode,
+            if high_stakes_profile:
+                hook_family, opening_hook = select_high_stakes_hook(
+                    candidate,
                     usage,
-                    video_format=video_format,
-                    hook_policy=hook_policy,
-                    hook_contract=(
-                        "user_six_v1" if video_format == "short" else "mode_compatible_v1"
-                    ),
+                    hook_family_override=hook_family_override,
                 )
-            )
+            else:
+                hook_family = (
+                    "emotional_interruption"
+                    if compact_profile
+                    else hook_family_override
+                    or select_hook_family(
+                        creative_mode,
+                        usage,
+                        video_format=video_format,
+                        hook_policy=hook_policy,
+                        hook_contract=(
+                            "user_six_v1" if video_format == "short" else "mode_compatible_v1"
+                        ),
+                    )
+                )
+                opening_hook = None
             predicted_id = project_directory_name(candidate.slug, project_date=project_date)
             reservation = _reservation_record(
                 candidate,
@@ -1313,6 +1610,14 @@ def create_auto_video(
                 retention_archetype=retention_archetype,
                 creative_mode=creative_mode,
                 hook_family=hook_family,
+                opening_hook=opening_hook,
+                duration_profile=(
+                    "adaptive_compact_v1"
+                    if compact_profile
+                    else "high_stakes_biblical_question_v1"
+                    if high_stakes_profile
+                    else None
+                ),
             )
             updated = merge_usage_indexes(
                 usage,
@@ -1384,10 +1689,18 @@ def create_auto_video(
             target_duration_seconds=target_duration_seconds,
             duration_min_seconds=duration_min_seconds,
             duration_max_seconds=duration_max_seconds,
+            exact_duration=exact_duration,
             video_format=video_format,
             project_date=project_date,
             production_mode=production_mode,
         )
+        if high_stakes_profile:
+            manifest = layout.load_manifest()
+            configure_high_stakes_question_profile(
+                manifest.config,
+                target_duration_seconds,
+            )
+            layout.save_manifest(manifest)
         creative_spec = CREATIVE_MODE_SPECS[creative_mode]
         practical_application = (
             candidate.practical_application if creative_spec.application_required else ""
@@ -1396,6 +1709,9 @@ def create_auto_video(
             creative_mode,
             theme=candidate.central_theme,
             reveal=candidate.possible_reveal,
+        )
+        selected_opening_hook = (
+            candidate.opening_hooks[hook_family].strip() if high_stakes_profile else ""
         )
         briefing = Briefing(
             title=project_title,
@@ -1469,10 +1785,26 @@ def create_auto_video(
             hook_contract=(
                 "cinematic_interruption_v1"
                 if compact_profile
+                else "high_stakes_opening_v1"
+                if high_stakes_profile
                 else "user_six_v1"
                 if video_format == "short"
                 else "mode_compatible_v1"
             ),
+            editorial_profile=editorial_profile,
+            question_id=candidate.candidate_id if high_stakes_profile else "",
+            opening_hook=selected_opening_hook,
+            implicit_viewer_question=(
+                candidate.implicit_viewer_question if high_stakes_profile else ""
+            ),
+            primary_literal_source_id=(candidate.source_id if high_stakes_profile else ""),
+            required_answer_points=(
+                candidate.required_answer_points if high_stakes_profile else []
+            ),
+            uncertainty_boundaries=(
+                candidate.uncertainty_boundaries if high_stakes_profile else []
+            ),
+            answer_status=(candidate.answer_status if high_stakes_profile else None),
             viewer_outcome=viewer_outcome,
             creative_rationale=(f"{creative_spec.label}: {creative_spec.purpose}"),
         )
@@ -1499,7 +1831,15 @@ def create_auto_video(
         )
         layout.append_decision(
             {
-                "type": "automatic_base_verse_selection",
+                "type": (
+                    "automatic_high_stakes_question_selection"
+                    if high_stakes_profile
+                    else "automatic_base_verse_selection"
+                ),
+                "editorial_profile": editorial_profile,
+                "question_id": candidate.candidate_id if high_stakes_profile else None,
+                "opening_hook": selected_opening_hook or None,
+                "answer_status": candidate.answer_status if high_stakes_profile else None,
                 "candidate_id": candidate.candidate_id,
                 "reference": candidate.reference,
                 "score": score,
@@ -1514,6 +1854,12 @@ def create_auto_video(
                 "compact_hook_strength_score": candidate.compact_hook_strength_score,
                 "compact_message_value_score": candidate.compact_message_value_score,
                 "compact_rewatch_value_score": candidate.compact_rewatch_value_score,
+                "compact_hook_editorial_features": (
+                    compact_hook_editorial_features(candidate.compact_hook)
+                    if compact_profile
+                    else None
+                ),
+                "compact_hook_prior": ("concrete_scroll_stop_v1" if compact_profile else None),
                 "retention_archetype": retention_archetype,
                 "creative_mode": creative_mode,
                 "interpretive_stance": default_interpretive_stance(creative_mode),
@@ -1536,18 +1882,21 @@ def create_auto_short(
     target_duration_seconds: int = 50,
     duration_min_seconds: float | None = None,
     duration_max_seconds: float | None = None,
+    exact_duration: bool = False,
     project_date: date | None = None,
     catalog_path: Path = DEFAULT_VERSE_CATALOG,
     production_mode: ProductionMode = "final_candidate_one_shot",
     creative_mode_override: CreativeMode | None = None,
     hook_family_override: HookFamily | None = None,
     requested_character: str | None = None,
+    editorial_profile: ShortsEditorialProfile = "verse_led_v1",
 ) -> tuple[ProjectLayout, VerseCandidate, float]:
     return create_auto_video(
         projects_dir=projects_dir,
         target_duration_seconds=target_duration_seconds,
         duration_min_seconds=duration_min_seconds,
         duration_max_seconds=duration_max_seconds,
+        exact_duration=exact_duration,
         video_format="short",
         project_date=project_date,
         catalog_path=catalog_path,
@@ -1555,4 +1904,5 @@ def create_auto_short(
         creative_mode_override=creative_mode_override,
         hook_family_override=hook_family_override,
         requested_character=requested_character,
+        editorial_profile=editorial_profile,
     )

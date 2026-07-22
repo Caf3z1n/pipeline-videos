@@ -10,8 +10,10 @@ from pipeline_videos.images import build_codex_queue
 from pipeline_videos.models import (
     BiblicalReview,
     Briefing,
+    ContinuityBible,
     CreativeContract,
     ImageManifest,
+    Palette,
     ScriptDocument,
     ScriptSection,
     ShortsCinematicDevotionalDirection,
@@ -19,6 +21,7 @@ from pipeline_videos.models import (
     ShortsCreativeDirection,
     ShortsEngagementPlan,
     ShortsNarrativeSpine,
+    ShortsOpeningVisualContract,
     ShortsReplayBridge,
     ShortsRetentionBeat,
     ShortsRetentionStory,
@@ -29,23 +32,32 @@ from pipeline_videos.models import (
     SourceEntry,
     SourceLibrary,
     StageStatus,
+    VerseUsageIndex,
 )
-from pipeline_videos.project import create_project
-from pipeline_videos.scenes import build_scenes
+from pipeline_videos.project import (
+    compact_narration_word_range,
+    create_project,
+    short_literal_verse_word_limit,
+)
+from pipeline_videos.scenes import _resolved_style, build_scenes
+from pipeline_videos.script import ensure_creative_contract
 from pipeline_videos.shorts_script import (
     LEGACY_SCRIPTURE_BOUNDARY_PHRASE,
     ShortsScriptPackageValidationError,
     _balanced_compact_chunks,
+    _compact_opening_fallback,
     check_reviewed_shorts_script_staging,
     check_shorts_script_package_staging,
     import_shorts_script_package,
     materialize_compact_visual_fallback,
     prepare_shorts_biblical_review_queue,
     prepare_shorts_script_queue,
+    shorts_script_input_hash,
     spoken_biblical_reference,
 )
 from pipeline_videos.storage import read_json, read_model, write_json
-from pipeline_videos.utils import utc_now
+from pipeline_videos.utils import sha256_value, utc_now
+from pipeline_videos.verse_selection import eligible_main_candidate_ids, load_verse_catalog
 
 
 def _short_project(tmp_path):
@@ -713,6 +725,15 @@ def _creative_package(queue: dict) -> ShortsScriptPackage:
         organizing_question="Sentir medo significava perder a fé?",
         resolution=resolution,
         viewer_takeaway=viewer_takeaway,
+        opening_visual_contract=ShortsOpeningVisualContract(
+            action_kind="body_translation",
+            dominant_subject_or_object="Davi e o passo interrompido no corredor escuro",
+            observable_action="interrompe o passo e gira o corpo ao ouvir a aproximação",
+            initial_state="Davi avançava pelo corredor antes de ouvir os passos",
+            resulting_state="Davi para com o corpo voltado para a sombra que se aproxima",
+            concrete_tension="continuar avançando ou responder ao perigo que se aproxima",
+            shot_scale="medium",
+        ),
         engagement=strategy.retention_story.engagement,
         source_ids=["bpm-salmos-56-3"],
     )
@@ -1133,7 +1154,7 @@ def test_creative_retention_v3_accepts_curiosity_without_practical_application(t
     layout = _creative_project(tmp_path)
     queue = prepare_shorts_script_queue(layout)
 
-    assert queue["schema_version"] == "5.2"
+    assert queue["schema_version"] == "5.4"
     assert queue["retention_contract"]["standard"] == "creative_retention_v3"
     assert queue["retention_contract"]["creative_mode"] == "biblical_curiosity"
     assert queue["retention_contract"]["mode_guidance"]["id"] == "biblical_curiosity"
@@ -1170,6 +1191,7 @@ def test_fifteen_second_profile_builds_cinematic_jesus_moment_without_cta(tmp_pa
     assert queue["deterministic_contract"]["biblical_review_mode"] == (
         "deterministic_verified_compact_v1"
     )
+    assert queue["deterministic_contract"]["opening_visual_standard"] == ("scroll_stop_concrete_v1")
     assert queue["deterministic_contract"]["spoken_reference"] == (
         "Mateus, capítulo 11, versículo 29"
     )
@@ -1181,11 +1203,16 @@ def test_fifteen_second_profile_builds_cinematic_jesus_moment_without_cta(tmp_pa
     assert blocks[-1]["creative_concept_required"] is False
     assert blocks[-1]["narration"] == "Mateus, capítulo 11, versículo 29."
     assert len(json.dumps(queue["schemas"]["package"])) < 2_000
+    context = read_json(layout.shorts_script_context)
+    assert context["opening_attention_contract"]["block_id"] == "block-001"
+    assert context["blocks"][0]["attention_role"] == "scroll_stop_opening"
 
-    materialize_compact_visual_fallback(layout)
+    fallback_plan = materialize_compact_visual_fallback(layout)
     check = check_shorts_script_package_staging(layout)
 
     assert check.valid is True, check.errors
+    assert "interrompe" in (fallback_plan.concepts[0].observable_action or "")
+    assert "escolhe" in (fallback_plan.concepts[0].observable_action or "")
     imported = import_shorts_script_package(layout)
     scenes = build_scenes(layout, skip_approvals=True)
     contract = read_model(layout.creative_contract, CreativeContract)
@@ -1204,6 +1231,622 @@ def test_fifteen_second_profile_builds_cinematic_jesus_moment_without_cta(tmp_pa
     assert len(scenes.scenes) == 5
     assert imported.biblical_review.reviewer == "deterministic-verified-compact-v1"
     assert layout.load_manifest().config.audio.synthesis_segmentation == ("continuous_narration_v1")
+
+
+def test_scroll_stop_visual_preflight_rejects_static_wide_opening(tmp_path) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
+    queue = prepare_shorts_script_queue(layout)
+    materialize_compact_visual_fallback(layout)
+    payload = read_json(layout.shorts_script_package_staging)
+    payload["concepts"][0].update(
+        {
+            "scene_description": "Jesus parado, sereno, em um plano geral contemplativo.",
+            "attention_role": "scroll_stop_opening",
+            "dominant_subject_or_object": "Jesus",
+            "observable_action": "Jesus parado olhando o horizonte",
+            "concrete_tension": "uma escolha difícil",
+            "shot_scale": "wide",
+        }
+    )
+    write_json(layout.shorts_script_package_staging, payload)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is False
+    assert any("close ou medium" in error for error in check.errors)
+    assert any("contemplação estática" in error for error in check.errors)
+    assert queue["schema_version"] == "5.4"
+
+
+def test_scroll_stop_visual_preflight_rejects_decorative_opening_metadata(tmp_path) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
+    prepare_shorts_script_queue(layout)
+    materialize_compact_visual_fallback(layout)
+    payload = read_json(layout.shorts_script_package_staging)
+    payload["concepts"][0].update(
+        {
+            "scene_description": "Close de Jesus sorrindo serenamente para a câmera.",
+            "attention_role": "scroll_stop_opening",
+            "dominant_subject_or_object": "Jesus",
+            "observable_action": "Jesus sorri e olha para a câmera",
+            "concrete_tension": "avançar ou recuar",
+            "shot_scale": "close",
+        }
+    )
+    write_json(layout.shorts_script_package_staging, payload)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is False
+    assert any("verbo físico principal" in error for error in check.errors)
+
+
+def test_scroll_stop_visual_preflight_rejects_auxiliary_verbs_masking_camera_pose(
+    tmp_path,
+) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
+    prepare_shorts_script_queue(layout)
+    materialize_compact_visual_fallback(layout)
+    payload = read_json(layout.shorts_script_package_staging)
+    payload["concepts"][0].update(
+        {
+            "scene_description": "Jesus começa a sorrir e volta a olhar para a câmera.",
+            "attention_role": "scroll_stop_opening",
+            "dominant_subject_or_object": "Jesus",
+            "observable_action": "começa a sorrir e volta a olhar para a câmera",
+            "concrete_tension": "avançar ou recuar",
+            "shot_scale": "close",
+        }
+    )
+    write_json(layout.shorts_script_package_staging, payload)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is False
+    assert any("verbo físico principal" in error for error in check.errors)
+
+
+def test_scroll_stop_visual_preflight_rejects_serenity_presented_as_action(tmp_path) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
+    prepare_shorts_script_queue(layout)
+    materialize_compact_visual_fallback(layout)
+    payload = read_json(layout.shorts_script_package_staging)
+    payload["concepts"][0].update(
+        {
+            "scene_description": "Jesus expressa serenidade diante da câmera.",
+            "attention_role": "scroll_stop_opening",
+            "dominant_subject_or_object": "Jesus",
+            "observable_action": "expressa serenidade diante da câmera",
+            "concrete_tension": "avançar ou recuar",
+            "shot_scale": "close",
+        }
+    )
+    write_json(layout.shorts_script_package_staging, payload)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is False
+    assert any("verbo físico principal" in error for error in check.errors)
+
+
+def test_scroll_stop_static_guard_does_not_match_preparado_substring(tmp_path) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
+    prepare_shorts_script_queue(layout)
+    materialize_compact_visual_fallback(layout)
+    payload = read_json(layout.shorts_script_package_staging)
+    payload["concepts"][0].update(
+        {
+            "scene_description": (
+                "Close de um homem preparado que corre em direção à porta e abre a tranca."
+            ),
+            "attention_role": "scroll_stop_opening",
+            "dominant_subject_or_object": "o homem e a porta",
+            "observable_action": "abre a tranca enquanto corre em direção à porta",
+            "concrete_tension": "recuar para o lugar antigo ou atravessar a porta",
+            "shot_scale": "close",
+        }
+    )
+    write_json(layout.shorts_script_package_staging, payload)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is True, check.errors
+
+
+def test_scroll_stop_accepts_concrete_action_outside_internal_vocabulary(tmp_path) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
+    prepare_shorts_script_queue(layout)
+    materialize_compact_visual_fallback(layout)
+    payload = read_json(layout.shorts_script_package_staging)
+    payload["concepts"][0].update(
+        {
+            "scene_description": (
+                "Close de uma mulher amassando uma carta diante da câmera e jogando-a no fogo."
+            ),
+            "attention_role": "scroll_stop_opening",
+            "dominant_subject_or_object": "a mulher, a carta e o fogo",
+            "observable_action": "amassa a carta diante da câmera e joga no fogo",
+            "concrete_tension": "o fogo avança enquanto a única saída começa a fechar",
+            "shot_scale": "close",
+        }
+    )
+    write_json(layout.shorts_script_package_staging, payload)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is True, check.errors
+
+
+def test_scroll_stop_positive_motion_avoids_negation_scope_ambiguity(tmp_path) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
+    prepare_shorts_script_queue(layout)
+    materialize_compact_visual_fallback(layout)
+    payload = read_json(layout.shorts_script_package_staging)
+    payload["concepts"][0].update(
+        {
+            "scene_description": (
+                "Close de um homem que abandona a pose anterior, abre a porta e atravessa."
+            ),
+            "attention_role": "scroll_stop_opening",
+            "dominant_subject_or_object": "o homem e a porta",
+            "observable_action": "abre a porta e atravessa o limiar",
+            "concrete_tension": "o corredor escurece enquanto a saída começa a fechar",
+            "shot_scale": "close",
+        }
+    )
+    write_json(layout.shorts_script_package_staging, payload)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is True, check.errors
+
+
+def test_scroll_stop_rejects_negated_action_followed_by_static_pose(tmp_path) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
+    prepare_shorts_script_queue(layout)
+    materialize_compact_visual_fallback(layout)
+    payload = read_json(layout.shorts_script_package_staging)
+    payload["concepts"][0].update(
+        {
+            "scene_description": "Jesus não abre e fica parado diante da porta.",
+            "attention_role": "scroll_stop_opening",
+            "dominant_subject_or_object": "Jesus e a porta",
+            "observable_action": "não abre e fica parado",
+            "concrete_tension": "atravessar ou permanecer do lado de fora",
+            "shot_scale": "close",
+        }
+    )
+    write_json(layout.shorts_script_package_staging, payload)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is False
+    assert any(
+        "ação negada" in error or "verbo físico principal" in error for error in check.errors
+    )
+
+
+def test_structured_opening_fields_are_materialized_in_downstream_scene(tmp_path) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
+    prepare_shorts_script_queue(layout)
+    materialize_compact_visual_fallback(layout)
+    payload = read_json(layout.shorts_script_package_staging)
+    payload["concepts"][0].update(
+        {
+            "scene_description": "Close de Jesus diante de uma porta fechada.",
+            "attention_role": "scroll_stop_opening",
+            "dominant_subject_or_object": "Jesus e a tranca da porta",
+            "observable_action": "Abre a tranca e atravessa a porta",
+            "concrete_tension": "permanecer do lado de fora ou atravessar agora",
+            "shot_scale": "close",
+        }
+    )
+    write_json(layout.shorts_script_package_staging, payload)
+
+    assert check_shorts_script_package_staging(layout).valid is True
+    package = import_shorts_script_package(layout)
+    opening = package.strategy.visual_scenes[0].scene_description
+
+    assert "Sujeito dominante: Jesus e a tranca da porta" in opening
+    assert "Ação já em curso: Abre a tranca e atravessa a porta" in opening
+    assert "Mudança visível" in opening
+    assert "Tensão visual concreta: permanecer do lado de fora ou atravessar agora" in opening
+
+
+def test_every_selectable_compact_candidate_has_theme_aligned_opening_fallback(
+    tmp_path,
+) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
+    config = layout.load_manifest().config.shorts_script
+    catalog = load_verse_catalog()
+    usage = VerseUsageIndex(generated_at="2026-07-21T12:00:00Z", records=[])
+    eligible_ids: set[str] = set()
+    for duration_seconds in range(15, 21):
+        minimum_words, maximum_words = compact_narration_word_range(duration_seconds)
+        eligible_ids.update(
+            eligible_main_candidate_ids(
+                catalog,
+                usage,
+                video_format="short",
+                max_verse_words=short_literal_verse_word_limit(duration_seconds),
+                required_spoken_by="jesus",
+                minimum_package_words=minimum_words,
+                maximum_package_words=maximum_words,
+                minimum_hook_strength_score=config.minimum_hook_strength_score,
+                minimum_message_value_score=config.minimum_message_value_score,
+                minimum_rewatch_value_score=config.minimum_rewatch_value_score,
+            )
+        )
+    compact = [
+        candidate for candidate in catalog.candidates if candidate.candidate_id in eligible_ids
+    ]
+
+    contracts = [
+        _compact_opening_fallback(
+            candidate.compact_hook,
+            central_theme=candidate.central_theme,
+            human_conflict=candidate.human_conflict,
+            central_question=candidate.central_question,
+            verse_text=candidate.verse_text,
+        )
+        for candidate in compact
+    ]
+
+    assert compact
+    assert all(item["motif_id"] != "contextual_decision" for item in contracts)
+    assert all("antes da mudança observável" not in item["initial_state"] for item in contracts)
+    assert all("depois de:" not in item["resulting_state"] for item in contracts)
+    assert len({item["motif_id"] for item in contracts}) >= 20
+    motif_by_reference = {
+        candidate.reference: contract["motif_id"]
+        for candidate, contract in zip(compact, contracts, strict=True)
+    }
+    assert motif_by_reference["João 14:27"] == "peace_before_circumstances"
+    assert motif_by_reference["João 15:5"] == "remain_connected"
+    assert motif_by_reference["João 16:33"] == "peace_before_circumstances"
+    contract_by_motif = {contract["motif_id"]: contract for contract in contracts}
+    assert contract_by_motif["service_over_status"]["action_kind"] == "body_translation"
+    assert "ajoelhada" in contract_by_motif["service_over_status"]["resulting_state"]
+    assert contract_by_motif["costly_love"]["action_kind"] == "body_translation"
+    assert "atravessa" in contract_by_motif["costly_love"]["resulting_state"]
+
+
+def test_creative_retention_requires_same_loop_in_hook_and_resolution(tmp_path) -> None:
+    layout = _creative_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+    package = _creative_package(queue)
+    beats = [beat.model_copy(deep=True) for beat in package.strategy.retention_beats]
+    beats[0] = beats[0].model_copy(update={"opens_loop": None})
+    beats[-2] = beats[-2].model_copy(update={"resolves_loop": None})
+    altered = package.model_copy(
+        update={"strategy": package.strategy.model_copy(update={"retention_beats": beats})}
+    )
+    write_json(layout.shorts_script_package_staging, altered)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is False
+    assert any("abrir exatamente" in error for error in check.errors)
+    assert any("fechar exatamente" in error for error in check.errors)
+
+
+def test_creative_retention_rejects_secondary_open_or_resolved_loops(tmp_path) -> None:
+    layout = _creative_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+    package = _creative_package(queue)
+    beats = [beat.model_copy(deep=True) for beat in package.strategy.retention_beats]
+    beats[1] = beats[1].model_copy(update={"opens_loop": "Uma segunda promessa concorrente."})
+    beats[4] = beats[4].model_copy(update={"resolves_loop": "Uma saída antecipada."})
+    altered = package.model_copy(
+        update={"strategy": package.strategy.model_copy(update={"retention_beats": beats})}
+    )
+    write_json(layout.shorts_script_package_staging, altered)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is False
+    assert any("único loop central" in error for error in check.errors)
+
+
+def test_full_short_rejects_presentational_opening_visual_direction(tmp_path) -> None:
+    layout = _creative_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+    package = _creative_package(queue)
+    direction = package.strategy.creative_direction
+    assert direction is not None and direction.opening_visual_contract is not None
+    bad_contract = direction.opening_visual_contract.model_copy(
+        update={"observable_action": "sorrindo serenamente e olhando para a câmera"}
+    )
+    altered = package.model_copy(
+        update={
+            "strategy": package.strategy.model_copy(
+                update={
+                    "creative_direction": direction.model_copy(
+                        update={"opening_visual_contract": bad_contract}
+                    )
+                }
+            )
+        }
+    )
+    write_json(layout.shorts_script_package_staging, altered)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is False
+    assert any("verbo físico principal" in error for error in check.errors)
+
+
+def test_full_short_rejects_passive_serenity_without_observable_change(tmp_path) -> None:
+    layout = _creative_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+    package = _creative_package(queue)
+    direction = package.strategy.creative_direction
+    assert direction is not None and direction.opening_visual_contract is not None
+    bad_contract = direction.opening_visual_contract.model_copy(
+        update={
+            "observable_action": "expressa serenidade diante da câmera",
+            "initial_state": "Jesus permanece sereno diante da câmera",
+            "resulting_state": "Jesus continua sereno diante da câmera",
+        }
+    )
+    altered = package.model_copy(
+        update={
+            "strategy": package.strategy.model_copy(
+                update={
+                    "creative_direction": direction.model_copy(
+                        update={"opening_visual_contract": bad_contract}
+                    )
+                }
+            )
+        }
+    )
+    write_json(layout.shorts_script_package_staging, altered)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is False
+    assert any("verbo físico principal" in error for error in check.errors)
+
+
+def test_full_short_accepts_unlisted_concrete_action_after_a_generic_gaze(tmp_path) -> None:
+    layout = _creative_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+    package = _creative_package(queue)
+    sections = [section.model_copy(deep=True) for section in package.script.sections]
+    sections[0] = sections[0].model_copy(
+        update={
+            "visual_direction": (
+                "Close de Davi olhando para a carta; ele a amassa e joga os pedaços no fogo."
+            )
+        }
+    )
+    direction = package.strategy.creative_direction
+    assert direction is not None and direction.opening_visual_contract is not None
+    concrete_contract = direction.opening_visual_contract.model_copy(
+        update={
+            "action_kind": "object_state_change",
+            "dominant_subject_or_object": "Davi, a carta e o fogo",
+            "observable_action": "amassa a carta e joga os pedaços no fogo",
+            "initial_state": "a carta permanece inteira nas mãos de Davi",
+            "resulting_state": "a carta aparece amassada e cai dentro do fogo",
+            "concrete_tension": "preservar a carta ou destruí-la diante do perigo",
+            "shot_scale": "close",
+        }
+    )
+    altered = package.model_copy(
+        update={
+            "script": package.script.model_copy(update={"sections": sections}),
+            "strategy": package.strategy.model_copy(
+                update={
+                    "creative_direction": direction.model_copy(
+                        update={"opening_visual_contract": concrete_contract}
+                    )
+                }
+            ),
+        }
+    )
+    write_json(layout.shorts_script_package_staging, altered)
+
+    check = check_shorts_script_package_staging(layout)
+
+    assert check.valid is True, check.errors
+
+
+def test_legacy_opening_keeps_legacy_queue_hash_and_contract(tmp_path) -> None:
+    layout = _creative_project(tmp_path)
+    manifest = layout.load_manifest()
+    manifest.config.images.opening_visual_standard = "legacy_v1"
+    layout.save_manifest(manifest)
+    expected_legacy_hash = sha256_value(
+        {
+            "algorithm": "6.2",
+            "project_id": manifest.project_id,
+            "title": manifest.title,
+            "target_duration_seconds": manifest.target_duration_seconds,
+            "config": manifest.config.shorts_script,
+            "briefing": read_json(layout.briefing),
+            "sources": read_json(layout.sources),
+        }
+    )
+
+    first = prepare_shorts_script_queue(layout)
+    second = prepare_shorts_script_queue(layout)
+
+    assert first["job_id"] == second["job_id"]
+    assert first["input_hash"] == second["input_hash"]
+    assert shorts_script_input_hash(layout) == expected_legacy_hash
+    assert first["schema_version"] == "5.2"
+    assert "attention_model" not in first["retention_contract"]
+    assert "promise_progression_payoff" not in first["retention_contract"]
+
+
+def test_legacy_opening_keeps_exact_scene_hash_and_reuses_completed_stage(tmp_path) -> None:
+    layout = _creative_project(tmp_path)
+    manifest = layout.load_manifest()
+    manifest.config.images.opening_visual_standard = "legacy_v1"
+    layout.save_manifest(manifest)
+    queue = prepare_shorts_script_queue(layout)
+    write_json(layout.shorts_script_package_staging, _creative_package(queue))
+    import_shorts_script_package(layout)
+
+    scenes = build_scenes(layout, skip_approvals=True)
+    project = layout.load_manifest()
+    script = read_model(layout.script, ScriptDocument)
+    render_config = project.config.render
+    expected_legacy_hash = sha256_value(
+        {
+            "algorithm": "6.1",
+            "script": script,
+            "briefing": read_model(layout.briefing, Briefing),
+            "style": _resolved_style(layout),
+            "palette": read_model(layout.palette, Palette),
+            "continuity": read_model(layout.continuity, ContinuityBible),
+            "creative_contract": ensure_creative_contract(layout, script),
+            "scene_planning_standard": project.config.images.scene_planning_standard,
+            "composition_safety_mode": project.config.images.composition_safety_mode,
+            "spoken_reference_image_mode": project.config.images.spoken_reference_image_mode,
+            "spoken_reference_image_path": project.config.images.spoken_reference_image_path,
+            "visual_scenes": None,
+            "target_scene_seconds": None,
+            "short_verse_visual_change_seconds": (
+                project.config.shorts_script.verse_visual_change_seconds
+            ),
+            "render_canvas": [render_config.width, render_config.height],
+        }
+    )
+    first_attempts = project.stages["scenes"].attempts
+
+    reused = build_scenes(layout, skip_approvals=True)
+    reloaded = layout.load_manifest()
+
+    assert project.stages["scenes"].input_hash == expected_legacy_hash
+    assert reloaded.stages["scenes"].attempts == first_attempts
+    assert reused == scenes
+
+
+def test_3d_short_executes_persisted_scroll_stop_framing(tmp_path) -> None:
+    layout = _creative_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+    write_json(layout.shorts_script_package_staging, _creative_package(queue))
+    import_shorts_script_package(layout)
+
+    scenes = build_scenes(layout, skip_approvals=True)
+
+    assert "plano médio ou close" in scenes.scenes[0].shot
+    assert "interromper o scroll com ação concreta" in scenes.scenes[0].narrative_function
+    assert "imagem-âncora e base da capa" in scenes.scenes[0].prompt.assembled_prompt
+    assert "acabamento especialmente caprichado" in scenes.scenes[0].prompt.assembled_prompt
+    assert "Sujeito dominante: Davi e o passo interrompido" in (
+        scenes.scenes[0].prompt.assembled_prompt
+    )
+    assert "Ação já em curso: interrompe o passo" in scenes.scenes[0].prompt.assembled_prompt
+    assert "Mudança visível (body_translation)" in scenes.scenes[0].prompt.assembled_prompt
+
+
+def test_narration_block_short_applies_opening_transition_contract_to_first_prompt(
+    tmp_path,
+) -> None:
+    layout = _creative_project(tmp_path)
+    manifest = layout.load_manifest()
+    manifest.config.images.scene_planning_standard = "narration_block_visual_v1"
+    layout.save_manifest(manifest)
+    queue = prepare_shorts_script_queue(layout)
+    package = _creative_package(queue)
+    visual_scenes = []
+    for section_index, section in enumerate(package.script.sections):
+        narration_parts = [section.narration]
+        if section_index == 0:
+            boundary = section.narration.find(". ")
+            assert boundary > 0
+            narration_parts = [
+                section.narration[: boundary + 1],
+                section.narration[boundary + 2 :],
+            ]
+        visual_scenes.extend(
+            ShortsVisualScene(
+                section_id=section.section_id,
+                narration=narration,
+                scene_description=(
+                    f"Ação concreta distinta para {section.section_id}, bloco {part_index}."
+                ),
+                visual_relation="contextual",
+            )
+            for part_index, narration in enumerate(narration_parts, start=1)
+        )
+    package = package.model_copy(
+        update={"strategy": package.strategy.model_copy(update={"visual_scenes": visual_scenes})}
+    )
+    write_json(layout.shorts_script_package_staging, package)
+    import_shorts_script_package(layout)
+
+    scenes = build_scenes(layout, skip_approvals=True)
+    prompt = scenes.scenes[0].prompt.assembled_prompt
+
+    assert "Ação concreta distinta para section-001" in prompt
+    assert "Sujeito dominante: Davi e o passo interrompido" in prompt
+    assert "Ação já em curso: interrompe o passo" in prompt
+    assert "Mudança visível (body_translation)" in prompt
+    assert "Tensão visual concreta: continuar avançando ou responder" in prompt
+
+
+def test_compact_3d_short_uses_imported_visual_blocks_even_with_legacy_scene_setting(
+    tmp_path,
+) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=True)
+    manifest = layout.load_manifest()
+    assert manifest.config.images.scene_planning_standard == "section_visual_direction_v1"
+    assert manifest.config.shorts_script.generation_mode == "deterministic_compact_visual_plan_v1"
+    prepare_shorts_script_queue(layout)
+    materialize_compact_visual_fallback(layout)
+    package = import_shorts_script_package(layout)
+
+    scenes = build_scenes(layout, skip_approvals=True)
+
+    planned_opening = package.strategy.visual_scenes[0].scene_description
+    assert len(scenes.scenes) == len(package.strategy.visual_scenes)
+    assert planned_opening in scenes.scenes[0].prompt.assembled_prompt
+    assert "Sujeito dominante:" in scenes.scenes[0].prompt.assembled_prompt
+    assert "Ação já em curso:" in scenes.scenes[0].prompt.assembled_prompt
+    assert "Tensão visual concreta:" in scenes.scenes[0].prompt.assembled_prompt
+    assert "imagem-âncora e base da capa" in scenes.scenes[0].prompt.assembled_prompt
+
+
+def test_performance_advisories_are_frozen_once_per_queue(monkeypatch, tmp_path) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
+    calls = 0
+
+    def changing_advisories(_layout):
+        nonlocal calls
+        calls += 1
+        return [{"snapshot_id": f"snapshot-{calls}", "recommended_actions": ["ação"]}]
+
+    monkeypatch.setattr(
+        "pipeline_videos.analytics.compact_short_performance_advisories",
+        changing_advisories,
+    )
+
+    first = prepare_shorts_script_queue(layout)
+    second = prepare_shorts_script_queue(layout)
+    materialize_compact_visual_fallback(layout)
+    context = read_json(layout.shorts_script_context)
+
+    assert calls == 1
+    assert second["job_id"] == first["job_id"]
+    assert second["input_hash"] == first["input_hash"]
+    assert first["frozen_performance_advisories"][0]["snapshot_id"] == "snapshot-1"
+    assert context["confirmed_performance_advisories"][0]["snapshot_id"] == "snapshot-1"
+
+
+def test_scroll_stop_queue_hash_tracks_visual_contract_changes(tmp_path) -> None:
+    layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
+    first = prepare_shorts_script_queue(layout)
+    manifest = layout.load_manifest()
+    manifest.config.images.visual_standard_id = "cinematic-family-3d-v1"
+    layout.save_manifest(manifest)
+
+    second = prepare_shorts_script_queue(layout)
+
+    assert second["input_hash"] != first["input_hash"]
 
 
 def test_painterly_short_maps_each_audio_block_to_a_specific_varied_scene(tmp_path) -> None:
@@ -1242,6 +1885,9 @@ def test_painterly_short_maps_each_audio_block_to_a_specific_varied_scene(tmp_pa
     assert all(
         "bordas direita e inferior" not in scene.prompt.assembled_prompt for scene in scenes.scenes
     )
+    assert "plano médio ou close de alto impacto" in scenes.scenes[0].shot
+    assert "interromper o scroll com ação concreta" in scenes.scenes[0].narrative_function
+    assert "área vazia decorativa obrigatória" in scenes.scenes[0].prompt.assembled_prompt
     reference_scene = scenes.scenes[-1]
     assert reference_scene.section_id == "section-003"
     assert reference_scene.image_source_mode == "fixed_profile_asset_v1"

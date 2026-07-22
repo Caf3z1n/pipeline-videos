@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 from enum import StrEnum
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 type ElevenLabsVoiceVariant = Literal["jesus_1", "jesus_2"]
 
@@ -89,6 +90,7 @@ type HookContract = Literal[
     "mode_compatible_v1",
     "user_six_v1",
     "cinematic_interruption_v1",
+    "high_stakes_opening_v1",
 ]
 
 type HookFamily = Literal[
@@ -107,6 +109,7 @@ type HookFamily = Literal[
     "consequence_first",
     "quote_first",
     "emotional_interruption",
+    "belief_reversal",
 ]
 
 USER_SIX_HOOK_FAMILIES: tuple[HookFamily, ...] = (
@@ -117,6 +120,21 @@ USER_SIX_HOOK_FAMILIES: tuple[HookFamily, ...] = (
     "want_to_learn_start",
     "never_do_this",
 )
+
+HIGH_STAKES_HOOK_FAMILIES: tuple[HookFamily, ...] = (
+    "surprising_fact",
+    "contradiction",
+    "belief_reversal",
+    "consequence_first",
+    "start_in_scene",
+    "quote_first",
+    "unanswered_question",
+)
+
+type ShortsEditorialProfile = Literal[
+    "verse_led_v1",
+    "high_stakes_biblical_question_v1",
+]
 
 MIN_SHORT_DURATION_SECONDS = 15
 MIN_LONG_DURATION_SECONDS = 30
@@ -288,9 +306,28 @@ class AudioConfig(PipelineModel):
     stability: float = 0.55
     similarity_boost: float = 0.75
     style: float = 0.0
+    speed: float = Field(default=1.0, ge=0.7, le=1.2)
+    speech_rate_policy: Literal[
+        "natural_voice_v1",
+        "explicit_user_override_v1",
+    ] = "natural_voice_v1"
     use_speaker_boost: bool = True
     sample_rate: int = 48000
     comment_response_silence_seconds: float = Field(default=0.0, ge=0.0, le=3.0)
+
+    @model_validator(mode="after")
+    def protect_natural_voice_rate(self) -> AudioConfig:
+        if self.speech_rate_policy == "natural_voice_v1" and not math.isclose(
+            self.speed,
+            1.0,
+            abs_tol=1e-9,
+        ):
+            raise ValueError(
+                "A velocidade natural da voz precisa permanecer em 1.0; "
+                "uma alteração exige pedido explícito do usuário e "
+                "speech_rate_policy=explicit_user_override_v1"
+            )
+        return self
 
     @field_validator("provider", mode="before")
     @classmethod
@@ -310,6 +347,10 @@ class ImageConfig(PipelineModel):
         "section_visual_direction_v1",
         "narration_block_visual_v1",
     ] = "section_visual_direction_v1"
+    opening_visual_standard: Literal[
+        "legacy_v1",
+        "scroll_stop_concrete_v1",
+    ] = "legacy_v1"
     composition_safety_mode: Literal[
         "caption_safe_area_v1",
         "unrestricted_scene_v1",
@@ -469,6 +510,7 @@ class ShortsScriptConfig(PipelineModel):
         "deterministic_verified_compact_v1",
     ] = "independent_model_v1"
     duration_profile: Literal["standard_45_55_v1", "adaptive_compact_v1"] = "standard_45_55_v1"
+    editorial_profile: ShortsEditorialProfile = "verse_led_v1"
     compact_narrative_standard: Literal["cinematic_jesus_devotional_v1"] | None = None
     require_direct_jesus_speech: bool = False
     require_emotional_interruption_hook: bool = False
@@ -496,7 +538,10 @@ class ShortsScriptConfig(PipelineModel):
     require_verified_scripture: bool = True
     verse_opening_max_seconds: float = Field(default=12.0, ge=4.0, le=15.0)
     scripture_citation_min_start_seconds: float = Field(default=8.0, ge=0.0, le=15.0)
-    scripture_citation_max_end_seconds: float = Field(default=20.0, ge=6.0, le=30.0)
+    scripture_citation_max_end_seconds: float = Field(default=20.0, ge=6.0, le=44.0)
+    scripture_citation_timing_policy: Literal["fixed_window_v1", "adaptive_payoff_v1"] = (
+        "fixed_window_v1"
+    )
     verse_visual_change_seconds: float = Field(default=5.5, ge=2.5, le=8.0)
     max_literal_verse_words: int = Field(default=40, ge=8, le=80)
     allow_contiguous_multi_verse_citations: bool = True
@@ -592,7 +637,11 @@ class ProjectManifest(PipelineModel):
     updated_at: str
     root_hint: str = "."
     target_duration_seconds: int = 540
-    duration_policy: Literal["exact_target_v1", "adaptive_range_v1"] = "exact_target_v1"
+    duration_policy: Literal[
+        "preferred_target_v1",
+        "exact_target_v1",
+        "adaptive_range_v1",
+    ] = "exact_target_v1"
     requested_duration_min_seconds: float | None = Field(default=None, ge=1.0)
     requested_duration_max_seconds: float | None = Field(default=None, ge=1.0)
     effective_duration_seconds: float | None = Field(default=None, ge=0.0)
@@ -606,15 +655,24 @@ class ProjectManifest(PipelineModel):
     def validate_duration_contract(self) -> ProjectManifest:
         minimum = self.requested_duration_min_seconds
         maximum = self.requested_duration_max_seconds
-        if self.duration_policy == "adaptive_range_v1":
+        if self.duration_policy in {"preferred_target_v1", "adaptive_range_v1"}:
             if minimum is None or maximum is None:
-                raise ValueError("A duração adaptativa exige limites mínimo e máximo")
+                raise ValueError("A política de duração exige limites mínimo e máximo")
             if maximum < minimum:
                 raise ValueError("O limite máximo de duração deve ser maior ou igual ao mínimo")
             if not minimum <= self.target_duration_seconds <= maximum:
                 raise ValueError(
                     "A duração preferencial precisa permanecer dentro da faixa solicitada"
                 )
+        if (
+            self.duration_policy == "exact_target_v1"
+            and (minimum is not None or maximum is not None)
+            and (
+                minimum != float(self.target_duration_seconds)
+                or maximum != float(self.target_duration_seconds)
+            )
+        ):
+            raise ValueError("A duração exata exige limites iguais ao alvo solicitado")
         if (
             self.effective_duration_seconds is not None
             and self.duration_policy == "adaptive_range_v1"
@@ -662,6 +720,14 @@ class Briefing(PipelineModel):
     hook_policy: HookPolicy = "auto"
     hook_family: HookFamily = "auto"
     hook_contract: HookContract = "mode_compatible_v1"
+    editorial_profile: ShortsEditorialProfile = "verse_led_v1"
+    question_id: str = ""
+    opening_hook: str = ""
+    implicit_viewer_question: str = ""
+    primary_literal_source_id: str = ""
+    required_answer_points: list[str] = Field(default_factory=list)
+    uncertainty_boundaries: list[str] = Field(default_factory=list)
+    answer_status: Literal["direct", "bounded_inference", "open"] | None = None
     viewer_outcome: str = ""
     creative_rationale: str = ""
 
@@ -682,6 +748,24 @@ class Briefing(PipelineModel):
             raise ValueError(
                 "hook_contract=cinematic_interruption_v1 exige emotional_interruption."
             )
+        if self.hook_contract == "high_stakes_opening_v1":
+            if self.hook_family not in HIGH_STAKES_HOOK_FAMILIES:
+                raise ValueError(
+                    "hook_contract=high_stakes_opening_v1 exige uma familia investigativa."
+                )
+            required = {
+                "question_id": self.question_id,
+                "opening_hook": self.opening_hook,
+                "implicit_viewer_question": self.implicit_viewer_question,
+                "primary_literal_source_id": self.primary_literal_source_id,
+            }
+            missing = [name for name, value in required.items() if not value.strip()]
+            if missing or not self.required_answer_points or self.answer_status is None:
+                details = ", ".join([*missing, "required_answer_points/answer_status"])
+                raise ValueError(
+                    "O perfil de grande pergunta biblica exige contrato editorial completo: "
+                    f"{details}."
+                )
         return self
 
 
@@ -738,6 +822,9 @@ class RelatedBiblicalPassage(PipelineModel):
         "character_development",
         "character_outcome",
         "direct_speech",
+        "supporting_fact",
+        "tension",
+        "uncertainty_boundary",
     ]
     spoken_by: Literal["jesus", "other", "unspecified"] = "unspecified"
 
@@ -805,6 +892,7 @@ class VerseCandidate(PipelineModel):
         "general",
         "long_form_anchor",
         "narrative_story",
+        "high_stakes_question",
     ] = "legacy"
     recommended_formats: list[Literal["short", "long"]] = Field(
         default_factory=lambda: ["short", "long"]
@@ -820,6 +908,46 @@ class VerseCandidate(PipelineModel):
     compact_hook_strength_score: float = Field(default=0.0, ge=0.0, le=1.0)
     compact_message_value_score: float = Field(default=0.0, ge=0.0, le=1.0)
     compact_rewatch_value_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    editorial_profile: ShortsEditorialProfile = "verse_led_v1"
+    opening_hooks: dict[HookFamily, str] = Field(default_factory=dict)
+    implicit_viewer_question: str = ""
+    required_answer_points: list[str] = Field(default_factory=list)
+    uncertainty_boundaries: list[str] = Field(default_factory=list)
+    answer_status: Literal["direct", "bounded_inference", "open"] | None = None
+    preferred_creative_mode: CreativeMode | None = None
+
+    @model_validator(mode="after")
+    def validate_high_stakes_question(self) -> VerseCandidate:
+        if self.editorial_profile != "high_stakes_biblical_question_v1":
+            return self
+        if self.catalog_segment != "high_stakes_question":
+            raise ValueError(
+                "Perguntas de alto interesse exigem catalog_segment=high_stakes_question."
+            )
+        invalid_families = set(self.opening_hooks).difference(HIGH_STAKES_HOOK_FAMILIES)
+        if invalid_families:
+            raise ValueError(
+                "Familias de hook invalidas no perfil investigativo: "
+                + ", ".join(sorted(invalid_families))
+            )
+        required_strings = {
+            "central_question": self.central_question,
+            "implicit_viewer_question": self.implicit_viewer_question,
+            "possible_reveal": self.possible_reveal,
+        }
+        missing = [name for name, value in required_strings.items() if not value.strip()]
+        if (
+            missing
+            or not self.opening_hooks
+            or not self.required_answer_points
+            or self.answer_status is None
+            or self.preferred_creative_mode is None
+        ):
+            raise ValueError(
+                "Pergunta de alto interesse incompleta: "
+                + ", ".join([*missing, "hooks/resposta/modo"])
+            )
+        return self
 
 
 class VerseCatalog(PipelineModel):
@@ -846,7 +974,9 @@ class VerseUsageRecord(PipelineModel):
     environment: str | None = None
     project_id: str
     project_path: str
+    candidate_id: str | None = None
     video_format: Literal["landscape", "short"]
+    duration_profile: str | None = None
     status: Literal["reserved", "used"]
     references: list[str] = Field(default_factory=list)
     supporting_references: list[str] = Field(default_factory=list)
@@ -865,6 +995,7 @@ class VerseUsageRecord(PipelineModel):
         | None
     ) = None
     hook_family: str | None = None
+    opening_hook: str | None = None
     creative_mode: CreativeMode | None = None
     engagement_mode: Literal["comment", "subscribe", "share"] | None = None
     created_at: str
@@ -1457,6 +1588,20 @@ class YouTubePublicationAsset(PipelineModel):
     error: str | None = None
 
 
+class ShortPublicationAnalyticsContext(PipelineModel):
+    """Immutable editorial fingerprint captured when a Short is uploaded."""
+
+    duration_profile: str
+    video_duration_seconds: float | None = Field(default=None, gt=0.0)
+    video_duration_source: Literal["ffprobe", "manifest_fallback"] | None = None
+    hook_contract: str | None = None
+    visual_standard_id: str
+    hook_text: str | None = None
+    hook_mechanism: str | None = None
+    opening_visual_standard: str
+    first_frame_pattern: str | None = None
+
+
 class YouTubePublicationRecord(PipelineModel):
     schema_version: Literal["1.0"] = "1.0"
     project_id: str
@@ -1473,6 +1618,7 @@ class YouTubePublicationRecord(PipelineModel):
     made_for_kids: bool = False
     contains_synthetic_media: bool = True
     notify_subscribers: bool = False
+    short_analytics_context: ShortPublicationAnalyticsContext | None = None
     video: YouTubePublicationAsset
     metadata: YouTubePublicationAsset
     thumbnail: YouTubePublicationAsset
@@ -1748,6 +1894,42 @@ class ShortsRetentionStory(PipelineModel):
     source_ids: list[str] = Field(default_factory=list)
 
 
+class ShortsOpeningVisualContract(PipelineModel):
+    """Structured visible transition used by scroll-stop openings."""
+
+    standard: Literal["scroll_stop_concrete_v1"] = "scroll_stop_concrete_v1"
+    action_kind: Literal[
+        "object_state_change",
+        "body_translation",
+        "environment_change",
+        "choice_executed",
+        "interaction_change",
+    ]
+    dominant_subject_or_object: str = Field(min_length=1)
+    observable_action: str = Field(min_length=1)
+    initial_state: str = Field(min_length=1)
+    resulting_state: str = Field(min_length=1)
+    concrete_tension: str = Field(min_length=1)
+    shot_scale: Literal["close", "medium"]
+
+    @model_validator(mode="after")
+    def validate_visible_transition(self) -> ShortsOpeningVisualContract:
+        values = (
+            self.dominant_subject_or_object,
+            self.observable_action,
+            self.initial_state,
+            self.resulting_state,
+            self.concrete_tension,
+        )
+        if not all(value.strip() for value in values):
+            raise ValueError("O contrato visual da abertura não pode conter campos vazios")
+        initial = " ".join(self.initial_state.casefold().split())
+        resulting = " ".join(self.resulting_state.casefold().split())
+        if initial == resulting:
+            raise ValueError("O estado resultante da abertura precisa diferir do estado inicial")
+        return self
+
+
 class ShortsCreativeDirection(PipelineModel):
     pattern: Literal["creative_retention_v3"] = "creative_retention_v3"
     creative_mode: CreativeMode
@@ -1767,6 +1949,7 @@ class ShortsCreativeDirection(PipelineModel):
     callback: str = ""
     engagement: ShortsEngagementPlan
     source_ids: list[str] = Field(default_factory=list)
+    opening_visual_contract: ShortsOpeningVisualContract | None = None
 
     @model_validator(mode="after")
     def validate_creative_direction(self) -> ShortsCreativeDirection:
@@ -1840,6 +2023,23 @@ class CompactVisualConcept(PipelineModel):
     block_id: str
     scene_description: str = Field(min_length=1)
     visual_relation: Literal["literal", "contextual", "symbolic"]
+    attention_role: Literal["scroll_stop_opening", "progression"] | None = None
+    dominant_subject_or_object: str | None = None
+    observable_action: str | None = None
+    action_kind: (
+        Literal[
+            "object_state_change",
+            "body_translation",
+            "environment_change",
+            "choice_executed",
+            "interaction_change",
+        ]
+        | None
+    ) = None
+    initial_state: str | None = None
+    resulting_state: str | None = None
+    concrete_tension: str | None = None
+    shot_scale: Literal["close", "medium", "wide"] | None = None
 
 
 class CompactVisualPlan(PipelineModel):
@@ -1919,3 +2119,220 @@ class Experiment(PipelineModel):
 class ExperimentMemory(PipelineModel):
     schema_version: Literal["1.0"] = "1.0"
     experiments: list[Experiment] = Field(default_factory=list)
+
+
+class ShortMetricSnapshot(PipelineModel):
+    """One immutable observation of a Short's post-publication performance."""
+
+    snapshot_id: str = Field(min_length=1)
+    video_id: str = Field(min_length=1)
+    observed_at: AwareDatetime
+    published_at: AwareDatetime | None = None
+    window_start: AwareDatetime | None = None
+    window_end: AwareDatetime | None = None
+    source: Literal[
+        "youtube_studio",
+        "youtube_analytics_api",
+        "manual",
+        "combined",
+    ]
+    processing_status: Literal["processing", "partial", "final"] = "partial"
+    view_counting_standard: Literal[
+        "shorts_starts_2025",
+        "legacy_engaged_views",
+        "unknown",
+    ] = "unknown"
+    shown_in_feed: int | None = Field(default=None, ge=0)
+    views: int | None = Field(default=None, ge=0)
+    engaged_views: int | None = Field(default=None, ge=0)
+    stayed_to_watch_percent: float | None = Field(default=None, ge=0.0, le=100.0)
+    swiped_away_percent: float | None = Field(default=None, ge=0.0, le=100.0)
+    average_view_duration_seconds: float | None = Field(default=None, ge=0.0)
+    average_percentage_viewed: float | None = Field(default=None, ge=0.0)
+    retention_1s_percent: float | None = Field(default=None, ge=0.0)
+    retention_3s_percent: float | None = Field(default=None, ge=0.0)
+    retention_hook_end_percent: float | None = Field(default=None, ge=0.0)
+    retention_scripture_start_percent: float | None = Field(default=None, ge=0.0)
+    retention_reference_start_percent: float | None = Field(default=None, ge=0.0)
+    likes: int | None = Field(default=None, ge=0)
+    comments: int | None = Field(default=None, ge=0)
+    shares: int | None = Field(default=None, ge=0)
+    subscribers_gained: int | None = Field(default=None, ge=0)
+    subscribers_lost: int | None = Field(default=None, ge=0)
+    video_duration_seconds: float | None = Field(default=None, gt=0.0)
+    duration_profile: str | None = None
+    hook_contract: str | None = None
+    visual_standard_id: str | None = None
+    hook_text: str | None = None
+    hook_mechanism: str | None = None
+    opening_visual_standard: str | None = None
+    first_frame_pattern: str | None = None
+    experiment_id: str | None = None
+    experiment_arm: str | None = None
+    notes: str | None = None
+
+    @field_validator(
+        "shown_in_feed",
+        "views",
+        "engaged_views",
+        "stayed_to_watch_percent",
+        "swiped_away_percent",
+        "average_view_duration_seconds",
+        "average_percentage_viewed",
+        "retention_1s_percent",
+        "retention_3s_percent",
+        "retention_hook_end_percent",
+        "retention_scripture_start_percent",
+        "retention_reference_start_percent",
+        "likes",
+        "comments",
+        "shares",
+        "subscribers_gained",
+        "subscribers_lost",
+        "video_duration_seconds",
+        mode="before",
+    )
+    @classmethod
+    def reject_boolean_metrics(cls, value: Any) -> Any:
+        if isinstance(value, bool):
+            raise ValueError("métricas numéricas não aceitam valores booleanos")
+        if isinstance(value, (int, float)) and not math.isfinite(float(value)):
+            raise ValueError("métricas numéricas precisam ser finitas")
+        return value
+
+    @field_validator(
+        "stayed_to_watch_percent",
+        "swiped_away_percent",
+        "average_view_duration_seconds",
+        "average_percentage_viewed",
+        "retention_1s_percent",
+        "retention_3s_percent",
+        "retention_hook_end_percent",
+        "retention_scripture_start_percent",
+        "retention_reference_start_percent",
+        "video_duration_seconds",
+    )
+    @classmethod
+    def require_finite_metrics(cls, value: float | None) -> float | None:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("métricas numéricas precisam ser finitas")
+        return value
+
+    @model_validator(mode="after")
+    def validate_snapshot_consistency(self) -> ShortMetricSnapshot:
+        if self.published_at is not None and self.published_at > self.observed_at:
+            raise ValueError("published_at não pode ser posterior a observed_at")
+        if (
+            self.window_start is not None
+            and self.window_end is not None
+            and self.window_end < self.window_start
+        ):
+            raise ValueError("window_end não pode ser anterior a window_start")
+        if self.window_start is not None and self.window_start > self.observed_at:
+            raise ValueError("window_start não pode ser posterior a observed_at")
+        if self.window_end is not None and self.window_end > self.observed_at:
+            raise ValueError("window_end não pode ser posterior a observed_at")
+        if (
+            self.published_at is not None
+            and self.window_start is not None
+            and self.window_start < self.published_at
+        ):
+            raise ValueError("window_start não pode ser anterior a published_at")
+        if (
+            self.published_at is not None
+            and self.window_end is not None
+            and self.window_end < self.published_at
+        ):
+            raise ValueError("window_end não pode ser anterior a published_at")
+        if (
+            self.engaged_views is not None
+            and self.views is not None
+            and self.engaged_views > self.views
+        ):
+            raise ValueError("engaged_views não pode ser maior que views")
+        if self.stayed_to_watch_percent is not None and self.swiped_away_percent is not None:
+            total = self.stayed_to_watch_percent + self.swiped_away_percent
+            if abs(total - 100.0) > 1.5:
+                raise ValueError(
+                    "stayed_to_watch_percent + swiped_away_percent precisa totalizar "
+                    "aproximadamente 100"
+                )
+        if self.source == "youtube_analytics_api" and (
+            self.stayed_to_watch_percent is not None or self.swiped_away_percent is not None
+        ):
+            raise ValueError(
+                "A API do YouTube Analytics não fornece Stayed to watch/Swiped away; "
+                "use source=youtube_studio ou combined."
+            )
+        return self
+
+
+class ShortMetricSnapshotMemory(PipelineModel):
+    schema_version: Literal["1.0"] = "1.0"
+    snapshots: list[ShortMetricSnapshot] = Field(default_factory=list)
+
+
+class ShortPerformanceNotification(PipelineModel):
+    code: str
+    severity: Literal["info", "warning", "critical"]
+    stage: Literal["evidence", "appeal", "engagement", "satisfaction"]
+    title: str
+    evidence: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+
+
+class ShortPerformanceDiagnostic(PipelineModel):
+    snapshot_id: str
+    video_id: str
+    observed_at: AwareDatetime
+    evidence_end_at: AwareDatetime
+    video_duration_seconds: float | None = Field(default=None, gt=0.0)
+    duration_cohort: str | None = None
+    duration_profile: str | None = None
+    hook_contract: str | None = None
+    visual_standard_id: str | None = None
+    hook_text: str | None = None
+    hook_mechanism: str | None = None
+    opening_visual_standard: str | None = None
+    first_frame_pattern: str | None = None
+    policy_version: Literal["appeal_engagement_satisfaction_v1"] = (
+        "appeal_engagement_satisfaction_v1"
+    )
+    evidence_status: Literal["insufficient_sample", "provisional", "confirmed"]
+    stage_evidence: dict[
+        str,
+        Literal["insufficient_sample", "provisional", "confirmed"],
+    ] = Field(default_factory=dict)
+    stage_sample_sizes: dict[str, int] = Field(default_factory=dict)
+    stage_sample_basis: dict[str, str] = Field(default_factory=dict)
+    sample_size: int | None = Field(default=None, ge=0)
+    sample_basis: Literal["shown_in_feed", "views_proxy", "unavailable"]
+    appeal_status: Literal[
+        "unknown",
+        "critical",
+        "below_baseline",
+        "monitor",
+        "healthy",
+        "reference",
+    ]
+    engagement_status: Literal["unknown", "weak", "developing", "strong", "replay_strong"]
+    satisfaction_status: Literal["unknown", "observed"]
+    primary_diagnosis: Literal[
+        "insufficient_evidence",
+        "appeal_metric_missing",
+        "appeal_sample_insufficient",
+        "opening_bottleneck",
+        "opening_and_progression",
+        "progression_bottleneck",
+        "mixed_signals",
+        "editorial_reference_candidate",
+    ]
+    derived_metrics: dict[str, float] = Field(default_factory=dict)
+    notifications: list[ShortPerformanceNotification] = Field(default_factory=list)
+    confidence_note: str
+
+
+class ShortPerformanceDiagnostics(PipelineModel):
+    schema_version: Literal["1.0"] = "1.0"
+    policy: dict[str, float | int | str]
+    diagnostics: list[ShortPerformanceDiagnostic] = Field(default_factory=list)

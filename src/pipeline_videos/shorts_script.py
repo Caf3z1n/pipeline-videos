@@ -18,6 +18,7 @@ from pipeline_videos.creative_direction import (
 )
 from pipeline_videos.editorial import quoted_comment_response
 from pipeline_videos.models import (
+    HIGH_STAKES_HOOK_FAMILIES,
     USER_SIX_HOOK_FAMILIES,
     BiblicalReview,
     Briefing,
@@ -48,8 +49,10 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION = "5.2"
-SHORTS_SCRIPT_ALGORITHM_VERSION = "6.2"
+LEGACY_SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION = "5.2"
+SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION = "5.4"
+LEGACY_SHORTS_SCRIPT_ALGORITHM_VERSION = "6.2"
+SHORTS_SCRIPT_ALGORITHM_VERSION = "6.4"
 LEGACY_SCRIPTURE_BOUNDARY_PHRASE = "Até aqui, o texto bíblico."
 
 
@@ -132,6 +135,21 @@ def _short_timeline_seconds(
     duration_seconds: int,
     config: ShortsScriptConfig,
 ) -> dict[str, list[float | int] | None]:
+    if config.scripture_citation_timing_policy == "adaptive_payoff_v1":
+        cta_start = max(config.hook_target_seconds + 8.0, duration_seconds - config.cta_max_seconds)
+        return {
+            "hook": [0, config.hook_target_seconds],
+            "question_and_evidence": [
+                config.hook_target_seconds,
+                round(duration_seconds * 0.62, 1),
+            ],
+            "scripture_adaptive": [
+                config.scripture_citation_min_start_seconds,
+                config.scripture_citation_max_end_seconds,
+            ],
+            "resolution_or_synthesis": [round(duration_seconds * 0.58, 1), cta_start],
+            "single_action_cta": [cta_start, duration_seconds],
+        }
     if config.duration_profile == "standard_45_55_v1":
         return {
             "hook": [0, 2],
@@ -313,7 +331,23 @@ def _require_literal_opening_source(layout: ProjectLayout) -> list[SourceEntry]:
     )
 
 
-def _stable_inputs(layout: ProjectLayout) -> dict[str, Any]:
+def _uses_scroll_stop_contract(layout: ProjectLayout) -> bool:
+    return layout.load_manifest().config.images.opening_visual_standard == "scroll_stop_concrete_v1"
+
+
+def _queue_schema_version(layout: ProjectLayout) -> str:
+    return (
+        SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION
+        if _uses_scroll_stop_contract(layout)
+        else LEGACY_SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION
+    )
+
+
+def _stable_inputs(
+    layout: ProjectLayout,
+    *,
+    performance_advisories: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     required = {
         "briefing": layout.briefing,
         "sources": layout.sources,
@@ -326,8 +360,17 @@ def _stable_inputs(layout: ProjectLayout) -> dict[str, Any]:
     project = layout.load_manifest()
     if project.video_format != "short":
         raise RuntimeError("A etapa shorts_script só é válida para projetos no formato Short.")
-    return {
-        "algorithm": SHORTS_SCRIPT_ALGORITHM_VERSION,
+    scroll_stop = _uses_scroll_stop_contract(layout)
+    if scroll_stop and performance_advisories is None:
+        from pipeline_videos.analytics import compact_short_performance_advisories
+
+        performance_advisories = compact_short_performance_advisories(layout)
+    payload = {
+        "algorithm": (
+            SHORTS_SCRIPT_ALGORITHM_VERSION
+            if scroll_stop
+            else LEGACY_SHORTS_SCRIPT_ALGORITHM_VERSION
+        ),
         "project_id": project.project_id,
         "title": project.title,
         "target_duration_seconds": project.target_duration_seconds,
@@ -335,10 +378,44 @@ def _stable_inputs(layout: ProjectLayout) -> dict[str, Any]:
         "briefing": read_json(layout.briefing),
         "sources": read_json(layout.sources),
     }
+    if scroll_stop:
+        payload["opening_visual_standard"] = project.config.images.opening_visual_standard
+        payload["visual_config"] = {
+            "visual_standard_id": project.config.images.visual_standard_id,
+            "scene_planning_standard": project.config.images.scene_planning_standard,
+            "composition_safety_mode": project.config.images.composition_safety_mode,
+            "spoken_reference_image_mode": (project.config.images.spoken_reference_image_mode),
+            "spoken_reference_image_path": (project.config.images.spoken_reference_image_path),
+            "thumbnail_generation_mode": (project.config.youtube_growth.thumbnail_generation_mode),
+        }
+        payload["confirmed_performance_advisories"] = performance_advisories or []
+    return payload
 
 
-def shorts_script_input_hash(layout: ProjectLayout) -> str:
-    return sha256_value(_stable_inputs(layout))
+def shorts_script_input_hash(
+    layout: ProjectLayout,
+    *,
+    performance_advisories: list[dict[str, Any]] | None = None,
+) -> str:
+    return sha256_value(_stable_inputs(layout, performance_advisories=performance_advisories))
+
+
+def _frozen_performance_advisories(
+    layout: ProjectLayout,
+    queue: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Return the external evidence frozen when this queue was materialized."""
+
+    raw = queue.get("frozen_performance_advisories")
+    if raw is None and layout.shorts_script_context.is_file():
+        context = read_json(layout.shorts_script_context)
+        if isinstance(context, dict):
+            raw = context.get("confirmed_performance_advisories", [])
+    if raw is None:
+        raw = []
+    if not isinstance(raw, list) or not all(isinstance(item, dict) for item in raw):
+        raise ValueError("A fila contém performance advisories congelados inválidos.")
+    return deepcopy(raw)
 
 
 def _baseline_hash(layout: ProjectLayout) -> str | None:
@@ -364,6 +441,8 @@ def _recent_decisions(layout: ProjectLayout, *, limit: int = 12) -> list[dict[st
 def _shorts_context_payload(
     layout: ProjectLayout,
     literal_candidates: list[SourceEntry],
+    *,
+    performance_advisories: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     project = layout.load_manifest()
     config = project.config.shorts_script
@@ -387,6 +466,8 @@ def _shorts_context_payload(
         payload["current_script_for_critique"] = read_json(layout.script)
     if layout.biblical_review.is_file():
         payload["current_biblical_review_for_critique"] = read_json(layout.biblical_review)
+    if _uses_scroll_stop_contract(layout) and performance_advisories:
+        payload["confirmed_performance_advisories"] = performance_advisories
     return payload
 
 
@@ -488,17 +569,591 @@ def _has_safe_compact_boundary(text: str) -> bool:
     return _SAFE_COMPACT_END_RE.search(text.strip()) is not None
 
 
+_OPENING_TRANSITION_BY_MOTIF: dict[str, tuple[str, str, str]] = {
+    "courageous_next_step": (
+        "body_translation",
+        "um pé permanece no apoio seguro e a mão prende o último poste",
+        "o pé alcança a ponte enquanto a mão solta o poste",
+    ),
+    "contextual_decision": (
+        "choice_executed",
+        "dois objetos permanecem alinhados diante das mãos indecisas",
+        "um objeto é reposicionado sob a luz enquanto o outro fica para trás",
+    ),
+    "mercy_with_truth": (
+        "interaction_change",
+        "a pedra permanece erguida diante da pessoa ferida",
+        "a pedra fica abaixada enquanto a faixa limpa alcança o ferimento",
+    ),
+    "release_overload": (
+        "object_state_change",
+        "muitas tigelas instáveis ocupam os dois braços",
+        "uma tigela permanece nas mãos e as demais repousam em superfície segura",
+    ),
+    "peace_before_circumstances": (
+        "choice_executed",
+        "a mão aperta a tranca e o corpo permanece voltado para a tempestade",
+        "a mão relaxa sobre a tranca e o corpo se volta para Jesus",
+    ),
+    "hope_beyond_now": (
+        "environment_change",
+        "o ferrolho mantém a porta escura completamente fechada",
+        "o ferrolho está retirado e uma fresta de luz atravessa a porta",
+    ),
+    "remain_connected": (
+        "interaction_change",
+        "o ramo aparece tensionado para longe da videira",
+        "o ramo volta a tocar a videira e é preso pelas mãos",
+    ),
+    "guidance_in_confusion": (
+        "object_state_change",
+        "o mapa permanece desalinhado diante de várias trilhas",
+        "o mapa fica alinhado com um único caminho iluminado",
+    ),
+    "inspect_the_fruit": (
+        "object_state_change",
+        "o fruto de casca intacta esconde o interior",
+        "o fruto aberto expõe o interior estragado ao lado do fruto saudável",
+    ),
+    "joy_through_grief": (
+        "environment_change",
+        "a lágrima permanece no rosto diante da janela fechada",
+        "a janela está aberta para a luz enquanto a lágrima é enxugada",
+    ),
+    "need_placed_in_prayer": (
+        "object_state_change",
+        "o saco pesado permanece apertado contra o corpo",
+        "o saco repousa no chão e as duas mãos aparecem abertas",
+    ),
+    "good_without_applause": (
+        "interaction_change",
+        "o pão permanece nas mãos longe da pessoa necessitada",
+        "o pão passa pelas mãos da porta lateral enquanto a multidão olha para outro lado",
+    ),
+    "uncover_the_light": (
+        "environment_change",
+        "a tigela de barro cobre a lamparina e mantém o rosto no escuro",
+        "a lamparina descoberta lança luz sobre o rosto próximo",
+    ),
+    "truth_practiced": (
+        "object_state_change",
+        "a instrução permanece dobrada e escondida sob a mesa",
+        "a instrução está aberta sob a luz diante da porta",
+    ),
+    "costly_love": (
+        "body_translation",
+        "a pessoa permanece atrás da porta trancada com a faixa nas mãos",
+        "a porta está aberta e a pessoa atravessa com a faixa em direção ao amigo",
+    ),
+    "held_not_abandoned": (
+        "interaction_change",
+        "a mão se prende apenas à corda desgastada diante do vazio",
+        "a corda está solta e a mão segura quem a alcançou",
+    ),
+    "word_that_remains": (
+        "object_state_change",
+        "o pergaminho está solto entre objetos levados pelo vento",
+        "as mãos firmam o pergaminho sobre a pedra enquanto os objetos se afastam",
+    ),
+    "confession_to_action": (
+        "choice_executed",
+        "o medalhão permanece erguido diante da porta sem movimento",
+        "o medalhão repousa na mesa e o primeiro passo atravessa a porta",
+    ),
+    "hunger_choice": (
+        "object_state_change",
+        "as tigelas vazias cercam as mãos ainda afastadas do pão",
+        "as tigelas ficam para trás e as mãos alcançam o pão oferecido",
+    ),
+    "hidden_cost": (
+        "choice_executed",
+        "a lembrança de família avança em direção à balança cheia de moedas",
+        "a mão retira a lembrança enquanto as moedas ainda caem da balança",
+    ),
+    "difference_without_enemy": (
+        "interaction_change",
+        "duas ferramentas permanecem erguidas sobre a linha de carvão",
+        "as ferramentas estão abaixadas e duas mãos apagam juntas a linha",
+    ),
+    "recognize_who_is_present": (
+        "body_translation",
+        "o espelho cobre o campo de visão enquanto Jesus permanece além da porta",
+        "o espelho está abaixado e o corpo se orienta para Jesus presente",
+    ),
+    "kingdom_beyond_power": (
+        "choice_executed",
+        "a pessoa permanece voltada para o pequeno trono com o pão intacto",
+        "o trono fica vazio e a pessoa reparte o pão ajoelhada no chão",
+    ),
+    "protect_small_beginning": (
+        "object_state_change",
+        "a muda pequena permanece suspensa sobre o recipiente de descarte",
+        "a muda está plantada no solo e recebe apoio das mãos",
+    ),
+    "service_over_status": (
+        "body_translation",
+        "a pessoa permanece de pé junto ao assento elevado e à bacia",
+        "a pessoa está ajoelhada com a bacia junto aos pés feridos",
+    ),
+    "found_on_the_search": (
+        "body_translation",
+        "o corpo se afasta pela trilha errada enquanto a lamparina se aproxima",
+        "o corpo muda de direção para o caminho indicado pela lamparina",
+    ),
+    "notice_the_present_gift": (
+        "object_state_change",
+        "a lista de comparação permanece aberta sobre o presente fechado",
+        "a lista está fechada e o presente começa a ser aberto pelas mãos",
+    ),
+    "follow_in_action": (
+        "body_translation",
+        "a corda mantém o corpo preso aos fardos fora da trilha",
+        "a corda está desatada e o primeiro pé ocupa a trilha aberta",
+    ),
+    "wake_and_prepare": (
+        "environment_change",
+        "a lamparina permanece apagada e as sandálias ainda estão soltas",
+        "a lamparina está acesa e as mãos apertam as sandálias",
+    ),
+    "open_table": (
+        "object_state_change",
+        "a divisória bloqueia a cadeira vazia diante do viajante",
+        "a divisória está removida e a cadeira avança para junto da mesa",
+    ),
+}
+
+
+def _opening_contract(
+    motif_id: str,
+    scene_description: str,
+    dominant_subject_or_object: str,
+    observable_action: str,
+    concrete_tension: str,
+    *,
+    shot_scale: str = "close",
+    action_kind: str | None = None,
+    initial_state: str | None = None,
+    resulting_state: str | None = None,
+) -> dict[str, str]:
+    transition = _OPENING_TRANSITION_BY_MOTIF.get(motif_id)
+    if transition is None and (
+        action_kind is None or initial_state is None or resulting_state is None
+    ):
+        raise ValueError(f"Motivo de abertura sem transição visual persistida: {motif_id}")
+    resolved_kind, resolved_initial, resolved_resulting = transition or (
+        action_kind,
+        initial_state,
+        resulting_state,
+    )
+    assert resolved_kind is not None
+    assert resolved_initial is not None
+    assert resolved_resulting is not None
+    return {
+        "motif_id": motif_id,
+        "scene_description": scene_description,
+        "dominant_subject_or_object": dominant_subject_or_object,
+        "observable_action": observable_action,
+        "action_kind": action_kind or resolved_kind,
+        "initial_state": initial_state or resolved_initial,
+        "resulting_state": resulting_state or resolved_resulting,
+        "concrete_tension": concrete_tension,
+        "shot_scale": shot_scale,
+    }
+
+
+def _marker_matches_signal(signal: str, marker: str) -> bool:
+    """Match editorial markers as whole token sequences, never as substrings."""
+
+    signal_tokens = re.findall(r"[^\W_]+", signal.casefold(), flags=re.UNICODE)
+    marker_tokens = re.findall(r"[^\W_]+", marker.casefold(), flags=re.UNICODE)
+    if not marker_tokens or len(marker_tokens) > len(signal_tokens):
+        return False
+    width = len(marker_tokens)
+    return any(
+        signal_tokens[index : index + width] == marker_tokens
+        for index in range(len(signal_tokens) - width + 1)
+    )
+
+
+def _compact_opening_fallback(
+    hook: str,
+    *,
+    central_theme: str = "",
+    human_conflict: str = "",
+    central_question: str = "",
+    verse_text: str = "",
+) -> dict[str, str]:
+    """Map the sealed editorial theme to a concrete, reproducible opening action."""
+
+    theme = _normalized(central_theme)
+    combined = _normalized(
+        " ".join((central_theme, hook, human_conflict, central_question, verse_text))
+    )
+    rules = (
+        (
+            ("fome",),
+            _opening_contract(
+                "hunger_choice",
+                "Close de uma pessoa empurrando tigelas vazias para longe e estendendo as mãos "
+                "ao pão que Jesus oferece; a fome e a escolha ocupam o mesmo instante.",
+                "as mãos entre tigelas vazias e o pão oferecido",
+                "afasta as tigelas vazias e alcança o pão",
+                "continuar buscando no que não satisfaz ou receber alimento verdadeiro",
+            ),
+        ),
+        (
+            ("grandeza que jesus mede", "grandeza que escolhe servir"),
+            _opening_contract(
+                "service_over_status",
+                "Plano médio de uma pessoa deixando um assento elevado e ajoelhando-se com uma "
+                "bacia para cuidar dos pés feridos de outra pessoa.",
+                "a pessoa, o assento elevado e a bacia",
+                "abandona o lugar de destaque e se ajoelha para servir",
+                "proteger o próprio status ou cuidar de quem está abaixo",
+                shot_scale="medium",
+            ),
+        ),
+        (
+            ("liberdade", "verdade que confronta"),
+            _opening_contract(
+                "truth_practiced",
+                "Close de uma pessoa retirando debaixo da mesa uma instrução dobrada e abrindo-a "
+                "sob a luz, com a porta da decisão já diante dela.",
+                "as mãos, a instrução aberta e a porta",
+                "para de esconder a instrução e a abre antes de atravessar",
+                "apenas ouvir a verdade ou responder a ela",
+            ),
+        ),
+        (
+            ("mesa do reino",),
+            _opening_contract(
+                "open_table",
+                "Plano médio de uma pessoa removendo uma divisória da mesa e puxando uma cadeira "
+                "para o viajante que permanecia do lado de fora.",
+                "a divisória sendo retirada e a cadeira vazia",
+                "retira a barreira e abre um lugar à mesa",
+                "preservar a fronteira humana ou acolher quem foi deixado de fora",
+                shot_scale="medium",
+            ),
+        ),
+        (
+            ("palavra de jesus",),
+            _opening_contract(
+                "word_that_remains",
+                "Close de mãos firmando um pergaminho sobre a pedra enquanto cartazes e objetos "
+                "ao redor são levados por uma rajada forte.",
+                "as mãos, o pergaminho e os objetos em movimento",
+                "firma o pergaminho enquanto o cenário ao redor se desfaz",
+                "tratar o que passa como permanente ou sustentar o que permanece",
+            ),
+        ),
+        (
+            ("resposta verdadeira",),
+            _opening_contract(
+                "confession_to_action",
+                "Close de uma pessoa pousando um medalhão religioso sobre a mesa e movendo o pé "
+                "através de uma porta onde alguém espera ajuda.",
+                "o medalhão abandonado e o pé atravessando a porta",
+                "pousa o símbolo sobre a mesa e executa a primeira ação de obediência",
+                "manter apenas a aparência ou transformar a confissão em resposta",
+            ),
+        ),
+        (
+            ("alegria",),
+            _opening_contract(
+                "joy_through_grief",
+                "Close de uma pessoa enxugando uma lágrima com uma mão enquanto a outra abre uma "
+                "janela para a primeira luz do dia.",
+                "o rosto com lágrima e a janela se abrindo",
+                "enxuga a lágrima e abre a janela sem esconder a tristeza",
+                "fingir que não dói ou permitir que a esperança atravesse a dor",
+            ),
+        ),
+        (
+            ("prioridades do reino",),
+            _opening_contract(
+                "hidden_cost",
+                "Close de moedas derramando de uma balança enquanto a pessoa puxa de volta a mão "
+                "que quase entregava uma lembrança de família em troca.",
+                "a balança, as moedas e a lembrança quase entregue",
+                "interrompe a troca quando o custo escondido fica visível",
+                "reter o ganho aparente ou preservar o que ele estava consumindo",
+            ),
+        ),
+        (
+            ("atenção e preparo",),
+            _opening_contract(
+                "wake_and_prepare",
+                "Close de uma pessoa despertando, acendendo uma lamparina e apertando as sandálias "
+                "enquanto sinais da mudança já aparecem pela janela.",
+                "a lamparina acesa e as mãos ajustando as sandálias",
+                "acende a luz e começa a se preparar imediatamente",
+                "apenas conhecer o aviso ou responder antes que o momento chegue",
+            ),
+        ),
+        (
+            ("bondade", "generosidade"),
+            _opening_contract(
+                "good_without_applause",
+                "Plano médio de uma pessoa entregando pão por uma porta lateral enquanto a "
+                "multidão e os aplausos permanecem voltados para outro lugar.",
+                "as mãos entregando pão fora do foco da multidão",
+                "oferece o alimento sem se mover em direção aos aplausos",
+                "ser visto ou atender a necessidade real",
+                shot_scale="medium",
+            ),
+        ),
+        (
+            ("coragem", "fé quando a dúvida", "permanecer fiel"),
+            _opening_contract(
+                "courageous_next_step",
+                "Close de um pé já atravessando uma ponte estreita enquanto a mão solta o último "
+                "poste seguro; o medo continua legível no rosto.",
+                "o pé sobre a ponte e a mão soltando o poste",
+                "solta o apoio e executa o próximo passo apesar do medo",
+                "deixar a pressão decidir ou permanecer fiel em movimento",
+            ),
+        ),
+        (
+            ("descanso", "foco quando", "ansiedade pelo amanhã"),
+            _opening_contract(
+                "release_overload",
+                "Close de uma pessoa tentando equilibrar muitas tigelas de barro e, no instante em "
+                "que uma começa a cair, pousando todas menos a única necessária.",
+                "as mãos sobrecarregadas e as tigelas instáveis",
+                "interrompe o malabarismo e escolhe uma única responsabilidade",
+                "controlar tudo ao mesmo tempo ou receber limite e prioridade",
+            ),
+        ),
+        (
+            ("discernimento",),
+            _opening_contract(
+                "inspect_the_fruit",
+                "Close de uma faca abrindo um fruto de casca impecável e revelando o interior "
+                "estragado, enquanto outro fruto saudável permanece ao lado.",
+                "o fruto aberto e o contraste entre casca e interior",
+                "corta o fruto e examina o que a aparência escondia",
+                "confiar na superfície ou reconhecer os frutos reais",
+            ),
+        ),
+        (
+            ("esperança",),
+            _opening_contract(
+                "hope_beyond_now",
+                "Close de uma pessoa retirando o ferrolho de uma porta escura enquanto a luz da "
+                "manhã atravessa a primeira fresta antes de o cenário mudar por completo.",
+                "a mão no ferrolho e a fresta de luz",
+                "abre a porta antes de conseguir ver todo o caminho",
+                "encerrar a história no momento atual ou agir em direção ao que ainda virá",
+            ),
+        ),
+        (
+            ("misericórdia", "perdão"),
+            _opening_contract(
+                "mercy_with_truth",
+                "Plano médio de uma pessoa baixando a pedra que segurava e estendendo uma "
+                "faixa limpa ao ferido, sem apagar a porta quebrada entre os dois.",
+                "a pedra baixada, a faixa e a porta quebrada",
+                "abandona o gesto de ferir e começa a cuidar sem esconder o dano",
+                "repetir a violência ou responder com verdade e misericórdia",
+                shot_scale="medium",
+            ),
+        ),
+        (
+            ("amor reconhecível",),
+            _opening_contract(
+                "costly_love",
+                "Plano médio de uma pessoa retirando a tranca da própria porta e levando uma faixa "
+                "ao amigo ferido do lado de fora.",
+                "a tranca aberta e a faixa nas mãos",
+                "abre a porta e atravessa em direção ao amigo ferido",
+                "endurecer para não sofrer ou tornar o amor visível em uma escolha",
+                shot_scale="medium",
+            ),
+        ),
+        (
+            ("espírito santo",),
+            _opening_contract(
+                "guidance_in_confusion",
+                "Close de uma pessoa num cruzamento girando um mapa confuso até alinhá-lo com um "
+                "único caminho iluminado diante dela.",
+                "o mapa desalinhado, as mãos e o caminho iluminado",
+                "reorienta o mapa e escolhe a direção que finalmente se torna legível",
+                "continuar girando sem ajuda ou receber direção e avançar",
+            ),
+        ),
+        (
+            ("chamado de deus", "cuidado de jesus com quem se perdeu"),
+            _opening_contract(
+                "found_on_the_search",
+                "Plano médio de uma pessoa perdida entre duas trilhas interrompendo a fuga ao ver "
+                "Jesus aproximar uma lamparina e indicar o caminho de volta.",
+                "a pessoa entre as trilhas e a lamparina aproximando-se",
+                "para de se afastar e volta o corpo em direção ao caminho indicado",
+                "concluir que está longe demais ou responder a quem já veio procurar",
+                shot_scale="medium",
+            ),
+        ),
+        (
+            ("cuidado do pai", "segurança na presença", "valor que o medo"),
+            _opening_contract(
+                "held_not_abandoned",
+                "Close de uma pessoa soltando uma corda desgastada no instante em que Jesus firma "
+                "a mão dela, com o vazio ainda visível atrás.",
+                "as duas mãos, a corda desgastada e o vazio",
+                "solta a corda falha e segura a mão que a alcançou",
+                "agir como se estivesse abandonada ou confiar no cuidado presente",
+            ),
+        ),
+        (
+            ("reino cresce",),
+            _opening_contract(
+                "protect_small_beginning",
+                "Close de uma mão prestes a descartar uma muda minúscula, interrompendo o gesto e "
+                "plantando-a em solo preparado.",
+                "a muda pequena entre a mão e o solo",
+                "retira a muda do descarte e a planta com cuidado",
+                "abandonar o que parece pequeno ou sustentar seu crescimento",
+            ),
+        ),
+        (
+            ("reino de deus além",),
+            _opening_contract(
+                "kingdom_beyond_power",
+                "Plano médio de uma pessoa virando as costas para um pequeno trono ornamentado e "
+                "ajoelhando-se para repartir pão com alguém no chão.",
+                "o trono vazio e o pão sendo repartido",
+                "abandona o símbolo de poder e começa a repartir o pão",
+                "procurar o Reino no domínio visível ou reconhecê-lo em outra lógica",
+                shot_scale="medium",
+            ),
+        ),
+        (
+            ("oração",),
+            _opening_contract(
+                "need_placed_in_prayer",
+                "Close de uma pessoa interrompendo o transporte de um saco pesado, pousando-o ao "
+                "lado de um lugar de oração e abrindo as mãos.",
+                "o saco pousado e as mãos que deixam de apertá-lo",
+                "coloca o peso no chão e abre as mãos em oração",
+                "continuar carregando a necessidade sozinha ou colocá-la diante de Deus",
+            ),
+        ),
+        (
+            ("paz de jesus", "oferece paz", "tenham paz", "aflição"),
+            _opening_contract(
+                "peace_before_circumstances",
+                "Close de uma mão soltando com cuidado a tranca de uma porta durante a tempestade, "
+                "enquanto a pessoa volta o rosto para Jesus antes de sair.",
+                "a mão na tranca, a tempestade e o olhar que muda de direção",
+                "relaxa a mão e se volta para Jesus antes de atravessar",
+                "esperar o cenário melhorar ou receber paz antes da mudança",
+            ),
+        ),
+        (
+            ("permanecer e seguir",),
+            _opening_contract(
+                "follow_in_action",
+                "Plano médio de uma pessoa soltando a corda que a prende a vários fardos e "
+                "colocando o primeiro pé na trilha já aberta por Jesus.",
+                "a corda desprendida, os fardos e o primeiro passo",
+                "desata a corda e começa a seguir pela trilha",
+                "manter a intenção parada ou transformar seguir em movimento concreto",
+                shot_scale="medium",
+            ),
+        ),
+        (
+            ("permanecer em jesus", "permanecer nele"),
+            _opening_contract(
+                "remain_connected",
+                "Close de mãos que param de puxar um ramo para longe e o prendem novamente à "
+                "videira viva antes que ele se rompa.",
+                "o ramo tensionado, as mãos e a videira",
+                "interrompe a força própria e reconecta o ramo à videira",
+                "insistir separado até quebrar ou permanecer ligado à fonte",
+            ),
+        ),
+        (
+            ("quem jesus declara",),
+            _opening_contract(
+                "recognize_who_is_present",
+                "Plano médio de uma pessoa baixando um pequeno espelho que cobria seu campo de "
+                "visão quando Jesus atravessa a porta e se aproxima.",
+                "o espelho baixado e Jesus entrando no campo visual",
+                "abaixa o reflexo e direciona toda a atenção para Jesus presente",
+                "manter Jesus como ideia distante ou reconhecer quem está diante dela",
+                shot_scale="medium",
+            ),
+        ),
+        (
+            ("unidade",),
+            _opening_contract(
+                "difference_without_enemy",
+                "Plano médio de duas pessoas baixando as ferramentas erguidas e apagando juntas a "
+                "linha de carvão que as separava no chão.",
+                "as ferramentas baixadas e a linha divisória",
+                "interrompem o confronto e removem a marca de separação",
+                "transformar diferença em inimigo ou reconhecer uma causa compartilhada",
+                shot_scale="medium",
+            ),
+        ),
+        (
+            ("gratidão",),
+            _opening_contract(
+                "notice_the_present_gift",
+                "Close de uma pessoa fechando uma lista de comparação e finalmente abrindo o "
+                "presente que permanecia esquecido ao lado.",
+                "a lista fechada e o presente ainda embrulhado",
+                "interrompe a comparação e começa a abrir o que já recebeu",
+                "continuar medindo a vida dos outros ou perceber a dádiva presente",
+            ),
+        ),
+        (
+            ("testemunho",),
+            _opening_contract(
+                "uncover_the_light",
+                "Close de mãos removendo de uma vez a tigela de barro que cobria uma lamparina, "
+                "fazendo a luz alcançar o rosto de quem esperava no escuro.",
+                "a lamparina descoberta e o rosto alcançado pela luz",
+                "retira a cobertura e expõe a luz imediatamente",
+                "proteger a luz escondendo-a ou permitir que ela cumpra sua missão",
+            ),
+        ),
+    )
+    for signal in (theme, combined):
+        for markers, contract in rules:
+            if any(_marker_matches_signal(signal, marker) for marker in markers):
+                return contract
+    return _opening_contract(
+        "contextual_decision",
+        "Plano médio de uma pessoa interrompendo uma escolha entre dois objetos concretos sobre a "
+        "mesa e voltando um deles para a luz antes de agir.",
+        "as mãos, os dois objetos e a decisão interrompida",
+        "para o gesto automático e reposiciona a escolha diante da luz",
+        "repetir a resposta antiga ou agir sobre a pergunta central da passagem",
+        shot_scale="medium",
+    )
+
+
 def _compact_narration_blocks(
     *,
     source: SourceEntry,
+    briefing: Briefing,
     spoken_reference: str,
     config: ShortsScriptConfig,
 ) -> list[dict[str, Any]]:
     assert source.excerpt is not None
     scene_count = config.target_scene_max
     verse_chunks = _balanced_compact_chunks(source.excerpt, max(1, scene_count - 2))
+    opening_fallback = _compact_opening_fallback(
+        source.compact_hook,
+        central_theme=briefing.central_theme,
+        human_conflict=briefing.human_conflict,
+        central_question=briefing.central_question,
+        verse_text=source.excerpt,
+    )
     fallbacks = (
-        "Jesus segura com cuidado as mãos de uma pessoa abatida em um caminho tranquilo.",
+        opening_fallback["scene_description"],
         "Jesus ora com um pequeno grupo reunido ao ar livre.",
         "Jesus prega com serenidade a pessoas atentas em uma colina.",
         "Moradas acolhedoras aparecem sob um céu luminoso, como símbolo de esperança.",
@@ -516,6 +1171,7 @@ def _compact_narration_blocks(
             "creative_concept_required": True,
             "fallback_scene_description": fallbacks[0],
             "fallback_visual_relation": "contextual",
+            "fallback_attention_contract": opening_fallback,
         }
     ]
     for index, chunk in enumerate(verse_chunks, start=2):
@@ -556,9 +1212,12 @@ def _compact_visual_context_payload(
     *,
     briefing: Briefing,
     blocks: list[dict[str, Any]],
+    performance_advisories: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     project = layout.load_manifest()
-    return {
+    creative_blocks = [item for item in blocks if item["creative_concept_required"]]
+    first_block_id = creative_blocks[0]["block_id"] if creative_blocks else None
+    payload: dict[str, Any] = {
         "schema_version": "1.0",
         "project_id": project.project_id,
         "task": "Describe one distinct visual scene for each creative narration block.",
@@ -575,11 +1234,52 @@ def _compact_visual_context_payload(
                 "block_id": item["block_id"],
                 "narration": item["narration"],
                 "fallback_scene_description": item["fallback_scene_description"],
+                "attention_role": (
+                    "scroll_stop_opening"
+                    if item["block_id"] == first_block_id
+                    and project.config.images.opening_visual_standard == "scroll_stop_concrete_v1"
+                    else "progression"
+                ),
             }
-            for item in blocks
-            if item["creative_concept_required"]
+            for item in creative_blocks
         ],
     }
+    if (
+        first_block_id is not None
+        and project.config.images.opening_visual_standard == "scroll_stop_concrete_v1"
+    ):
+        payload["opening_attention_contract"] = {
+            "standard": "scroll_stop_concrete_v1",
+            "block_id": first_block_id,
+            "required_output_fields": [
+                "attention_role=scroll_stop_opening",
+                "dominant_subject_or_object",
+                "observable_action",
+                "action_kind",
+                "initial_state",
+                "resulting_state",
+                "concrete_tension",
+                "shot_scale=close ou medium",
+            ],
+            "requirements": [
+                "um sujeito ou objeto dominante",
+                "uma ação observável já em curso",
+                "um tipo de mudança física e estados inicial/final visualmente distintos",
+                "tensão, escolha ou contraste concreto coerente com o hook",
+                "emoção legível em menos de um segundo",
+                "plano médio, close ou objeto específico dominante",
+                "imagem e hook abrem a mesma pergunta que a fala de Jesus resolve",
+            ],
+            "avoid": [
+                "retrato contemplativo genérico",
+                "Jesus apenas posando ou acolhendo sem conflito visível",
+                "plano geral cujo ambiente domina o sujeito",
+                "estímulo aleatório sem ligação com a passagem",
+            ],
+        }
+    if _uses_scroll_stop_contract(layout) and performance_advisories:
+        payload["confirmed_performance_advisories"] = performance_advisories
+    return payload
 
 
 def _compact_visual_plan_queue(
@@ -594,17 +1294,24 @@ def _compact_visual_plan_queue(
     compact_reference: str,
     spoken_reference: str,
     config: ShortsScriptConfig,
+    performance_advisories: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     project = layout.load_manifest()
     blocks = _compact_narration_blocks(
         source=source,
+        briefing=briefing,
         spoken_reference=spoken_reference,
         config=config,
     )
-    context = _compact_visual_context_payload(layout, briefing=briefing, blocks=blocks)
+    context = _compact_visual_context_payload(
+        layout,
+        briefing=briefing,
+        blocks=blocks,
+        performance_advisories=performance_advisories,
+    )
     write_json(layout.shorts_script_context, context)
     payload: dict[str, Any] = {
-        "schema_version": SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION,
+        "schema_version": _queue_schema_version(layout),
         "generated_at": utc_now(),
         "project_id": project.project_id,
         "job_id": job_id,
@@ -613,6 +1320,7 @@ def _compact_visual_plan_queue(
         "next_script_version": next_version,
         "status": StageStatus.WAITING_EXTERNAL.value,
         "role": config.specialist_role,
+        "frozen_performance_advisories": performance_advisories or [],
         "generation_mode": "deterministic_compact_visual_plan_v1",
         "output_contract": "compact_visual_plan_v1",
         "orchestration": {
@@ -651,6 +1359,7 @@ def _compact_visual_plan_queue(
             "spoken_reference": spoken_reference,
             "blocks": blocks,
             "biblical_review_mode": config.biblical_review_mode,
+            "opening_visual_standard": project.config.images.opening_visual_standard,
         },
         "instructions": [
             "Leia somente inputs.compact_context.",
@@ -660,6 +1369,14 @@ def _compact_visual_plan_queue(
             ),
             "Varie personagens, ações, ambientes e relações literal, contextual ou simbólica.",
             "Descreva um único momento visual por conceito; o estilo será aplicado pelo pipeline.",
+            (
+                "No primeiro bloco, cumpra opening_attention_contract: comece no meio de uma "
+                "ação concreta, com sujeito dominante e tensão visual alinhada ao hook; não use "
+                "plano geral contemplativo nem gesto genérico de acolhimento. Preencha também "
+                "todos os required_output_fields estruturados."
+                if project.config.images.opening_visual_standard == "scroll_stop_concrete_v1"
+                else "Preserve o padrão visual de abertura já salvo no projeto."
+            ),
             "Repita job_id e input_hash exatamente e grave somente outputs.package.",
             (
                 "Execute preflight.command; se houver erros, faça no máximo uma correção "
@@ -693,14 +1410,42 @@ def prepare_shorts_script_queue(
     is_retention_v2 = config.narrative_standard == "retention_story_v2"
     is_creative_v3 = config.narrative_standard == "creative_retention_v3"
     is_compact_cinematic = config.duration_profile == "adaptive_compact_v1"
+    is_high_stakes = config.editorial_profile == "high_stakes_biblical_question_v1"
     main_agent_mode = not config.use_specialist_subagent
     if not config.enabled:
         raise RuntimeError("A etapa especializada de roteiro está desativada neste projeto.")
+    stage = project.stages["shorts_script"]
+    if (
+        not force
+        and layout.shorts_script_queue.is_file()
+        and layout.shorts_script_context.is_file()
+        and stage.status in {StageStatus.WAITING_EXTERNAL, StageStatus.COMPLETED}
+    ):
+        queue = read_json(layout.shorts_script_queue)
+        if isinstance(queue, dict):
+            frozen_advisories = _frozen_performance_advisories(layout, queue)
+            frozen_input_hash = shorts_script_input_hash(
+                layout,
+                performance_advisories=frozen_advisories,
+            )
+            if stage.input_hash == queue.get("input_hash") == frozen_input_hash:
+                return queue
     literal_candidates = (
         _require_literal_opening_source(layout)
         if config.require_verified_scripture or config.require_literal_verse_opening
         else _literal_opening_candidates(layout)
     )
+    briefing_source = read_model(layout.briefing, Briefing)
+    if is_high_stakes:
+        literal_candidates = [
+            source
+            for source in literal_candidates
+            if source.source_id == briefing_source.primary_literal_source_id
+        ]
+        if not literal_candidates:
+            raise ValueError(
+                "O perfil de grande pergunta exige a fonte literal primaria selada no briefing."
+            )
     if is_compact_cinematic:
         literal_candidates = [
             source
@@ -717,23 +1462,25 @@ def prepare_shorts_script_queue(
                 "O Short compacto exige uma fala direta de Jesus verificada, um hook curado forte "
                 "e valor de mensagem/replay acima dos pisos configurados."
             )
-    input_hash = shorts_script_input_hash(layout)
-    stage = project.stages["shorts_script"]
-    if (
-        not force
-        and layout.shorts_script_queue.is_file()
-        and layout.shorts_script_context.is_file()
-        and stage.input_hash == input_hash
-    ):
-        queue = read_json(layout.shorts_script_queue)
-        if stage.status in {StageStatus.WAITING_EXTERNAL, StageStatus.COMPLETED}:
-            return queue
+    if _uses_scroll_stop_contract(layout):
+        from pipeline_videos.analytics import compact_short_performance_advisories
 
+        performance_advisories = compact_short_performance_advisories(layout)
+    else:
+        performance_advisories = []
+    input_hash = shorts_script_input_hash(
+        layout,
+        performance_advisories=performance_advisories,
+    )
     existing_script = read_json(layout.script) if layout.script.is_file() else None
     next_version = int(existing_script.get("version", 0)) + 1 if existing_script else 1
     baseline_hash = _baseline_hash(layout)
     job_id = f"shorts-script-{input_hash[:16]}"
-    context = _shorts_context_payload(layout, literal_candidates)
+    context = _shorts_context_payload(
+        layout,
+        literal_candidates,
+        performance_advisories=performance_advisories,
+    )
     briefing = Briefing.model_validate(context["briefing"])
     if is_compact_cinematic:
         unresolved = []
@@ -766,6 +1513,13 @@ def prepare_shorts_script_queue(
             and briefing.hook_family not in USER_SIX_HOOK_FAMILIES
         ):
             unresolved.append("hook_family precisa ser uma das seis famílias oficiais")
+        if is_high_stakes:
+            if briefing.hook_contract != "high_stakes_opening_v1":
+                unresolved.append("hook_contract=high_stakes_opening_v1")
+            if not briefing.opening_hook.strip():
+                unresolved.append("opening_hook curado")
+            if not briefing.required_answer_points:
+                unresolved.append("required_answer_points")
         if unresolved:
             raise ValueError(
                 "Resolva a direção criativa do briefing antes de preparar o Short: "
@@ -786,6 +1540,7 @@ def prepare_shorts_script_queue(
             compact_reference=main_passage,
             spoken_reference=main_passage_spoken,
             config=config,
+            performance_advisories=performance_advisories,
         )
     inputs: dict[str, str] = {
         "compact_context": relative_posix(layout.shorts_script_context, layout.root),
@@ -797,7 +1552,7 @@ def prepare_shorts_script_queue(
         inputs["current_video_for_critique"] = relative_posix(current_render, layout.root)
 
     payload: dict[str, Any] = {
-        "schema_version": SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION,
+        "schema_version": _queue_schema_version(layout),
         "generated_at": utc_now(),
         "project_id": project.project_id,
         "job_id": job_id,
@@ -864,6 +1619,22 @@ def prepare_shorts_script_queue(
             "opening_example": f"Em {main_passage_spoken}, lemos: “texto do versículo.”",
         },
         "citation_policy": _shorts_citation_policy(config),
+        "editorial_profile_contract": (
+            {
+                "profile": briefing.editorial_profile,
+                "question_id": briefing.question_id,
+                "opening_hook": briefing.opening_hook,
+                "implicit_viewer_question": briefing.implicit_viewer_question,
+                "central_question": briefing.central_question,
+                "required_answer_points": briefing.required_answer_points,
+                "uncertainty_boundaries": briefing.uncertainty_boundaries,
+                "answer_status": briefing.answer_status,
+                "primary_literal_source_id": briefing.primary_literal_source_id,
+                "scripture_timing_policy": config.scripture_citation_timing_policy,
+            }
+            if is_high_stakes
+            else None
+        ),
         "retention_contract": (
             {
                 "standard": "creative_retention_v3",
@@ -878,6 +1649,8 @@ def prepare_shorts_script_queue(
                     "allowed_families": (
                         list(USER_SIX_HOOK_FAMILIES)
                         if briefing.hook_contract == "user_six_v1"
+                        else list(HIGH_STAKES_HOOK_FAMILIES)
+                        if briefing.hook_contract == "high_stakes_opening_v1"
                         else list(HOOK_TEMPLATE_EXAMPLES)
                     ),
                     "target_end_seconds": config.hook_target_seconds,
@@ -887,9 +1660,40 @@ def prepare_shorts_script_queue(
                             for family in USER_SIX_HOOK_FAMILIES
                         }
                         if briefing.hook_contract == "user_six_v1"
+                        else {briefing.hook_family: briefing.opening_hook}
+                        if briefing.hook_contract == "high_stakes_opening_v1"
                         else HOOK_TEMPLATE_EXAMPLES
                     ),
                 },
+                **(
+                    {
+                        "attention_model": {
+                            "standard": "appeal_engagement_satisfaction_v1",
+                            "first_frame_standard": (project.config.images.opening_visual_standard),
+                            "opening_requirements": [
+                                "situação específica ou conflito imediatamente compreensível",
+                                "sujeito dominante e ação observável no primeiro quadro",
+                                "imagem e fala abrem a mesma pergunta",
+                                "promessa honesta que a resolução cumpre",
+                            ],
+                            "forbidden_tactics": [
+                                "erro deliberado para provocar correção",
+                                "comentário falso ou conta alternativa",
+                                "medo, consequência ou promessa bíblica inventados",
+                                "estímulo visual aleatório sem função narrativa",
+                            ],
+                        },
+                        "promise_progression_payoff": {
+                            "single_central_loop": True,
+                            "every_development_beat_adds_new_information": True,
+                            "resolution_closes_opening_promise": True,
+                            "filler_to_delay_payoff_forbidden": True,
+                            "scripture_may_not_be_fragmented_to_manufacture_suspense": True,
+                        },
+                    }
+                    if _uses_scroll_stop_contract(layout)
+                    else {}
+                ),
                 "timeline_seconds": _short_timeline_seconds(
                     project.target_duration_seconds,
                     config,
@@ -1018,13 +1822,26 @@ def prepare_shorts_script_queue(
             (
                 (
                     (
-                        "O Short exige um hook inicial forte e honesto. Copie-o como prefixo exato "
-                        "da primeira seção, use no máximo "
-                        f"{config.hook_max_words} palavras, termine até "
-                        f"{config.hook_target_seconds:.1f}s e siga a selected_family. Nos Shorts "
-                        "novos, os seis modelos fornecidos pelo usuário são o contrato exclusivo: "
-                        "a primeira fala reproduz literalmente a estrutura selecionada, sem "
-                        "clickbait ou promessa que o vídeo não entrega."
+                        (
+                            "Copie exatamente o opening_hook curado do briefing "
+                            "como primeira fala: "
+                            f"'{briefing.opening_hook}'. Ele pode ser pergunta, fato, contradição, "
+                            "consequência ou reversão de crença; não o transforme automaticamente "
+                            "em pergunta. A abertura precisa criar a pergunta "
+                            "na mente do espectador "
+                            "e terminar até "
+                            f"{config.hook_target_seconds:.1f}s."
+                            if is_high_stakes
+                            else "O Short exige um hook inicial forte e honesto. "
+                            "Copie-o como prefixo "
+                            "exato da primeira seção, use no máximo "
+                            f"{config.hook_max_words} palavras, termine até "
+                            f"{config.hook_target_seconds:.1f}s e siga a selected_family. "
+                            "Nos Shorts novos, os seis modelos fornecidos pelo usuário são o "
+                            "contrato exclusivo: "
+                            "a primeira fala reproduz literalmente a estrutura selecionada, sem "
+                            "clickbait ou promessa que o vídeo não entrega."
+                        )
                         if is_creative_v3
                         else "O texto exato de strategy.hook deve abrir uma cena já em movimento, "
                         "copiar o início da primeira seção, ter no máximo "
@@ -1098,12 +1915,36 @@ def prepare_shorts_script_queue(
                 "bíblica; cross_reference_bridge para correlacionar outro versículo; ou "
                 "promise_boundary para explicar o que o texto afirma e o que ele não promete."
             ),
+            *(
+                [
+                    "Trate a pergunta do briefing como autoridade editorial, não o "
+                    "versículo isolado. A progressão deve cobrir todos os "
+                    "required_answer_points, usar as fontes de apoio somente no escopo "
+                    "registrado e fechar exatamente a curiosidade aberta pelo hook.",
+                    "Respeite answer_status e uncertainty_boundaries. Quando a resposta "
+                    "for open ou bounded_inference, diga com clareza o que a Bíblia "
+                    "afirma, o que permite inferir e o que permanece sem resposta; "
+                    "nunca apresente interpretação como fato bíblico.",
+                ]
+                if is_high_stakes
+                else []
+            ),
             (
-                "Faça a citação ocupar a janela entre "
-                f"{config.scripture_citation_min_start_seconds:g}s e "
-                f"{config.scripture_citation_max_end_seconds:g}s e registre seu início e fim em "
-                "verse_opening. A Bíblia entra como evidência narrativa, explicativa ou "
-                "argumentativa coerente com o modo, não como bloco decorativo."
+                (
+                    "Não existe posição fixa de 8–20 segundos para a citação neste perfil. Escolha "
+                    "sua posição pela função narrativa: ela pode estabelecer a tensão, comprovar "
+                    "uma virada ou entregar a recompensa. Registre início e fim em verse_opening, "
+                    "dentro do limite técnico de 0 a "
+                    f"{config.scripture_citation_max_end_seconds:g}s, "
+                    "e nunca esconda a resposta com enchimento apenas para adiar a citação."
+                    if is_high_stakes
+                    else "Faça a citação ocupar a janela entre "
+                    f"{config.scripture_citation_min_start_seconds:g}s e "
+                    f"{config.scripture_citation_max_end_seconds:g}s e registre seu "
+                    "início e fim em "
+                    "verse_opening. A Bíblia entra como evidência narrativa, explicativa ou "
+                    "argumentativa coerente com o modo, não como bloco decorativo."
+                )
                 if is_creative_v3
                 else "Faça a citação ocupar a janela entre "
                 f"{config.scripture_citation_min_start_seconds:g}s e "
@@ -1170,6 +2011,17 @@ def prepare_shorts_script_queue(
                 "vertical, fiel ao gancho e visualmente forte: assunto dominante, emoção ou "
                 "gesto legível, conflito simples, luz direcional e espaço negativo no terço "
                 "superior. Não escreva texto de capa dentro da imagem e não use choque gratuito."
+            ),
+            *(
+                [
+                    "Em creative_direction.opening_visual_contract, declare o verbo físico "
+                    "principal no início de observable_action, sem sujeito, auxiliar ou negação; "
+                    "classifique action_kind e registre initial_state/resulting_state visivelmente "
+                    "distintos, sujeito dominante, tensão concreta e shot_scale close ou medium. "
+                    "Esse contrato é a autoridade da primeira imagem."
+                ]
+                if is_creative_v3 and _uses_scroll_stop_contract(layout)
+                else []
             ),
             (
                 "Não force aplicação pessoal. Em modos factuais, termine com compreensão ou "
@@ -1408,6 +2260,8 @@ def prepare_shorts_script_queue(
             "final_reviewed_preflight_command",
         ):
             payload["preflight"].pop(key, None)
+    if _uses_scroll_stop_contract(layout):
+        payload["frozen_performance_advisories"] = performance_advisories
     start_stage(layout, "shorts_script", input_hash, provider=config.specialist_role)
     write_json(layout.shorts_script_queue, payload)
     wait_stage(
@@ -1436,6 +2290,121 @@ def _safe_staging_file(layout: ProjectLayout, relative_path: str) -> Path:
 
 def _normalized(text: str) -> str:
     return " ".join(token.casefold() for token in tokenize_words(text))
+
+
+_GENERIC_VISUAL_ACTION_TOKENS = {
+    "acolhe",
+    "acolhendo",
+    "acolher",
+    "contempla",
+    "contemplando",
+    "contemplar",
+    "encara",
+    "encarando",
+    "encarar",
+    "escuta",
+    "escutando",
+    "escutar",
+    "expressa",
+    "expressando",
+    "expressar",
+    "está",
+    "esta",
+    "estar",
+    "fala",
+    "falando",
+    "falar",
+    "fica",
+    "ficando",
+    "ficar",
+    "olha",
+    "olhando",
+    "olhar",
+    "observa",
+    "observando",
+    "observar",
+    "permanece",
+    "permanecendo",
+    "permanecer",
+    "posa",
+    "posando",
+    "posar",
+    "sorri",
+    "sorrindo",
+    "sorrir",
+}
+
+_FORBIDDEN_ACTION_OPENERS = _GENERIC_VISUAL_ACTION_TOKENS | {
+    "a",
+    "as",
+    "apenas",
+    "calma",
+    "calmamente",
+    "calmo",
+    "começa",
+    "comeca",
+    "continua",
+    "câmera",
+    "camera",
+    "davi",
+    "deixa",
+    "ela",
+    "ele",
+    "expressão",
+    "expressao",
+    "figura",
+    "homem",
+    "jesus",
+    "luz",
+    "mãos",
+    "mão",
+    "maos",
+    "mao",
+    "mulher",
+    "não",
+    "nao",
+    "nunca",
+    "o",
+    "objeto",
+    "olhar",
+    "os",
+    "pessoa",
+    "porta",
+    "profundamente",
+    "rosto",
+    "serena",
+    "serenamente",
+    "serenidade",
+    "sereno",
+    "volta",
+}
+
+
+def _opening_action_contract_errors(
+    action: str,
+    *,
+    initial_state: str,
+    resulting_state: str,
+) -> list[str]:
+    """Validate an explicit state transition instead of guessing arbitrary Portuguese verbs."""
+
+    errors: list[str] = []
+    stripped = action.strip()
+    tokens = re.findall(r"[^\W_]+", stripped.casefold(), flags=re.UNICODE)
+    if len(tokens) < 2:
+        errors.append("observable_action precisa declarar verbo físico e complemento visível.")
+    elif tokens[0] in _FORBIDDEN_ACTION_OPENERS:
+        errors.append(
+            "observable_action precisa começar pelo verbo físico principal, sem sujeito, "
+            "auxiliar, negação, olhar, sorriso ou estado emocional."
+        )
+    if {"não", "nao", "nunca"}.intersection(tokens[:3]):
+        errors.append("observable_action precisa afirmar a mudança executada, sem ação negada.")
+    if _normalized(initial_state) == _normalized(resulting_state):
+        errors.append(
+            "initial_state e resulting_state precisam registrar estados visíveis distintos."
+        )
+    return errors
 
 
 def _collapsed(text: str) -> str:
@@ -2509,6 +3478,10 @@ def _collect_creative_direction_errors(
         _add_validation_error(errors, "hook_family diverge da família resolvida no briefing.")
     if strategy.hook_family != direction.hook_family:
         _add_validation_error(errors, "strategy.hook_family precisa copiar creative_direction.")
+    if briefing.hook_contract == "high_stakes_opening_v1" and _normalized(
+        strategy.hook
+    ) != _normalized(briefing.opening_hook):
+        _add_validation_error(errors, "O hook investigativo precisa copiar o opening_hook curado.")
     hook_is_valid = (
         hook_matches_user_six_template(strategy.hook, direction.hook_family)
         if briefing.hook_contract == "user_six_v1"
@@ -2565,6 +3538,35 @@ def _collect_creative_direction_errors(
         cta = section_by_id[direction.cta_section_id]
         if opening.role != "opening":
             _add_validation_error(errors, "O hook precisa usar role=opening.")
+        if _uses_scroll_stop_contract(layout):
+            opening_visual = direction.opening_visual_contract
+            if opening_visual is None:
+                _add_validation_error(
+                    errors,
+                    "creative_direction precisa declarar opening_visual_contract para a abertura.",
+                )
+            else:
+                for visual_error in _opening_action_contract_errors(
+                    opening_visual.observable_action,
+                    initial_state=opening_visual.initial_state,
+                    resulting_state=opening_visual.resulting_state,
+                ):
+                    _add_validation_error(errors, visual_error)
+                normalized_tension = _normalized(opening_visual.concrete_tension)
+                tension_markers = (
+                    " ou ",
+                    " enquanto ",
+                    " contra ",
+                    " mas ",
+                    " entre ",
+                    " apesar ",
+                )
+                if not any(marker in f" {normalized_tension} " for marker in tension_markers):
+                    _add_validation_error(
+                        errors,
+                        "opening_visual_contract precisa tornar duas respostas ou consequências "
+                        "visualmente distinguíveis.",
+                    )
         for scripture_id in direction.scripture_section_ids:
             if section_by_id[scripture_id].role != "biblical_narrative":
                 _add_validation_error(errors, "Toda citação precisa usar role=biblical_narrative.")
@@ -2587,8 +3589,12 @@ def _collect_creative_direction_errors(
                     errors,
                     f"creative_direction.{field_name} precisa aparecer na seção mapeada.",
                 )
-        if direction.organizing_question.strip() and not _contains_normalized(
-            package.script.narration_text(), direction.organizing_question
+        if (
+            briefing.hook_contract != "high_stakes_opening_v1"
+            and direction.organizing_question.strip()
+            and not _contains_normalized(
+                package.script.narration_text(), direction.organizing_question
+            )
         ):
             _add_validation_error(
                 errors,
@@ -2617,6 +3623,14 @@ def _collect_creative_direction_errors(
 
     if strategy.verse_opening is not None:
         verse = strategy.verse_opening
+        if (
+            briefing.hook_contract == "high_stakes_opening_v1"
+            and verse.source_id != briefing.primary_literal_source_id
+        ):
+            _add_validation_error(
+                errors,
+                "A citação investigativa precisa usar a fonte literal primária selada.",
+            )
         if verse.target_start_seconds < config.scripture_citation_min_start_seconds:
             _add_validation_error(
                 errors,
@@ -2691,6 +3705,58 @@ def _collect_creative_direction_errors(
         _add_validation_error(errors, "A resolução precisa de um beat próprio.")
     if not any(beat.purpose == "hook" for beat in beats):
         _add_validation_error(errors, "Shorts exigem um beat inicial de hook.")
+    if _uses_scroll_stop_contract(layout):
+        expected_loop = direction.organizing_question.strip() or direction.content_promise.strip()
+        opening_beats = [
+            beat
+            for beat in beats
+            if beat.section_id == direction.opening_section_id and beat.purpose == "hook"
+        ]
+        if len(opening_beats) != 1:
+            _add_validation_error(
+                errors,
+                "A abertura precisa ter exatamente um beat de hook para abrir o loop central.",
+            )
+        elif _normalized(opening_beats[0].opens_loop or "") != _normalized(expected_loop):
+            _add_validation_error(
+                errors,
+                "O beat inicial precisa abrir exatamente a pergunta ou promessa central.",
+            )
+        resolution_beats = [
+            beat
+            for beat in beats
+            if beat.section_id == direction.resolution_section_id and beat.purpose == "resolution"
+        ]
+        if len(resolution_beats) != 1:
+            _add_validation_error(
+                errors,
+                "A resolução precisa ter exatamente um beat para fechar o loop central.",
+            )
+        elif _normalized(resolution_beats[0].resolves_loop or "") != _normalized(expected_loop):
+            _add_validation_error(
+                errors,
+                "O beat de resolução precisa fechar exatamente o mesmo loop aberto no hook.",
+            )
+        unauthorized_openers = [
+            beat
+            for beat in beats
+            if beat.opens_loop
+            and not (beat.section_id == direction.opening_section_id and beat.purpose == "hook")
+        ]
+        unauthorized_resolvers = [
+            beat
+            for beat in beats
+            if beat.resolves_loop
+            and not (
+                beat.section_id == direction.resolution_section_id and beat.purpose == "resolution"
+            )
+        ]
+        if unauthorized_openers or unauthorized_resolvers:
+            _add_validation_error(
+                errors,
+                "O contrato exige um único loop central: somente o hook pode abri-lo e somente "
+                "a resolução pode fechá-lo.",
+            )
 
     new_information = []
     for beat in beats:
@@ -2751,14 +3817,18 @@ def _collect_package_validation_errors(
             f"{config.min_words} e {config.max_words}.",
         )
     estimated_duration = len(words) / config.estimated_narration_wpm * 60
+    uses_duration_window = project.duration_policy in {
+        "preferred_target_v1",
+        "adaptive_range_v1",
+    }
     preferred_minimum = (
         project.requested_duration_min_seconds
-        if project.duration_policy == "adaptive_range_v1"
+        if uses_duration_window
         else project.target_duration_seconds
     )
     preferred_maximum = (
         project.requested_duration_max_seconds
-        if project.duration_policy == "adaptive_range_v1"
+        if uses_duration_window
         else project.target_duration_seconds
     )
     assert preferred_minimum is not None and preferred_maximum is not None
@@ -3095,7 +4165,11 @@ def _load_shorts_script_queue(layout: ProjectLayout) -> dict[str, Any]:
     queue = read_json(layout.shorts_script_queue)
     if not isinstance(queue, dict) or queue.get("role") != "shorts_script_specialist":
         raise ValueError("Fila do roteirista inválida.")
-    if queue.get("input_hash") != shorts_script_input_hash(layout):
+    frozen_advisories = _frozen_performance_advisories(layout, queue)
+    if queue.get("input_hash") != shorts_script_input_hash(
+        layout,
+        performance_advisories=frozen_advisories,
+    ):
         raise RuntimeError("A fila do roteirista ficou obsoleta após mudanças editoriais.")
     baseline = queue.get("baseline_script_hash")
     if baseline != _baseline_hash(layout):
@@ -3223,6 +4297,64 @@ def _load_compact_visual_plan(
         )
     if actual_ids != expected_ids:
         errors.append("Os conceitos visuais precisam preservar a ordem dos blocos.")
+    opening_standard = queue.get("deterministic_contract", {}).get("opening_visual_standard")
+    if opening_standard == "scroll_stop_concrete_v1" and expected_ids:
+        opening = next(
+            (concept for concept in plan.concepts if concept.block_id == expected_ids[0]),
+            None,
+        )
+        if opening is not None:
+            if opening.attention_role != "scroll_stop_opening":
+                errors.append(
+                    "O primeiro conceito precisa declarar attention_role=scroll_stop_opening."
+                )
+            for field_name, value in (
+                ("dominant_subject_or_object", opening.dominant_subject_or_object),
+                ("observable_action", opening.observable_action),
+                ("action_kind", opening.action_kind),
+                ("initial_state", opening.initial_state),
+                ("resulting_state", opening.resulting_state),
+                ("concrete_tension", opening.concrete_tension),
+            ):
+                if not isinstance(value, str) or not value.strip():
+                    errors.append(f"O primeiro conceito precisa preencher {field_name}.")
+            if opening.shot_scale not in {"close", "medium"}:
+                errors.append("O primeiro conceito precisa usar shot_scale close ou medium.")
+            normalized_opening = _normalized(opening.scene_description)
+            opening_tokens = [
+                token.strip(".,;:!?()[]{}\"'“”") for token in normalized_opening.split()
+            ]
+            forbidden_static_tokens = {
+                "parado",
+                "parada",
+                "posando",
+                "contemplativo",
+                "contemplativa",
+            }
+
+            has_wide_phrase = any(
+                token == "plano" and opening_tokens[index + 1] == "geral"
+                for index, token in enumerate(opening_tokens[:-1])
+            )
+            if has_wide_phrase or forbidden_static_tokens.intersection(opening_tokens):
+                errors.append(
+                    "O primeiro conceito contradiz o contrato: não use plano geral, pose "
+                    "parada ou contemplação estática."
+                )
+            errors.extend(
+                _opening_action_contract_errors(
+                    opening.observable_action or "",
+                    initial_state=opening.initial_state or "",
+                    resulting_state=opening.resulting_state or "",
+                )
+            )
+            normalized_tension = _normalized(opening.concrete_tension or "")
+            tension_markers = (" ou ", " enquanto ", " contra ", " mas ", " entre ", " apesar ")
+            if not any(marker in f" {normalized_tension} " for marker in tension_markers):
+                errors.append(
+                    "A tensão da abertura precisa tornar duas respostas ou consequências "
+                    "visualmente distinguíveis."
+                )
     if errors:
         raise ShortsScriptPackageValidationError(errors)
     return plan
@@ -3234,15 +4366,39 @@ def materialize_compact_visual_fallback(layout: ProjectLayout) -> CompactVisualP
     queue = _load_shorts_script_queue(layout)
     if queue.get("generation_mode") != "deterministic_compact_visual_plan_v1":
         raise RuntimeError("A fila atual não usa o plano visual compacto determinístico.")
-    concepts = [
-        {
-            "block_id": item["block_id"],
-            "scene_description": item["fallback_scene_description"],
-            "visual_relation": item["fallback_visual_relation"],
-        }
+    creative_blocks = [
+        item
         for item in queue["deterministic_contract"]["blocks"]
         if item["creative_concept_required"]
     ]
+    scroll_stop = (
+        queue["deterministic_contract"].get("opening_visual_standard") == "scroll_stop_concrete_v1"
+    )
+    concepts = []
+    for index, item in enumerate(creative_blocks):
+        opening = index == 0 and scroll_stop
+        fallback_attention = item.get("fallback_attention_contract", {})
+        concepts.append(
+            {
+                "block_id": item["block_id"],
+                "scene_description": item["fallback_scene_description"],
+                "visual_relation": item["fallback_visual_relation"],
+                "attention_role": "scroll_stop_opening" if opening else "progression",
+                "dominant_subject_or_object": (
+                    fallback_attention.get("dominant_subject_or_object") if opening else None
+                ),
+                "observable_action": (
+                    fallback_attention.get("observable_action") if opening else None
+                ),
+                "action_kind": fallback_attention.get("action_kind") if opening else None,
+                "initial_state": fallback_attention.get("initial_state") if opening else None,
+                "resulting_state": (fallback_attention.get("resulting_state") if opening else None),
+                "concrete_tension": (
+                    fallback_attention.get("concrete_tension") if opening else None
+                ),
+                "shot_scale": fallback_attention.get("shot_scale") if opening else None,
+            }
+        )
     plan = CompactVisualPlan(
         job_id=queue["job_id"],
         input_hash=queue["input_hash"],
@@ -3257,6 +4413,23 @@ def materialize_compact_visual_fallback(layout: ProjectLayout) -> CompactVisualP
         }
     )
     return plan
+
+
+def _effective_compact_scene_description(concept: Any) -> str:
+    description = concept.scene_description
+    if concept.attention_role != "scroll_stop_opening":
+        return description
+    return " ".join(
+        (
+            description.rstrip(" .") + ".",
+            f"Sujeito dominante: {concept.dominant_subject_or_object}.",
+            f"Ação já em curso: {concept.observable_action}.",
+            f"Mudança visível ({concept.action_kind}), em um único momento de transição: "
+            f"{concept.initial_state} cedendo a {concept.resulting_state}.",
+            f"Tensão visual concreta: {concept.concrete_tension}.",
+            f"Enquadramento: {concept.shot_scale}.",
+        )
+    )
 
 
 def _build_deterministic_compact_package(
@@ -3341,7 +4514,7 @@ def _build_deterministic_compact_package(
                 section_id=block["section_id"],
                 narration=block["narration"],
                 scene_description=(
-                    concept.scene_description
+                    _effective_compact_scene_description(concept)
                     if concept is not None
                     else block["fallback_scene_description"]
                 ),
@@ -3599,6 +4772,15 @@ def prepare_shorts_biblical_review_queue(
             ),
             "Relate em uma única passagem todos os bloqueios de citação, contexto, interpretação, "
             "elaboração criativa, direitos e referência.",
+            *(
+                [
+                    "No perfil high_stakes_biblical_question_v1, confirme também que cada "
+                    "required_answer_point é sustentado pelas fontes, que uncertainty_boundaries "
+                    "foram preservadas e que nenhuma inferência foi narrada como texto bíblico."
+                ]
+                if config.editorial_profile == "high_stakes_biblical_question_v1"
+                else []
+            ),
             "Não reescreva o roteiro, não aprove em nome do usuário e não altere o projeto.",
             "Grave somente outputs.review; script_version precisa copiar a versão do staging.",
         ],

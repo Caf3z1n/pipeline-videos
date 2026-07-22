@@ -605,6 +605,7 @@ def _synthesize_elevenlabs(
     stability: float,
     similarity_boost: float,
     style: float,
+    speed: float,
     use_speaker_boost: bool,
     previous_text: str | None,
     next_text: str | None,
@@ -623,6 +624,7 @@ def _synthesize_elevenlabs(
             "stability": stability,
             "similarity_boost": similarity_boost,
             "style": style,
+            "speed": speed,
             "use_speaker_boost": use_speaker_boost,
         },
         "apply_text_normalization": "auto",
@@ -805,35 +807,34 @@ def _scene_input_hash(
     voice_id: str | None,
     model_id: str | None,
 ) -> str:
-    return sha256_value(
-        {
-            "algorithm_version": AUDIO_ALGORITHM_VERSION,
-            "text": scene.narration,
-            "previous_text": (
-                previous_scene.narration
-                if provider == "elevenlabs" and previous_scene is not None
-                else None
-            ),
-            "next_text": (
-                next_scene.narration
-                if provider == "elevenlabs" and next_scene is not None
-                else None
-            ),
-            "provider": provider,
-            "voice_id": voice_id,
-            "model_id": model_id,
-            "language_code": config.language_code,
-            "stability": config.stability,
-            "similarity_boost": config.similarity_boost,
-            "style": config.style,
-            "use_speaker_boost": config.use_speaker_boost,
-            "output_format": config.output_format if provider == "elevenlabs" else "wav",
-            "sample_rate": TARGET_SAMPLE_RATE,
-            "synthesis_segmentation": config.synthesis_segmentation,
-            "comment_response_silence_seconds": config.comment_response_silence_seconds,
-            "mock_contract": 1 if provider == "mock" else None,
-        }
-    )
+    payload = {
+        "algorithm_version": AUDIO_ALGORITHM_VERSION,
+        "text": scene.narration,
+        "previous_text": (
+            previous_scene.narration
+            if provider == "elevenlabs" and previous_scene is not None
+            else None
+        ),
+        "next_text": (
+            next_scene.narration if provider == "elevenlabs" and next_scene is not None else None
+        ),
+        "provider": provider,
+        "voice_id": voice_id,
+        "model_id": model_id,
+        "language_code": config.language_code,
+        "stability": config.stability,
+        "similarity_boost": config.similarity_boost,
+        "style": config.style,
+        "use_speaker_boost": config.use_speaker_boost,
+        "output_format": config.output_format if provider == "elevenlabs" else "wav",
+        "sample_rate": TARGET_SAMPLE_RATE,
+        "synthesis_segmentation": config.synthesis_segmentation,
+        "comment_response_silence_seconds": config.comment_response_silence_seconds,
+        "mock_contract": 1 if provider == "mock" else None,
+    }
+    if not math.isclose(config.speed, 1.0, abs_tol=1e-9):
+        payload["speed"] = config.speed
+    return sha256_value(payload)
 
 
 def _continuous_narration_groups(
@@ -886,33 +887,32 @@ def _continuous_group_input_hash(
     model_id: str | None,
     segmentation: str,
 ) -> str:
-    return sha256_value(
-        {
-            "algorithm_version": AUDIO_ALGORITHM_VERSION,
-            "text": group.text,
-            "previous_text": (
-                previous_group.text
-                if provider == "elevenlabs" and previous_group is not None
-                else None
-            ),
-            "next_text": (
-                next_group.text if provider == "elevenlabs" and next_group is not None else None
-            ),
-            "provider": provider,
-            "voice_id": voice_id,
-            "model_id": model_id,
-            "language_code": config.language_code,
-            "stability": config.stability,
-            "similarity_boost": config.similarity_boost,
-            "style": config.style,
-            "use_speaker_boost": config.use_speaker_boost,
-            "output_format": config.output_format if provider == "elevenlabs" else "wav",
-            "sample_rate": TARGET_SAMPLE_RATE,
-            "synthesis_segmentation": segmentation,
-            "comment_response_silence_seconds": config.comment_response_silence_seconds,
-            "mock_contract": 1 if provider == "mock" else None,
-        }
-    )
+    payload = {
+        "algorithm_version": AUDIO_ALGORITHM_VERSION,
+        "text": group.text,
+        "previous_text": (
+            previous_group.text if provider == "elevenlabs" and previous_group is not None else None
+        ),
+        "next_text": (
+            next_group.text if provider == "elevenlabs" and next_group is not None else None
+        ),
+        "provider": provider,
+        "voice_id": voice_id,
+        "model_id": model_id,
+        "language_code": config.language_code,
+        "stability": config.stability,
+        "similarity_boost": config.similarity_boost,
+        "style": config.style,
+        "use_speaker_boost": config.use_speaker_boost,
+        "output_format": config.output_format if provider == "elevenlabs" else "wav",
+        "sample_rate": TARGET_SAMPLE_RATE,
+        "synthesis_segmentation": segmentation,
+        "comment_response_silence_seconds": config.comment_response_silence_seconds,
+        "mock_contract": 1 if provider == "mock" else None,
+    }
+    if not math.isclose(config.speed, 1.0, abs_tol=1e-9):
+        payload["speed"] = config.speed
+    return sha256_value(payload)
 
 
 def _existing_local_words(segment: AudioSegment, duration: float) -> list[LocalWord]:
@@ -1018,6 +1018,7 @@ def _synthesize_text(
             stability=config.stability,
             similarity_boost=config.similarity_boost,
             style=config.style,
+            speed=config.speed,
             use_speaker_boost=config.use_speaker_boost,
             previous_text=previous_text,
             next_text=next_text,
@@ -1704,7 +1705,7 @@ def generate_audio(
                 f"incluindo {recovered_count} recuperado(s) de tentativa interrompida."
             ),
         )
-        if project.duration_policy == "adaptive_range_v1":
+        if project.duration_policy in {"preferred_target_v1", "adaptive_range_v1"}:
             effective_duration = round(audio_manifest.duration, 6)
             current_project = layout.load_manifest()
             if current_project.effective_duration_seconds != effective_duration:
@@ -1712,7 +1713,12 @@ def generate_audio(
                 layout.save_manifest(current_project)
                 layout.append_event(
                     {
-                        "event": "adaptive_duration_settled",
+                        "event": (
+                            "adaptive_duration_settled"
+                            if project.duration_policy == "adaptive_range_v1"
+                            else "natural_voice_duration_settled"
+                        ),
+                        "duration_policy": project.duration_policy,
                         "preferred_seconds": project.target_duration_seconds,
                         "effective_seconds": effective_duration,
                         "minimum_seconds": project.requested_duration_min_seconds,

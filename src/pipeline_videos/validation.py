@@ -18,6 +18,7 @@ from pipeline_videos.models import (
     CreativeContract,
     ImageManifest,
     MusicManifest,
+    ProjectManifest,
     SceneManifest,
     ScriptDocument,
     StageStatus,
@@ -41,7 +42,7 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-VALIDATION_ALGORITHM_VERSION = "6"
+VALIDATION_ALGORITHM_VERSION = "7"
 
 _COMPLETION_FIRST_ADVISORY_PATTERNS = (
     "O contrato criativo",
@@ -78,6 +79,48 @@ class ValidationReport:
             "warnings": self.warnings,
             "checks": self.checks,
         }
+
+
+def _apply_final_duration_policy(
+    manifest: ProjectManifest,
+    video_duration: float,
+    report: ValidationReport,
+) -> None:
+    """Validate explicit constraints while keeping ordinary duration targets advisory."""
+
+    if manifest.duration_policy == "adaptive_range_v1":
+        assert manifest.requested_duration_min_seconds is not None
+        assert manifest.requested_duration_max_seconds is not None
+        if not (
+            manifest.requested_duration_min_seconds
+            <= video_duration
+            <= manifest.requested_duration_max_seconds
+        ):
+            report.errors.append("A duração do vídeo final ficou fora da faixa solicitada.")
+        return
+    if manifest.duration_policy == "preferred_target_v1":
+        assert manifest.requested_duration_min_seconds is not None
+        assert manifest.requested_duration_max_seconds is not None
+        report.checks["requested_duration_target_seconds"] = manifest.target_duration_seconds
+        report.checks["preferred_duration_min_seconds"] = manifest.requested_duration_min_seconds
+        report.checks["preferred_duration_max_seconds"] = manifest.requested_duration_max_seconds
+        if not (
+            manifest.requested_duration_min_seconds
+            <= video_duration
+            <= manifest.requested_duration_max_seconds
+        ):
+            report.warnings.append(
+                "A duração final ficou fora da janela preferencial, mas a voz natural será "
+                "preservada e nenhuma correção automática será iniciada."
+            )
+        return
+    duration_tolerance = manifest.config.shorts_script.duration_tolerance_seconds
+    report.checks["requested_duration_target_seconds"] = manifest.target_duration_seconds
+    report.checks["duration_tolerance_seconds"] = duration_tolerance
+    if abs(video_duration - manifest.target_duration_seconds) > duration_tolerance:
+        report.errors.append(
+            "A duração do vídeo final ficou fora da tolerância do alvo explicitamente exato."
+        )
 
 
 def _apply_completion_first_policy(report: ValidationReport) -> None:
@@ -364,6 +407,8 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                 "Há mais de dois segundos entre a última palavra e o fim do áudio."
             )
         shorts_config = manifest.config.shorts_script
+        report.checks["speech_rate_policy"] = manifest.config.audio.speech_rate_policy
+        report.checks["speech_speed"] = manifest.config.audio.speed
         if (
             manifest.video_format == "short"
             and shorts_config.compact_narrative_standard == "cinematic_jesus_devotional_v1"
@@ -404,6 +449,25 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                 ):
                     report.errors.append(
                         "A duração efetiva registrada diverge do manifesto de áudio."
+                    )
+            elif manifest.duration_policy == "preferred_target_v1":
+                assert manifest.requested_duration_min_seconds is not None
+                assert manifest.requested_duration_max_seconds is not None
+                report.checks["preferred_duration_min_seconds"] = (
+                    manifest.requested_duration_min_seconds
+                )
+                report.checks["preferred_duration_max_seconds"] = (
+                    manifest.requested_duration_max_seconds
+                )
+                report.checks["effective_duration_seconds"] = audio.duration
+                if not (
+                    manifest.requested_duration_min_seconds
+                    <= audio.duration
+                    <= manifest.requested_duration_max_seconds
+                ):
+                    report.warnings.append(
+                        "A duração natural da narração ficou fora da janela preferencial; "
+                        "isso não autoriza alterar a velocidade da voz nem preencher tempo."
                     )
             elif narration_ratio < shorts_config.minimum_audio_duration_ratio:
                 report.errors.append(
@@ -576,17 +640,7 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
             if layout.final_video.exists():
                 final_data = ffprobe_json(layout.final_video)
                 video_duration = float(final_data.get("format", {}).get("duration", 0))
-                if manifest.duration_policy == "adaptive_range_v1":
-                    assert manifest.requested_duration_min_seconds is not None
-                    assert manifest.requested_duration_max_seconds is not None
-                    if not (
-                        manifest.requested_duration_min_seconds
-                        <= video_duration
-                        <= manifest.requested_duration_max_seconds
-                    ):
-                        report.errors.append(
-                            "A duração do vídeo final ficou fora da faixa solicitada."
-                        )
+                _apply_final_duration_policy(manifest, video_duration, report)
                 tolerance = max(1 / manifest.config.render.fps, 0.08)
                 report.checks["av_duration_delta"] = round(abs(video_duration - audio.duration), 3)
                 if abs(video_duration - audio.duration) > tolerance:

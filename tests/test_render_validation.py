@@ -27,7 +27,11 @@ from pipeline_videos.models import (
 from pipeline_videos.state import initial_approvals, initial_stage_records
 from pipeline_videos.storage import ProjectLayout, write_json
 from pipeline_videos.utils import sha256_value, utc_now
-from pipeline_videos.validation import ValidationReport, _apply_completion_first_policy
+from pipeline_videos.validation import (
+    ValidationReport,
+    _apply_completion_first_policy,
+    _apply_final_duration_policy,
+)
 
 
 def _probe_payload(
@@ -76,6 +80,73 @@ def test_completion_first_demotes_creative_checks_but_keeps_media_blockers() -> 
     assert report.errors == ["Vídeo ausente: final.mp4"]
     assert len(report.warnings) == 2
     assert all(item.startswith("[entrega primeiro]") for item in report.warnings)
+
+
+def test_preferred_duration_accepts_43_7_seconds_for_a_50_second_target() -> None:
+    now = utc_now()
+    manifest = ProjectManifest(
+        project_id="short-flexivel",
+        title="Short flexível",
+        created_at=now,
+        updated_at=now,
+        target_duration_seconds=50,
+        duration_policy="preferred_target_v1",
+        requested_duration_min_seconds=42.5,
+        requested_duration_max_seconds=57.5,
+        video_format="short",
+    )
+    report = ValidationReport(project_id=manifest.project_id, generated_at=now)
+
+    _apply_final_duration_policy(manifest, 43.7, report)
+
+    assert report.errors == []
+    assert report.warnings == []
+
+
+def test_preferred_duration_warns_without_requesting_automatic_correction() -> None:
+    now = utc_now()
+    manifest = ProjectManifest(
+        project_id="short-flexivel",
+        title="Short flexível",
+        created_at=now,
+        updated_at=now,
+        target_duration_seconds=50,
+        duration_policy="preferred_target_v1",
+        requested_duration_min_seconds=42.5,
+        requested_duration_max_seconds=57.5,
+        video_format="short",
+    )
+    report = ValidationReport(project_id=manifest.project_id, generated_at=now)
+
+    _apply_final_duration_policy(manifest, 40.0, report)
+
+    assert report.errors == []
+    assert report.warnings == [
+        "A duração final ficou fora da janela preferencial, mas a voz natural será "
+        "preservada e nenhuma correção automática será iniciada."
+    ]
+
+
+def test_exact_duration_remains_blocking_only_when_explicitly_configured() -> None:
+    now = utc_now()
+    manifest = ProjectManifest(
+        project_id="short-exato",
+        title="Short exato",
+        created_at=now,
+        updated_at=now,
+        target_duration_seconds=50,
+        duration_policy="exact_target_v1",
+        requested_duration_min_seconds=50,
+        requested_duration_max_seconds=50,
+        video_format="short",
+    )
+    report = ValidationReport(project_id=manifest.project_id, generated_at=now)
+
+    _apply_final_duration_policy(manifest, 43.7, report)
+
+    assert report.errors == [
+        "A duração do vídeo final ficou fora da tolerância do alvo explicitamente exato."
+    ]
 
 
 def test_ffprobe_validation_accepts_expected_h264_aac(monkeypatch, tmp_path) -> None:

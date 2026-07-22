@@ -64,6 +64,7 @@ def test_remote_request_applies_safe_defaults_and_requires_explicit_external_aut
     request = _request()
 
     assert request.duration_seconds == 50
+    assert request.exact_duration is False
     assert request.publication_mode == "private_review"
     assert request.publish_at is None
     assert request.creative_mode == "auto"
@@ -155,12 +156,32 @@ def test_prepare_job_project_enables_local_specialists_without_human_approval(tm
     assert manifest.config.youtube_growth.thumbnail_variants == 0
     assert manifest.config.audio.voice_id == DEFAULT_ELEVENLABS_VOICE_ID
     assert manifest.config.audio.model_id == DEFAULT_ELEVENLABS_MODEL_ID
+    assert manifest.duration_policy == "preferred_target_v1"
+    assert manifest.requested_duration_min_seconds == 42.5
+    assert manifest.requested_duration_max_seconds == 57.5
     assert manifest.config.youtube_publication.allow_automated_private_review_upload is True
     assert all(record.status.value == "pending" for record in manifest.approvals.values())
     prompt = codex_checkpoint_prompt(Path("/tmp/checkpoint.json"))
     assert "mesma sessão" in prompt
     assert "AGENTS.md" in prompt
     assert "crie exatamente os subagentes" in prompt.casefold()
+
+
+def test_remote_duration_is_exact_only_when_explicitly_requested(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(
+        _request(
+            topic="Duração declaradamente exata",
+            duration_seconds=50,
+            exact_duration=True,
+        )
+    )
+
+    manifest = prepare_job_project(job, projects_root=tmp_path / "projects").load_manifest()
+
+    assert manifest.duration_policy == "exact_target_v1"
+    assert manifest.requested_duration_min_seconds == 50
+    assert manifest.requested_duration_max_seconds == 50
 
 
 def test_prepare_remote_micro_short_uses_two_parallel_image_workers(tmp_path) -> None:
@@ -534,6 +555,33 @@ def test_shorts_correction_is_a_checkpoint_in_the_same_sol_session(tmp_path) -> 
     assert "strategy.hook_type inválido" in spec.payload["task"]["validation_error"]
 
 
+def test_remote_compact_visual_planner_keeps_context_during_correction(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(topic="Esperança", duration_seconds=15))
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+    write_json(layout.shorts_script_context, {"opening_attention_contract": {"standard": "x"}})
+    write_json(
+        layout.shorts_script_queue,
+        {
+            "job_id": "compact-visual-test",
+            "generation_mode": "deterministic_compact_visual_plan_v1",
+            "orchestration": {"reasoning_effort": "medium"},
+            "inputs": {"compact_context": "script/shorts-context.json"},
+            "outputs": {
+                "package": "script/staging/shorts-script-specialist/package.json",
+            },
+        },
+    )
+
+    phase = _shorts_script_phase_spec(layout)
+    correction = _shorts_script_correction_checkpoint(layout, ValueError("abertura estática"))
+
+    assert phase.payload["delegation"]["role"] == "shorts_visual_planner"
+    assert correction.payload["delegation"]["role"] == "shorts_visual_planner"
+    assert str(layout.shorts_script_context) in correction.payload["allowed_inputs"]
+    assert correction.payload["task"]["compact_context_path"] == str(layout.shorts_script_context)
+
+
 def test_remote_biblical_review_uses_one_isolated_high_reasoning_reviewer(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Judas"))
@@ -796,7 +844,7 @@ def test_remote_long_growth_uses_theme_prompt_without_visual_reference(tmp_path)
 
 def test_specific_topic_uses_compact_catalog_selection_phase(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
-    job = store.enqueue(_request(topic="coragem para conversas difíceis"))
+    job = store.enqueue(_request(topic="coragem para conversas difíceis", duration_seconds=15))
     projects_root = tmp_path / "projects"
     layout = prepare_job_project(job, projects_root=projects_root)
 
@@ -812,6 +860,13 @@ def test_specific_topic_uses_compact_catalog_selection_phase(tmp_path) -> None:
     assert spec.payload["allowed_inputs"] == []
     assert spec.payload["task"]["desired_candidate_count"] == 1
     assert spec.payload["task"]["candidates"]
+    assert all(
+        item["compact_hook_prior"] == "concrete_scroll_stop_v1"
+        and item["compact_hook_editorial_features"]
+        and item["recent_exact_hook_count"] == 0
+        and item["recent_exact_hook_penalty"] == 0
+        for item in spec.payload["task"]["candidates"]
+    )
 
 
 def test_long_job_materializes_enough_verified_sources_without_human_approval(tmp_path) -> None:

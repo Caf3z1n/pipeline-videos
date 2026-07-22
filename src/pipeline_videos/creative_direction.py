@@ -6,6 +6,9 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from pipeline_videos.models import (
+    HIGH_STAKES_HOOK_FAMILIES as MODEL_HIGH_STAKES_HOOK_FAMILIES,
+)
+from pipeline_videos.models import (
     USER_SIX_HOOK_FAMILIES as MODEL_USER_SIX_HOOK_FAMILIES,
 )
 from pipeline_videos.models import (
@@ -387,6 +390,8 @@ def hook_families_for_mode(
     short: bool,
     hook_contract: HookContract = "mode_compatible_v1",
 ) -> tuple[str, ...]:
+    if short and hook_contract == "high_stakes_opening_v1":
+        return tuple(MODEL_HIGH_STAKES_HOOK_FAMILIES)
     if short and hook_contract == "cinematic_interruption_v1":
         if mode not in {"devotional_application", "pastoral_encouragement"}:
             raise ValueError(
@@ -478,6 +483,21 @@ def hook_matches_family(hook: str, family: str) -> bool:
         return normalized.startswith("quer aprender ") and " comece" in normalized
     if family == "never_do_this":
         return normalized.startswith("nunca ")
+    if family == "unanswered_question":
+        return hook.rstrip().endswith("?")
+    if family == "surprising_fact":
+        return "?" not in hook and len(normalized.split()) >= 4
+    if family == "contradiction":
+        return any(
+            marker in f" {normalized} "
+            for marker in (" mas ", " mesmo assim ", " ainda assim ", " embora ", " apesar ")
+        )
+    if family == "quote_first":
+        return hook.lstrip().startswith(('"', "'", "“", "‘", "â€œ", "â€˜"))
+    if family == "belief_reversal":
+        return "?" not in hook and any(
+            marker in f" {normalized} " for marker in (" nao ", " na verdade ", " ao contrario ")
+        )
     return bool(normalized)
 
 

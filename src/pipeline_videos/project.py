@@ -53,6 +53,23 @@ COMPACT_MAXIMUM_WORD_RATIO = 1.08
 COMPACT_MINIMUM_HOOK_STRENGTH_SCORE = 0.9
 COMPACT_MINIMUM_MESSAGE_VALUE_SCORE = 0.9
 COMPACT_MINIMUM_REWATCH_VALUE_SCORE = 0.88
+PREFERRED_DURATION_LOWER_RATIO = 0.85
+PREFERRED_DURATION_UPPER_RATIO = 1.15
+
+
+def preferred_duration_window(
+    target_duration_seconds: int,
+    *,
+    minimum_duration_seconds: int,
+) -> tuple[float, float]:
+    """Return a planning window without turning a spoken target into an exact constraint."""
+
+    minimum = max(
+        float(minimum_duration_seconds),
+        round(target_duration_seconds * PREFERRED_DURATION_LOWER_RATIO, 1),
+    )
+    maximum = round(target_duration_seconds * PREFERRED_DURATION_UPPER_RATIO, 1)
+    return minimum, maximum
 
 
 def short_literal_verse_word_limit(duration_seconds: int) -> int | None:
@@ -150,6 +167,38 @@ def configure_short_duration_profile(config: ProjectConfig, duration_seconds: in
     config.production.max_model_repairs_per_stage = 1
 
 
+def configure_high_stakes_question_profile(
+    config: ProjectConfig,
+    duration_seconds: int,
+) -> None:
+    """Configure a question-first Short without imposing a universal citation timestamp."""
+
+    if not COMPACT_SHORT_THRESHOLD_SECONDS <= duration_seconds <= 60:
+        raise ValueError(
+            "O perfil de grandes perguntas biblicas exige Short entre 45 e 60 segundos."
+        )
+    shorts = config.shorts_script
+    target_words = duration_seconds * shorts.estimated_narration_wpm / 60
+    shorts.editorial_profile = "high_stakes_biblical_question_v1"
+    shorts.require_independent_biblical_review = True
+    shorts.hook_min_words = 4
+    shorts.hook_max_words = 18
+    shorts.hook_target_seconds = 3.5
+    shorts.min_words = max(70, round(target_words * 0.84))
+    shorts.max_words = min(180, round(target_words * 1.08))
+    shorts.scripture_citation_min_start_seconds = 0.0
+    shorts.scripture_citation_max_end_seconds = min(44.0, duration_seconds - 4.0)
+    shorts.scripture_citation_timing_policy = "adaptive_payoff_v1"
+    shorts.minimum_retention_beats = 6
+    shorts.minimum_progression_beats = 3
+    shorts.minimum_sections = 6
+    shorts.retention_target_min_seconds = max(38.0, duration_seconds * 0.85)
+    shorts.retention_target_max_seconds = float(duration_seconds)
+    config.production.validation_policy = "completion_first_v1"
+    config.production.token_budget_behavior = "fallback_then_continue"
+    config.production.max_model_repairs_per_stage = 1
+
+
 def project_topic_slug(topic: str) -> str:
     match = DATED_PROJECT_PATTERN.fullmatch(topic.strip())
     return slugify(match.group(2) if match else topic)
@@ -226,10 +275,11 @@ somente em staging. Apenas o agente principal importa títulos, descrição, est
 Em produção remota, o coordenador permanece na sessão do job e cria o mesmo especialista de
 crescimento do fluxo local, que entrega exatamente um par título+thumbnail no staging.
 
-Em projetos Short, `script/shorts-queue.json` contrata o `shorts_script_specialist`. Ele escreve
-somente no staging; o agente principal executa o preflight agregado e prepara
-`reviews/shorts-review-queue.json` para exatamente um `biblical_reviewer`. O roteiro só é importado
-depois que pacote e revisão independente passam juntos no preflight final.
+Em Shorts compactos determinísticos, `script/shorts-queue.json` contrata somente o
+`shorts_visual_planner`; a locução e a revisão bíblica permanecem seladas pelo catálogo verificado.
+Nos demais Shorts, a fila contrata o `shorts_script_specialist` e, quando a própria fila exigir
+revisão independente, exatamente um `biblical_reviewer`. Todos escrevem somente nos stagings; o
+agente principal executa o preflight e importa uma única vez.
 
 Vídeos novos usam direção criativa explícita. Shorts padrão seguem `creative_retention_v3`, sempre
 com um hook inicial honesto, e salvam `hook_contract=user_six_v1`. Shorts compactos usam
@@ -250,6 +300,7 @@ def create_project(
     target_duration_seconds: int = 540,
     duration_min_seconds: float | None = None,
     duration_max_seconds: float | None = None,
+    exact_duration: bool = False,
     style_id: str | None = None,
     palette_id: str | None = None,
     demo: bool = False,
@@ -268,17 +319,22 @@ def create_project(
         )
     if (duration_min_seconds is None) != (duration_max_seconds is None):
         raise ValueError("Informe juntos os limites mínimo e máximo de duração.")
-    duration_policy = "adaptive_range_v1" if duration_min_seconds is not None else "exact_target_v1"
-    requested_minimum = (
-        float(duration_min_seconds)
-        if duration_min_seconds is not None
-        else float(target_duration_seconds)
-    )
-    requested_maximum = (
-        float(duration_max_seconds)
-        if duration_max_seconds is not None
-        else float(target_duration_seconds)
-    )
+    if exact_duration and duration_min_seconds is not None:
+        raise ValueError("Duração exata não pode ser combinada com uma faixa de duração.")
+    if duration_min_seconds is not None:
+        duration_policy = "adaptive_range_v1"
+        requested_minimum = float(duration_min_seconds)
+        requested_maximum = float(duration_max_seconds)
+    elif exact_duration:
+        duration_policy = "exact_target_v1"
+        requested_minimum = float(target_duration_seconds)
+        requested_maximum = float(target_duration_seconds)
+    else:
+        duration_policy = "preferred_target_v1"
+        requested_minimum, requested_maximum = preferred_duration_window(
+            target_duration_seconds,
+            minimum_duration_seconds=minimum_duration,
+        )
     if requested_minimum < minimum_duration:
         raise ValueError(
             f"A faixa de {video_format} deve começar em pelo menos {minimum_duration} segundos."
@@ -312,6 +368,7 @@ def create_project(
             width=1080,
             height=1920,
         )
+        config.images.opening_visual_standard = "scroll_stop_concrete_v1"
         config.images.width = 1024
         config.images.height = 1536
         config.captions.margin_left = 110

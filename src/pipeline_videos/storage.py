@@ -280,6 +280,14 @@ class ProjectLayout:
         return self.root / "analytics" / "experiments.json"
 
     @property
+    def short_metric_snapshots(self) -> Path:
+        return self.root / "analytics" / "shorts-snapshots.json"
+
+    @property
+    def short_performance_diagnostics(self) -> Path:
+        return self.root / "analytics" / "shorts-diagnostics.json"
+
+    @property
     def events(self) -> Path:
         return self.root / "logs" / "events.jsonl"
 

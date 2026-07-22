@@ -33,6 +33,21 @@
 - Não substitua a geração embutida por API paga sem aprovação explícita.
 - Não sobrescreva imagem aprovada; gere nova versão e peça aprovação.
 
+## Duração e naturalidade da voz
+
+- Uma duração mencionada normalmente, como “um Short de 50 segundos”, é uma meta aproximada, não
+  uma exigência exata. Crie com `preferred_target_v1`; aceite a duração natural resultante e não
+  abra correção, nova síntese ou novo render por diferença normal de alguns segundos.
+- Use `exact_target_v1`/`--exact-duration` somente quando o usuário disser explicitamente “exatos”,
+  “cravados”, “fixos” ou equivalente. Uma faixa mínima/máxima explícita usa `adaptive_range_v1`.
+- Nunca reduza ou aumente a velocidade da voz, aplique `atempo`, time-stretch, silêncio, padding ou
+  alongamento de imagem para aproximar uma meta comum. A voz permanece em velocidade natural `1.0`.
+  Qualquer override de velocidade exige um pedido explícito separado do usuário e
+  `speech_rate_policy=explicit_user_override_v1`; a duração, sozinha, nunca autoriza esse override.
+- Em `preferred_target_v1`, desvios da janela preferencial são no máximo avisos e não alimentam
+  loops de correção. Fidelidade bíblica, integridade da mídia e ativos ausentes continuam sendo
+  bloqueios reais.
+
 ## Precisão bíblica
 
 - Não invente versículo, referência, citação ou detalhe histórico.
@@ -112,6 +127,21 @@
   ficam restritas a projetos legados e vídeos longos. O preflight deve bloquear qualquer
   divergência antes da produção. No perfil compacto, use exatamente o hook curado da passagem; a
   seleção exige pisos persistidos de força do hook, valor da mensagem e potencial de replay.
+- Quando o pedido exigir curiosidade bíblica de alto interesse, use explicitamente
+  `new-short --profile high-stakes` e o perfil `high_stakes_biblical_question_v1`, restrito a 45–60
+  segundos. Ele seleciona a dúvida antes da passagem, copia um hook factual curado de
+  `high_stakes_opening_v1`, exige todos os `required_answer_points`, preserva `answer_status` e
+  `uncertainty_boundaries` e usa revisão bíblica independente. A citação literal continua
+  obrigatória, mas usa `adaptive_payoff_v1` entre 0 e 44 segundos conforme sua função de tensão,
+  prova ou recompensa; não imponha a janela padrão de 8–20 segundos.
+  Esse catálogo é de ciclo único: quando todos os temas tiverem sido usados ou reservados, informe
+  explicitamente a exaustão e não crie outro projeto até que uma nova rodada curada seja incluída e
+  validada. Nunca reinicie a contagem automaticamente.
+- A seleção compacta usa também um prior suave e reproduzível de clareza, concretude e
+  visualizabilidade, penalizando abertura genérica sem situação, ação ou tensão e repetição exata
+  entre Shorts recentes. O prior nunca reescreve hook ou citação, não bloqueia precisão bíblica e
+  não se apresenta como desempenho observado. Métricas confirmadas orientam o roteiro padrão e o
+  plano visual compacto; não reescrevem automaticamente o hook bíblico já selado.
 - O seletor automático usa o catálogo local verificado, combina as pastas com o registro Git
   compartilhado, reserva por compare-and-swap antes de criar o projeto e favorece variedade de
   livro, tema, personagem, testamento, modo criativo e família de hook. Falha do registro bloqueia a
@@ -217,6 +247,17 @@
   `description_rationale`, `tag_strategy` e `discovery_hypothesis`; nunca afirma que SEO garante
   viralização. Para Shorts, trate escolha de assistir, duração média, percentual assistido e
   satisfação como sinais principais de distribuição.
+- Métricas de Shorts usam `appeal_engagement_satisfaction_v1`: `Stayed to watch`/`Swiped away`
+  medem apelo no feed, duração/percentual assistido medem engajamento e reações/compartilhamentos/
+  inscritos apoiam satisfação. Nunca substitua a métrica do Studio por `engaged_views/views`.
+  Snapshots são imutáveis; apelo exige ao menos 200 exposições e progressão exige ao menos 200
+  `engaged_views`. Resultados em processamento ou cuja janela termina antes de 48 horas permanecem
+  provisórios. Alertas só são resolvidos por evidência confirmada do mesmo estágio. Só advisories
+  compatíveis por coorte de duração, hook, estilo e contrato de abertura entram em novas filas; um
+  único Short nunca prova causalidade.
+- Nunca implemente erro deliberado para provocar correção, comentário por conta alternativa,
+  engajamento falso, medo inventado ou promessa vazia. Curiosidade precisa ser honesta e o payoff
+  deve cumprir o mesmo loop aberto pelo hook.
 - Thumbnails novas de Shorts usam conflito/personagem reconhecível, destaque vermelho e ao menos uma
   seta, X, sublinhado ou pincel com alvo real; evite frases abstratas quando o confronto for mais forte.
 - Planeje espaço negativo real e tente não cobrir rosto, corpo, ação principal ou o alvo narrativo.
@@ -295,6 +336,15 @@
 - O perfil pintado usa `unrestricted_scene_v1`: não acrescente regras para preservar rostos diante
   das legendas, esvaziar o centro vertical, afastar elementos das bordas direita/inferior ou evitar
   poses intermediárias. As cenas passam rapidamente e a composição artística pode ocupar o quadro.
+- Shorts novos usam `opening_visual_standard=scroll_stop_concrete_v1`. O primeiro bloco mostra um
+  sujeito ou objeto dominante, uma ação observável já em curso e tensão, escolha ou contraste
+  coerente com o hook, preferindo plano médio, close ou objeto específico a plano geral
+  contemplativo. No perfil pintado, isso não reintroduz área segura, centro vazio nem restrições de
+  borda; apenas impede abertura genérica e faz imagem e fala abrirem a mesma pergunta. O contrato
+  registra `action_kind`, `initial_state` e `resulting_state` concretos; esses campos dirigem o
+  primeiro prompt tanto no planejamento por bloco quanto no fluxo 3D por seção. No compacto 3D,
+  `strategy.visual_scenes` continua sendo a autoridade mesmo que o projeto preserve a configuração
+  legada `section_visual_direction_v1`.
 - Uma imagem mostra um momento, um ambiente e uma ação; sem colagem ou painéis.
 - O único render é o candidato final V4: resolução completa, H.264, CRF 12, preset `slow`,
   supersampling 3. Não gere `draft-preview.mp4` nem `preview.mp4`.
