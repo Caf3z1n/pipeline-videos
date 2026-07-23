@@ -26,9 +26,12 @@ from pipeline_videos.storage import ProjectLayout, read_json, read_model, write_
 from pipeline_videos.utils import relative_posix, sha256_file, sha256_value, slugify, utc_now
 
 APPROVED_SCRIPT_SCHEMA_VERSION = "1.0"
+APPROVED_PRODUCTION_STATE_SCHEMA_VERSION = "1.0"
 APPROVED_SCRIPT_ID_PATTERN = re.compile(r"^approved-[a-z0-9][a-z0-9-]{0,72}-[a-f0-9]{8}$")
+CONTENT_HASH_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 HASHTAG_PATTERN = re.compile(r"(?<!\w)#[\wÀ-ÿ]+", flags=re.UNICODE)
 ApprovedScriptStatus = Literal["draft", "approved", "reserved", "produced", "withdrawn"]
+PRODUCTION_STATUS_ORDER = {"approved": 0, "reserved": 1, "produced": 2}
 
 
 class ApprovedCtaOption(PipelineModel):
@@ -430,6 +433,80 @@ def approved_content_hash(script: ApprovedShortScript) -> str:
     return sha256_value(approved_content_payload(script))
 
 
+def _approved_production_state_item(script: ApprovedShortScript) -> dict[str, Any]:
+    return {
+        "approved_script_id": script.approved_script_id,
+        "content_hash": script.content_hash,
+        "label": script.label,
+        "status": script.status,
+        "updated_at": script.updated_at,
+        "reserved_by_job_id": script.reserved_by_job_id,
+        "reserved_at": script.reserved_at,
+        "produced_at": script.produced_at,
+        "youtube_video_id": script.youtube_video_id,
+        "youtube_url": script.youtube_url,
+    }
+
+
+def _validate_production_state_snapshot(
+    snapshot: dict[str, Any],
+) -> tuple[str, list[dict[str, Any]]]:
+    if snapshot.get("schema_version") != APPROVED_PRODUCTION_STATE_SCHEMA_VERSION:
+        raise ValueError("Versão do snapshot de produção inválida.")
+    exported_at = snapshot.get("exported_at")
+    if not isinstance(exported_at, str) or not exported_at.strip():
+        raise ValueError("Snapshot de produção sem exported_at válido.")
+    raw_items = snapshot.get("items")
+    if not isinstance(raw_items, list):
+        raise ValueError("Snapshot de produção sem lista de itens válida.")
+    seen: set[str] = set()
+    items: list[dict[str, Any]] = []
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            raise ValueError("Item inválido no snapshot de produção.")
+        script_id = raw.get("approved_script_id")
+        content_hash = raw.get("content_hash")
+        label = raw.get("label")
+        status = raw.get("status")
+        updated_at = raw.get("updated_at")
+        if not isinstance(script_id, str) or not APPROVED_SCRIPT_ID_PATTERN.fullmatch(script_id):
+            raise ValueError("ID inválido no snapshot de produção.")
+        if script_id in seen:
+            raise ValueError(f"ID duplicado no snapshot de produção: {script_id}")
+        if not isinstance(content_hash, str) or not CONTENT_HASH_PATTERN.fullmatch(content_hash):
+            raise ValueError(f"Hash inválido no snapshot de produção: {script_id}")
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError(f"Título inválido no snapshot de produção: {script_id}")
+        if status not in PRODUCTION_STATUS_ORDER:
+            raise ValueError(f"Estado inválido no snapshot de produção: {script_id}")
+        if not isinstance(updated_at, str) or not updated_at.strip():
+            raise ValueError(f"updated_at inválido no snapshot de produção: {script_id}")
+        item = {
+            "approved_script_id": script_id,
+            "content_hash": content_hash,
+            "label": label.strip(),
+            "status": status,
+            "updated_at": updated_at,
+            "reserved_by_job_id": raw.get("reserved_by_job_id"),
+            "reserved_at": raw.get("reserved_at"),
+            "produced_at": raw.get("produced_at"),
+            "youtube_video_id": raw.get("youtube_video_id"),
+            "youtube_url": raw.get("youtube_url"),
+        }
+        for field in (
+            "reserved_by_job_id",
+            "reserved_at",
+            "produced_at",
+            "youtube_video_id",
+            "youtube_url",
+        ):
+            if item[field] is not None and not isinstance(item[field], str):
+                raise ValueError(f"{field} inválido no snapshot de produção: {script_id}")
+        seen.add(script_id)
+        items.append(item)
+    return exported_at, items
+
+
 class ApprovedScriptStore:
     statuses: tuple[ApprovedScriptStatus, ...] = (
         "draft",
@@ -443,6 +520,7 @@ class ApprovedScriptStore:
         self.root = jobs_root.expanduser().resolve() / "approved-scripts"
         for status in self.statuses:
             (self.root / status).mkdir(parents=True, exist_ok=True)
+        self.remote_state_path = self.root / "remote-production-state.json"
 
     def path(self, script_id: str, status: ApprovedScriptStatus) -> Path:
         if not APPROVED_SCRIPT_ID_PATTERN.fullmatch(script_id):
@@ -472,6 +550,123 @@ class ApprovedScriptStore:
             for path in (self.root / current).glob("approved-*.json")
         ]
         return sorted(items, key=lambda item: item.created_at)
+
+    def production_state_snapshot(self) -> dict[str, Any]:
+        items = [
+            _approved_production_state_item(script)
+            for script in self.list()
+            if script.status in PRODUCTION_STATUS_ORDER
+        ]
+        return {
+            "schema_version": APPROVED_PRODUCTION_STATE_SCHEMA_VERSION,
+            "exported_at": utc_now(),
+            "counts": {
+                status: sum(item["status"] == status for item in items)
+                for status in PRODUCTION_STATUS_ORDER
+            },
+            "items": items,
+        }
+
+    def merge_production_state(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        exported_at, remote_items = _validate_production_state_snapshot(snapshot)
+        local_by_id = {script.approved_script_id: script for script in self.list()}
+        resolved: list[tuple[ApprovedShortScript, Path, dict[str, Any]]] = []
+        missing_local: list[str] = []
+
+        # Validate the complete snapshot before mutating any local state.
+        for item in remote_items:
+            script_id = item["approved_script_id"]
+            local = local_by_id.get(script_id)
+            if local is None:
+                missing_local.append(script_id)
+                continue
+            if local.content_hash != item["content_hash"]:
+                raise RuntimeError(
+                    f"Hash divergente para {script_id}; nenhuma alteração foi aplicada."
+                )
+            if local.status == "withdrawn":
+                continue
+            if local.status == "draft":
+                raise RuntimeError(
+                    f"O roteiro local {script_id} ainda é rascunho; nenhuma alteração foi aplicada."
+                )
+            resolved.append((local, self.find(script_id)[1], item))
+
+        advanced = 0
+        enriched = 0
+        unchanged = 0
+        regressions_ignored = 0
+        for local, old_path, item in resolved:
+            local_rank = PRODUCTION_STATUS_ORDER[local.status]
+            remote_rank = PRODUCTION_STATUS_ORDER[item["status"]]
+            if remote_rank < local_rank:
+                regressions_ignored += 1
+                continue
+            updates = {
+                "status": item["status"],
+                "reserved_by_job_id": item.get("reserved_by_job_id"),
+                "reserved_at": item.get("reserved_at"),
+                "produced_at": item.get("produced_at"),
+                "youtube_video_id": item.get("youtube_video_id"),
+                "youtube_url": item.get("youtube_url"),
+                "updated_at": item["updated_at"],
+            }
+            updated = local.model_copy(update=updates)
+            if updated == local:
+                unchanged += 1
+                continue
+            if remote_rank > local_rank:
+                advanced += 1
+            else:
+                enriched += 1
+            new_path = self.save(updated)
+            if old_path != new_path:
+                old_path.unlink(missing_ok=True)
+
+        write_json(self.remote_state_path, snapshot)
+        with suppress(OSError):
+            self.remote_state_path.chmod(0o600)
+        overview = self.production_overview()
+        return {
+            "schema_version": APPROVED_PRODUCTION_STATE_SCHEMA_VERSION,
+            "remote_exported_at": exported_at,
+            "advanced": advanced,
+            "enriched": enriched,
+            "unchanged": unchanged,
+            "regressions_ignored": regressions_ignored,
+            "missing_local": missing_local,
+            "production_counts": overview["counts"],
+        }
+
+    def production_overview(self) -> dict[str, Any]:
+        items_by_id = {
+            script.approved_script_id: _approved_production_state_item(script)
+            for script in self.list()
+            if script.status in PRODUCTION_STATUS_ORDER
+        }
+        remote_exported_at: str | None = None
+        if self.remote_state_path.is_file():
+            snapshot = read_json(self.remote_state_path)
+            remote_exported_at, remote_items = _validate_production_state_snapshot(snapshot)
+            for item in remote_items:
+                local = items_by_id.get(item["approved_script_id"])
+                if local is None or (
+                    PRODUCTION_STATUS_ORDER[item["status"]]
+                    >= PRODUCTION_STATUS_ORDER[local["status"]]
+                ):
+                    items_by_id[item["approved_script_id"]] = item
+        items = sorted(
+            items_by_id.values(),
+            key=lambda item: (item["label"].casefold(), item["approved_script_id"]),
+        )
+        return {
+            "counts": {
+                status: sum(item["status"] == status for item in items)
+                for status in PRODUCTION_STATUS_ORDER
+            },
+            "items": items,
+            "remote_synced_at": remote_exported_at,
+        }
 
     def find_by_label(
         self,

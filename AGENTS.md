@@ -111,10 +111,16 @@
 ## Criação e modos de Shorts
 
 - Ideação editorial não é produção. Todo pedido para sugerir temas, discutir roteiros, preparar
-  roteiros em massa ou aprová-los começa com
+  roteiros em massa ou aprová-los começa com uma sincronização remota única pelo controlador
+  `request-video-production` (`-Action ApprovedSync`) e depois
   `uv run pipeline-videos approved-scripts workflow-status`. Antes de qualquer mutação, faça
   exatamente uma pergunta curta confirmando a etapa desejada. Se o usuário já nomear a operação e
   disser para executá-la agora, essa frase vale como confirmação; não repita a pergunta.
+- A sincronização de produção usa `approved_script_id + content_hash` e só permite a progressão
+  `approved -> reserved -> produced`. Divergência de hash bloqueia o lote antes de qualquer
+  mutação; estado remoto atrasado nunca rebaixa o local. `script_counts.approved` representa
+  aprovação editorial histórica, enquanto `production_counts.approved` representa somente os
+  pacotes ainda disponíveis para produção.
 - Depois da confirmação, execute somente a etapa escolhida e encerre com uma resposta direta. Não
   crie projeto, coordenador, subagente, revisão, SEO, plano visual, mídia ou produção que não
   pertença explicitamente à etapa confirmada. Não explique o processo quando bastar informar o

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, time, timedelta
 
 import pytest
@@ -146,6 +147,91 @@ def test_approval_hash_and_atomic_reservation(tmp_path) -> None:
     assert reserved.reserved_by_job_id == "video-20260723-120000-12345678"
     with pytest.raises(RuntimeError, match="Não há roteiros"):
         store.reserve("video-20260723-120001-12345678")
+
+
+def test_remote_production_state_merge_is_monotonic_and_idempotent(tmp_path) -> None:
+    store = ApprovedScriptStore(tmp_path / "jobs")
+    draft = _approved_script()
+    store.save(draft)
+    approved = store.approve(
+        draft.approved_script_id,
+        confirm_hash=draft.content_hash,
+        approved_by="Pedro",
+    )
+    snapshot = store.production_state_snapshot()
+    snapshot["items"][0].update(
+        {
+            "status": "reserved",
+            "reserved_by_job_id": "video-20260723-120000-12345678",
+            "reserved_at": "2026-07-23T12:00:00+00:00",
+            "updated_at": "2026-07-23T12:00:00+00:00",
+        }
+    )
+
+    first = store.merge_production_state(snapshot)
+    second = store.merge_production_state(snapshot)
+    reserved, reserved_path = store.find(approved.approved_script_id)
+
+    assert first["advanced"] == 1
+    assert second["unchanged"] == 1
+    assert reserved.status == "reserved"
+    assert reserved_path.parent.name == "reserved"
+
+    produced_snapshot = json.loads(json.dumps(snapshot))
+    produced_snapshot["exported_at"] = "2026-07-23T12:10:00+00:00"
+    produced_snapshot["items"][0].update(
+        {
+            "status": "produced",
+            "produced_at": "2026-07-23T12:09:00+00:00",
+            "youtube_video_id": "youtube-123",
+            "youtube_url": "https://youtu.be/youtube-123",
+            "updated_at": "2026-07-23T12:09:00+00:00",
+        }
+    )
+    result = store.merge_production_state(produced_snapshot)
+    produced, _ = store.find(approved.approved_script_id)
+
+    assert result["advanced"] == 1
+    assert produced.status == "produced"
+    assert produced.youtube_url == "https://youtu.be/youtube-123"
+
+    stale_result = store.merge_production_state(snapshot)
+    still_produced, _ = store.find(approved.approved_script_id)
+
+    assert stale_result["regressions_ignored"] == 1
+    assert still_produced.status == "produced"
+
+
+def test_remote_production_state_hash_mismatch_is_atomic(tmp_path) -> None:
+    store = ApprovedScriptStore(tmp_path / "jobs")
+    first = _approved_script()
+    second = first.model_copy(
+        update={
+            "approved_script_id": "approved-segundo-12345678",
+            "label": "Segundo roteiro",
+        }
+    )
+    second = second.model_copy(update={"content_hash": approved_content_hash(second)})
+    store.save(first)
+    store.save(second)
+    for script in (first, second):
+        store.approve(
+            script.approved_script_id,
+            confirm_hash=script.content_hash,
+            approved_by="Pedro",
+        )
+    snapshot = store.production_state_snapshot()
+    for item in snapshot["items"]:
+        item["status"] = "reserved"
+        item["reserved_by_job_id"] = "video-20260723-120000-12345678"
+    snapshot["items"][1]["content_hash"] = "0" * 64
+
+    with pytest.raises(RuntimeError, match="Hash divergente"):
+        store.merge_production_state(snapshot)
+
+    assert len(store.list(status="approved")) == 2
+    assert store.list(status="reserved") == []
+    assert not store.remote_state_path.exists()
 
 
 def test_cta_can_be_replaced_before_hash_approval(tmp_path) -> None:

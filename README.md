@@ -285,12 +285,21 @@ estado indeterminado é bloqueado para impedir duplicata silenciosa.
 ### Roteiros pré-aprovados
 
 Antes de existir um projeto de vídeo, temas e roteiros passam pela bancada editorial. O agente
+sincroniza uma vez os estados de produção da VPS pelo controlador `request-video-production`,
 consulta a etapa atual e faz uma única pergunta curta; nenhuma ação é iniciada até a etapa ser
 confirmada:
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File `
+  "$env:USERPROFILE\.codex\skills\request-video-production\scripts\video-job.ps1" `
+  -Action ApprovedSync
 uv run pipeline-videos approved-scripts workflow-status
 ```
+
+O status separa `script_counts.approved` (aprovação editorial histórica) de
+`production_counts.approved` (roteiros ainda disponíveis). A sincronização confere
+`approved_script_id + content_hash`, nunca rebaixa `reserved` ou `produced` e não altera o conteúdo
+congelado.
 
 O fluxo é sequencial e cada comando executa somente sua própria etapa:
 

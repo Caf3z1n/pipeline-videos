@@ -1050,12 +1050,15 @@ class EditorialBoardStore:
         return production_ids
 
     def workflow_status(self) -> dict[str, Any]:
+        from pipeline_videos.approved_scripts import ApprovedScriptStore
+
         topic_counts = {
             status: len(self.list_topics(status=status)) for status in self.topic_statuses
         }
         script_counts = {
             status: len(self.list_scripts(status=status)) for status in self.draft_statuses
         }
+        production = ApprovedScriptStore(self.root.parent).production_overview()
         pending_batches = [
             EditorialBatch.model_validate_json(path.read_text(encoding="utf-8"))
             for path in self.batches_root.glob("batch-????????-??????-????????.json")
@@ -1069,15 +1072,18 @@ class EditorialBoardStore:
         elif script_counts["draft"]:
             next_step = "script_approval"
             question = "Você quer revisar, alterar ou aprovar os roteiros do lote?"
-        elif script_counts["approved"]:
+        elif production["counts"]["approved"]:
             next_step = "production_release"
-            question = "Você quer apenas listar os aprovados ou iniciar a produção?"
+            question = "Você quer produzir um dos roteiros ainda disponíveis?"
         else:
             next_step = "theme_suggestion"
             question = "Você quer sugerir temas ou receber sugestões de temas?"
         return {
             "topic_counts": topic_counts,
             "script_counts": script_counts,
+            "production_counts": production["counts"],
+            "production_items": production["items"],
+            "production_remote_synced_at": production["remote_synced_at"],
             "batches": [
                 {
                     "batch_id": batch.batch_id,

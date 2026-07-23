@@ -131,6 +131,30 @@ def approved_workflow_status(
     typer.echo(json.dumps(_editorial_board(jobs_dir).workflow_status(), ensure_ascii=False))
 
 
+@approved_app.command("production-sync")
+def approved_production_sync(
+    snapshot_base64: Annotated[
+        str,
+        typer.Option(
+            "--snapshot-base64",
+            help="Snapshot remoto JSON codificado em UTF-8/Base64.",
+        ),
+    ],
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Mescla estados remotos sem alterar nem reabrir o conteúdo aprovado."""
+
+    try:
+        decoded = base64.b64decode(snapshot_base64, validate=True).decode("utf-8")
+        snapshot = json.loads(decoded)
+        if not isinstance(snapshot, dict):
+            raise ValueError("o conteúdo precisa ser um objeto JSON")
+        result = _approved_store(jobs_dir).merge_production_state(snapshot)
+    except Exception as exc:
+        raise typer.BadParameter(f"Snapshot remoto inválido: {exc}") from exc
+    typer.echo(json.dumps(result, ensure_ascii=False))
+
+
 @approved_app.command("hook-check")
 def approved_hook_check(
     hooks: Annotated[
@@ -786,6 +810,20 @@ def remote_list(
         raise typer.BadParameter("Status remoto inválido.")
     jobs = RemoteJobStore(jobs_dir).list(status=status_filter)  # type: ignore[arg-type]
     typer.echo(json.dumps([job_summary(job) for job in jobs[:limit]], ensure_ascii=False))
+
+
+@remote_app.command("approved-state")
+def remote_approved_state(
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Exporta um snapshot compacto do estado dos roteiros pré-aprovados."""
+
+    typer.echo(
+        json.dumps(
+            _approved_store(jobs_dir).production_state_snapshot(),
+            ensure_ascii=False,
+        )
+    )
 
 
 @remote_app.command("cancel")

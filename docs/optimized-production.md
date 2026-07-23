@@ -121,9 +121,12 @@ Projetos novos usam:
 
 ### Bancada editorial econômica
 
-Ideação, aprovação de temas e aprovação de roteiros acontecem antes da criação de projetos. Consulte
-`approved-scripts workflow-status`, faça a única pergunta indicada e aguarde a confirmação. A ordem
-é fixa:
+Ideação, aprovação de temas e aprovação de roteiros acontecem antes da criação de projetos. Antes
+de consultar `approved-scripts workflow-status`, execute uma vez `ApprovedSync` pelo controlador
+`request-video-production`. O snapshot remoto contém somente IDs, hashes e estados operacionais;
+o merge local valida todos os hashes antes de aplicar a progressão
+`approved -> reserved -> produced`, sem regressão. Depois consulte o status, faça a única pergunta
+indicada e aguarde a confirmação. A ordem é fixa:
 
 ```text
 tema sugerido

@@ -68,6 +68,9 @@ def test_editorial_board_starts_with_one_concise_question(tmp_path) -> None:
 
     assert status["next_step"] == "theme_suggestion"
     assert status["required_question"] == ("Você quer sugerir temas ou receber sugestões de temas?")
+    assert status["production_counts"] == {"approved": 0, "reserved": 0, "produced": 0}
+    assert status["production_items"] == []
+    assert status["production_remote_synced_at"] is None
     assert "somente a etapa confirmada" in status["operational_rule"].casefold()
 
 
@@ -217,6 +220,10 @@ def test_batch_import_and_single_hash_mass_approval(tmp_path) -> None:
         topics[0].title,
         status="reserved",
     ).reserved_by_job_id
+    workflow = store.workflow_status()
+    assert workflow["script_counts"]["approved"] == 2
+    assert workflow["production_counts"] == {"approved": 1, "reserved": 1, "produced": 0}
+    assert workflow["next_step"] == "production_release"
     repeated = store.approve_batch(
         batch.batch_id,
         confirm_hash=review["aggregate_hash"],
