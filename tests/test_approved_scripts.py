@@ -234,6 +234,36 @@ def test_remote_production_state_hash_mismatch_is_atomic(tmp_path) -> None:
     assert not store.remote_state_path.exists()
 
 
+def test_approved_snapshot_import_is_idempotent_and_never_overwrites(tmp_path) -> None:
+    store = ApprovedScriptStore(tmp_path / "jobs")
+    draft = _approved_script()
+    source = ApprovedScriptStore(tmp_path / "source")
+    source.save(draft)
+    approved = source.approve(
+        draft.approved_script_id,
+        confirm_hash=draft.content_hash,
+        approved_by="Pedro",
+    )
+
+    imported, created = store.import_approved_snapshot(approved)
+    repeated, created_again = store.import_approved_snapshot(approved)
+
+    assert created is True
+    assert created_again is False
+    assert imported.content_hash == repeated.content_hash
+
+    changed = approved.model_copy(update={"label": "Mesmo ID com outro conteúdo"})
+    changed = changed.model_copy(update={"content_hash": approved_content_hash(changed)})
+    with pytest.raises(RuntimeError, match="outro hash"):
+        store.import_approved_snapshot(changed)
+
+    reserved = store.reserve("video-20260723-120000-12345678")
+    existing, created_reserved = store.import_approved_snapshot(approved)
+    assert reserved.status == "reserved"
+    assert existing.status == "reserved"
+    assert created_reserved is False
+
+
 def test_cta_can_be_replaced_before_hash_approval(tmp_path) -> None:
     store = ApprovedScriptStore(tmp_path / "jobs")
     draft = _approved_script()

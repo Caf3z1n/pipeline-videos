@@ -567,6 +567,21 @@ class ApprovedScriptStore:
             "items": items,
         }
 
+    def import_approved_snapshot(
+        self,
+        script: ApprovedShortScript,
+    ) -> tuple[ApprovedShortScript, bool]:
+        if script.status != "approved":
+            raise ValueError("Somente um snapshot aprovado pode ser importado para produção.")
+        try:
+            existing, _ = self.find(script.approved_script_id)
+        except FileNotFoundError:
+            self.save(script)
+            return script, True
+        if existing.content_hash != script.content_hash:
+            raise RuntimeError(f"O pacote {script.approved_script_id} já existe com outro hash.")
+        return existing, False
+
     def merge_production_state(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         exported_at, remote_items = _validate_production_state_snapshot(snapshot)
         local_by_id = {script.approved_script_id: script for script in self.list()}

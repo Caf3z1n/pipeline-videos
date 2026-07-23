@@ -826,6 +826,41 @@ def remote_approved_state(
     )
 
 
+@remote_app.command("approved-import")
+def remote_approved_import(
+    snapshot_base64: Annotated[
+        str,
+        typer.Option(
+            "--snapshot-base64",
+            help="ApprovedShortScript completo codificado em UTF-8/Base64.",
+        ),
+    ],
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Importa um pacote aprovado imutável antes da liberação remota."""
+
+    from pipeline_videos.approved_scripts import (
+        ApprovedShortScript,
+        approved_script_summary,
+    )
+
+    try:
+        decoded = base64.b64decode(snapshot_base64, validate=True).decode("utf-8")
+        script = ApprovedShortScript.model_validate_json(decoded)
+        imported, created = _approved_store(jobs_dir).import_approved_snapshot(script)
+    except Exception as exc:
+        raise typer.BadParameter(f"Snapshot aprovado inválido: {exc}") from exc
+    typer.echo(
+        json.dumps(
+            {
+                "created": created,
+                "script": approved_script_summary(imported),
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
 @remote_app.command("cancel")
 def remote_cancel(
     job_id: str,
