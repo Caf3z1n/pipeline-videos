@@ -353,6 +353,11 @@ há roteirista, revisor bíblico, especialista de crescimento nem novo preflight
 liberação. O executor confere somente o hash imutável antes da mídia; conteúdo e decisões aprovadas
 não são reinterpretados, pontuados ou validados novamente.
 
+Pelo controlador `request-video-production`, um ou mais aprovados são enviados em um único bundle
+content-addressed por SCP. O servidor valida todos os hashes antes de importar, grava uma intenção
+idempotente e cria IDs de job retomáveis. Repetir a mesma seleção reutiliza os mesmos jobs, sem
+duplicata e sem tokens de modelo na sincronização.
+
 A duração informada na bancada é somente uma estimativa. Depois da aprovação por hash, o roteiro
 usa `approved_script_locked_v1`: nenhuma contagem de palavras ou diferença em relação a 50 segundos
 pode alterar ou bloquear o texto. A voz natural define a duração efetiva do Short, seja ela menor

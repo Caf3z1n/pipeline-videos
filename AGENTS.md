@@ -154,6 +154,10 @@
   cria somente um job `approved_fast_v1`, usa upload privado e não reabre roteiro, revisão bíblica,
   SEO ou planejamento visual. Repetição do pedido deve reutilizar o estado persistido ou informar
   que o pacote já está reservado/produzido; nunca crie duplicata silenciosa.
+- Pelo controlador remoto, a liberação usa um único bundle content-addressed transferido por SCP.
+  O servidor valida todos os IDs, hashes e snapshots antes da primeira mutação, grava uma intenção
+  idempotente e retoma os mesmos IDs de job após interrupção. Pacote já existente é referenciado;
+  pacote ausente é importado. Não envie snapshots em Base64 pela linha de comando.
 - Em `approved_fast_v1`, não execute preflight, pontuação, conferência bíblica, revisão criativa ou
   validação de SEO depois da aprovação humana. Confira somente o hash imutável do snapshot. A
   validação final é estritamente técnica: integridade dos arquivos, correspondência literal entre

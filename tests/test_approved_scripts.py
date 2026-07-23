@@ -4,7 +4,16 @@ import json
 from datetime import UTC, datetime, time, timedelta
 
 import pytest
+from typer.testing import CliRunner
 
+from pipeline_videos import cli
+from pipeline_videos.approved_release import (
+    ApprovedReleaseBundle,
+    ApprovedReleaseBundleItem,
+    approved_release_bundle_path,
+    approved_release_id,
+    execute_approved_release_bundle,
+)
 from pipeline_videos.approved_scripts import (
     ApprovedCtaOption,
     ApprovedScriptStore,
@@ -28,6 +37,7 @@ from pipeline_videos.remote_schedules import (
     RemoteScheduleStore,
     materialize_daily_schedules,
 )
+from pipeline_videos.storage import read_json, write_json
 
 
 def _approved_script() -> ApprovedShortScript:
@@ -262,6 +272,142 @@ def test_approved_snapshot_import_is_idempotent_and_never_overwrites(tmp_path) -
     assert reserved.status == "reserved"
     assert existing.status == "reserved"
     assert created_reserved is False
+
+
+def test_approved_release_bundle_is_idempotent_and_resumes_same_jobs(tmp_path) -> None:
+    source = ApprovedScriptStore(tmp_path / "source")
+    server = ApprovedScriptStore(tmp_path / "jobs")
+    first_draft = _approved_script()
+    second_draft = first_draft.model_copy(
+        update={
+            "approved_script_id": "approved-segundo-12345678",
+            "label": "Segundo roteiro",
+        }
+    )
+    second_draft = second_draft.model_copy(
+        update={"content_hash": approved_content_hash(second_draft)}
+    )
+    approved = []
+    for draft in (first_draft, second_draft):
+        source.save(draft)
+        approved.append(
+            source.approve(
+                draft.approved_script_id,
+                confirm_hash=draft.content_hash,
+                approved_by="Pedro",
+            )
+        )
+    server.import_approved_snapshot(approved[0])
+    identities = [(item.approved_script_id, item.content_hash) for item in approved]
+    bundle = ApprovedReleaseBundle(
+        release_id=approved_release_id(identities),
+        items=[
+            ApprovedReleaseBundleItem(
+                approved_script_id=approved[0].approved_script_id,
+                content_hash=approved[0].content_hash,
+            ),
+            ApprovedReleaseBundleItem(
+                approved_script_id=approved[1].approved_script_id,
+                content_hash=approved[1].content_hash,
+                snapshot=approved[1],
+            ),
+        ],
+    )
+    jobs = RemoteJobStore(tmp_path / "jobs")
+
+    first_result = execute_approved_release_bundle(bundle, job_store=jobs)
+    repeated_result = execute_approved_release_bundle(bundle, job_store=jobs)
+
+    first_ids = [item["job"]["job_id"] for item in first_result["jobs"]]
+    repeated_ids = [item["job"]["job_id"] for item in repeated_result["jobs"]]
+    assert first_ids == repeated_ids
+    assert len(jobs.list()) == 2
+    assert len(server.list(status="reserved")) == 2
+    intent = read_json(jobs.root / "approved-releases" / f"{bundle.release_id}.json")
+    assert intent["status"] == "completed"
+
+
+def test_approved_release_bundle_hash_collision_is_atomic(tmp_path) -> None:
+    server = ApprovedScriptStore(tmp_path / "jobs")
+    source = ApprovedScriptStore(tmp_path / "source")
+    draft = _approved_script()
+    server.save(draft)
+    existing = server.approve(
+        draft.approved_script_id,
+        confirm_hash=draft.content_hash,
+        approved_by="Pedro",
+    )
+    changed_draft = draft.model_copy(update={"label": "Conteúdo divergente"})
+    changed_draft = changed_draft.model_copy(
+        update={"content_hash": approved_content_hash(changed_draft)}
+    )
+    source.save(changed_draft)
+    changed = source.approve(
+        changed_draft.approved_script_id,
+        confirm_hash=changed_draft.content_hash,
+        approved_by="Pedro",
+    )
+    identities = [(changed.approved_script_id, changed.content_hash)]
+    bundle = ApprovedReleaseBundle(
+        release_id=approved_release_id(identities),
+        items=[
+            ApprovedReleaseBundleItem(
+                approved_script_id=changed.approved_script_id,
+                content_hash=changed.content_hash,
+                snapshot=changed,
+            )
+        ],
+    )
+    jobs = RemoteJobStore(tmp_path / "jobs")
+
+    with pytest.raises(RuntimeError, match="Hash divergente"):
+        execute_approved_release_bundle(bundle, job_store=jobs)
+
+    unchanged, _ = server.find(existing.approved_script_id)
+    assert unchanged.status == "approved"
+    assert jobs.list() == []
+    assert not (jobs.root / "approved-releases").exists()
+
+
+def test_remote_cli_consumes_approved_release_bundle_file(tmp_path) -> None:
+    source = ApprovedScriptStore(tmp_path / "source")
+    draft = _approved_script()
+    source.save(draft)
+    approved = source.approve(
+        draft.approved_script_id,
+        confirm_hash=draft.content_hash,
+        approved_by="Pedro",
+    )
+    identities = [(approved.approved_script_id, approved.content_hash)]
+    bundle = ApprovedReleaseBundle(
+        release_id=approved_release_id(identities),
+        items=[
+            ApprovedReleaseBundleItem(
+                approved_script_id=approved.approved_script_id,
+                content_hash=approved.content_hash,
+                snapshot=approved,
+            )
+        ],
+    )
+    bundle_path = approved_release_bundle_path(tmp_path / "jobs", bundle.release_id)
+    write_json(bundle_path, bundle)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "remote",
+            "approved-release-bundle",
+            bundle.release_id,
+            "--jobs-dir",
+            str(tmp_path / "jobs"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["release_id"] == bundle.release_id
+    assert payload["jobs"][0]["job"]["status"] == "queued"
+    assert not bundle_path.exists()
 
 
 def test_cta_can_be_replaced_before_hash_approval(tmp_path) -> None:

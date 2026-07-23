@@ -167,6 +167,12 @@ Ela reserva o snapshot, cria um único job `approved_fast_v1` com upload privado
 executor não abre roteiro, revisão, SEO, plano visual nem preflight editorial; somente imagens,
 áudio, legendas, música, render, validação técnica da mídia e upload permanecem.
 
+Na produção remota, o controlador agrupa os roteiros escolhidos em um bundle content-addressed e o
+transfere por SCP. O servidor valida o bundle inteiro antes da primeira mutação e persiste uma
+intenção de liberação com os IDs dos jobs. Repetir a mesma seleção retoma a mesma intenção e os
+mesmos jobs; snapshots já presentes são reutilizados e somente os ausentes são importados. O
+transporte e a liberação não chamam modelo.
+
 Não existe preflight de contagem de palavras ou janela de duração para um roteiro aprovado. O valor
 de duração salvo é uma estimativa para organização; `approved_script_locked_v1` aceita a duração
 natural produzida pela locução e a registra como efetiva. Desvio para menos ou para mais não cria

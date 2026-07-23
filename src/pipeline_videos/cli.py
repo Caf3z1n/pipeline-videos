@@ -826,39 +826,31 @@ def remote_approved_state(
     )
 
 
-@remote_app.command("approved-import")
-def remote_approved_import(
-    snapshot_base64: Annotated[
-        str,
-        typer.Option(
-            "--snapshot-base64",
-            help="ApprovedShortScript completo codificado em UTF-8/Base64.",
-        ),
-    ],
+@remote_app.command("approved-release-bundle")
+def remote_approved_release_bundle(
+    release_id: str,
     jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
 ) -> None:
-    """Importa um pacote aprovado imutável antes da liberação remota."""
+    """Importa, reserva e enfileira um bundle aprovado de forma retomável."""
 
-    from pipeline_videos.approved_scripts import (
-        ApprovedShortScript,
-        approved_script_summary,
+    from pipeline_videos.approved_release import (
+        ApprovedReleaseBundle,
+        approved_release_bundle_path,
+        execute_approved_release_bundle,
     )
+    from pipeline_videos.remote_jobs import RemoteJobStore
 
+    job_store = RemoteJobStore(jobs_dir)
+    bundle_path = approved_release_bundle_path(job_store.root, release_id)
     try:
-        decoded = base64.b64decode(snapshot_base64, validate=True).decode("utf-8")
-        script = ApprovedShortScript.model_validate_json(decoded)
-        imported, created = _approved_store(jobs_dir).import_approved_snapshot(script)
+        bundle = ApprovedReleaseBundle.model_validate_json(bundle_path.read_text(encoding="utf-8"))
+        if bundle.release_id != release_id:
+            raise ValueError("O release_id do arquivo não corresponde ao comando.")
+        result = execute_approved_release_bundle(bundle, job_store=job_store)
     except Exception as exc:
-        raise typer.BadParameter(f"Snapshot aprovado inválido: {exc}") from exc
-    typer.echo(
-        json.dumps(
-            {
-                "created": created,
-                "script": approved_script_summary(imported),
-            },
-            ensure_ascii=False,
-        )
-    )
+        raise typer.BadParameter(f"Bundle aprovado inválido: {exc}") from exc
+    bundle_path.unlink(missing_ok=True)
+    typer.echo(json.dumps(result, ensure_ascii=False))
 
 
 @remote_app.command("cancel")
