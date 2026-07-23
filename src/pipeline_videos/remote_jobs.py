@@ -486,6 +486,8 @@ def wait_for_terminal_job(
     while True:
         job, _ = store.find(job_id)
         if job.status in TERMINAL_JOB_STATUSES:
+            if not store.terminal_event_path(job.job_id).is_file():
+                store._record_status_event(job)
             return job
         remaining = deadline - time.monotonic()
         if remaining <= 0:

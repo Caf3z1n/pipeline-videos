@@ -149,6 +149,7 @@ def test_wait_for_terminal_job_returns_persisted_terminal_event_without_model(tm
         "completed",
         youtube_url="https://youtu.be/video-123",
     )
+    store.terminal_event_path(completed.job_id).unlink()
 
     waited = wait_for_terminal_job(store, completed.job_id, timeout_seconds=0)
 
