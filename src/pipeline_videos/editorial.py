@@ -38,6 +38,7 @@ class ScriptureCitation:
     quote: str
     word_offset: int = 0
     estimated_start_seconds: float = 0.0
+    reference_hint: str | None = None
 
 
 def _normalized(value: str) -> str:
@@ -45,16 +46,24 @@ def _normalized(value: str) -> str:
     return " ".join(re.findall(r"\w+", value, flags=re.UNICODE))
 
 
+def _accent_fold(value: str) -> str:
+    return "".join(
+        character
+        for character in unicodedata.normalize("NFKD", value).casefold()
+        if not unicodedata.combining(character)
+    )
+
+
 def _quoted_text_spans(value: str) -> list[tuple[int, str]]:
     spans: list[tuple[int, str]] = []
     depth = 0
     start = -1
     for index, character in enumerate(value):
-        if character == "“":
+        if character == "\u201c":
             if depth == 0:
                 start = index
             depth += 1
-        elif character == "”" and depth:
+        elif character == "\u201d" and depth:
             depth -= 1
             if depth == 0:
                 spans.append((start, value[start + 1 : index]))
@@ -81,11 +90,15 @@ def scripture_citations(
         if "biblical_text" in section.claim_classification:
             for quote_start, quote in _quoted_text_spans(section.narration):
                 prefix = section.narration[max(0, quote_start - 180) : quote_start]
-                reference_before_quote = (
-                    re.search(r"\bcapítulo\s+\d+\b", prefix, flags=re.IGNORECASE)
-                    and re.search(r"\bversículos?\s+\d+\b", prefix, flags=re.IGNORECASE)
-                    and re.search(r"\b(?:lemos|diz|declara)\s*:\s*$", prefix, flags=re.IGNORECASE)
+                folded_prefix = _accent_fold(prefix)
+                spoken_reference_matches = list(
+                    re.finditer(
+                        r"\bcapitulo\s+(?P<chapter>\d+)\s*,?\s*"
+                        r"versiculos?\s+(?P<verse>\d+(?:\s*(?:a|-)\s*\d+)?)\b",
+                        folded_prefix,
+                    )
                 )
+                reference_before_quote = spoken_reference_matches and re.search(r":\s*$", prefix)
                 next_section = (
                     document.sections[section_index + 1]
                     if section_index + 1 < len(document.sections)
@@ -97,18 +110,25 @@ def scripture_citations(
                     and "biblical_text" in next_section.claim_classification
                     and set(section.biblical_basis).intersection(next_section.biblical_basis)
                     and re.search(
-                        r"\bcapítulo\s+\d+\b",
-                        next_section.narration,
-                        flags=re.IGNORECASE,
+                        r"\bcapitulo\s+\d+\b",
+                        _accent_fold(next_section.narration),
                     )
                     and re.search(
-                        r"\bversículos?\s+\d+\b",
-                        next_section.narration,
-                        flags=re.IGNORECASE,
+                        r"\bversiculos?\s+\d+\b",
+                        _accent_fold(next_section.narration),
                     )
                 )
                 if reference_before_quote or reference_after_quote:
                     offset = word_cursor + len(tokenize_words(section.narration[:quote_start]))
+                    reference_hint = None
+                    if spoken_reference_matches:
+                        reference_match = spoken_reference_matches[-1]
+                        verse_hint = re.sub(
+                            r"\s+",
+                            "",
+                            reference_match.group("verse"),
+                        ).replace("a", "-")
+                        reference_hint = f"{reference_match.group('chapter')}:{verse_hint}"
                     citations.append(
                         ScriptureCitation(
                             section_id=section.section_id,
@@ -118,6 +138,7 @@ def scripture_citations(
                                 offset / words_per_minute * 60,
                                 2,
                             ),
+                            reference_hint=reference_hint,
                         )
                     )
         word_cursor += len(tokenize_words(section.narration))

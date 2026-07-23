@@ -332,7 +332,24 @@ def _editorial_sources(
     entries: list[SourceEntry] = []
     used_references: set[str] = set()
     for index, citation in enumerate(citations):
-        reference = topic.source_passages[min(index, len(topic.source_passages) - 1)]
+        reference = next(
+            (
+                candidate
+                for candidate in topic.source_passages
+                if citation.reference_hint
+                and citation.reference_hint
+                == next(
+                    iter(
+                        re.findall(
+                            r"\d+:\d+(?:-\d+)?",
+                            candidate.replace("–", "-").replace("—", "-"),
+                        )
+                    ),
+                    None,
+                )
+            ),
+            topic.source_passages[min(index, len(topic.source_passages) - 1)],
+        )
         source_id = f"editorial-source-{slugify(reference)}-{index + 1:02d}"
         entries.append(
             SourceEntry(

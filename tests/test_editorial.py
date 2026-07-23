@@ -104,6 +104,31 @@ def test_scripture_citation_preserves_nested_curly_quotes() -> None:
     assert [citation.quote for citation in citations] == [excerpt]
 
 
+def test_scripture_citation_accepts_spoken_reference_before_quote() -> None:
+    excerpt = "Eu sei que sempre me ouves, para que creiam que tu me enviaste."
+    script = ScriptDocument(
+        title="Lázaro",
+        sections=[
+            ScriptSection(
+                section_id="scripture",
+                role="biblical_narrative",
+                title="Citação",
+                narration=(
+                    f"Antes de chamar Lázaro, orei em João, capítulo 11, versículo 42: “{excerpt}”"
+                ),
+                biblical_basis=["João 11:42"],
+                claim_classification=["biblical_text"],
+            )
+        ],
+    )
+
+    citations = scripture_citations(script)
+
+    assert [(citation.quote, citation.reference_hint) for citation in citations] == [
+        (excerpt, "11:42")
+    ]
+
+
 @pytest.mark.parametrize(
     ("replacement", "message"),
     [
