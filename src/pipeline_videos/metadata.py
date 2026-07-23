@@ -97,6 +97,12 @@ def _build_chapters(
 
 
 def build_metadata(layout: ProjectLayout, *, force: bool = False) -> YouTubeMetadata:
+    if layout.approved_script_lock.is_file():
+        from pipeline_videos.approved_scripts import verify_project_approved_script_lock
+
+        verify_project_approved_script_lock(layout)
+        return read_model(layout.metadata, YouTubeMetadata)
+
     briefing = read_model(layout.briefing, Briefing)
     scenes = read_model(layout.scenes, SceneManifest)
     sources = read_model(layout.sources, SourceLibrary)
