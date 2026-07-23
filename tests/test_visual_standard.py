@@ -2,13 +2,10 @@ from datetime import date
 
 from pipeline_videos.models import (
     Palette,
-    SceneManifest,
-    ScriptDocument,
-    ScriptSection,
     StyleProfile,
 )
 from pipeline_videos.project import create_project, load_style
-from pipeline_videos.scenes import _resolved_style, assemble_prompt, build_scenes
+from pipeline_videos.scenes import _resolved_style, assemble_prompt
 from pipeline_videos.storage import read_model, write_json
 
 
@@ -46,7 +43,6 @@ def test_visual_standard_restores_the_project_profile_and_hardens_prompt(tmp_pat
         emotion="tensão contida",
         canvas_width=1080,
         canvas_height=1920,
-        reserve_caption_safe_area=False,
     ).assembled_prompt
     assert "Visual standard: biblical-midcentury-gouache-v1" in prompt
     assert "guache opaco e têmpera" in prompt
@@ -57,61 +53,31 @@ def test_visual_standard_restores_the_project_profile_and_hardens_prompt(tmp_pat
     assert "sem tela dividida" in prompt
 
 
-def test_short_verse_opening_can_change_images_and_keeps_first_anchor(tmp_path) -> None:
+def test_long_and_short_share_the_same_visual_contract(tmp_path) -> None:
+    long_layout = create_project(
+        "longo-guache",
+        "Longo em guache",
+        projects_dir=tmp_path,
+        target_duration_seconds=420,
+        project_date=date(2026, 7, 14),
+    )
     layout = create_project(
-        "versiculo-abertura",
-        "Versículo na abertura",
+        "short-guache",
+        "Short em guache",
         projects_dir=tmp_path,
         target_duration_seconds=60,
         video_format="short",
-        style_id="cinematic-family-3d-animation",
         project_date=date(2026, 7, 14),
     )
-    write_json(
-        layout.script,
-        ScriptDocument(
-            title="Coragem em Josué",
-            sections=[
-                ScriptSection(
-                    section_id="verse",
-                    role="opening",
-                    title="Josué 1:9",
-                    narration=(
-                        "Em Josué, capítulo 1, versículo 9, lemos: “Seja forte e corajoso. "
-                        "Não se apavore nem "
-                        "desanime, pois o Senhor, o seu Deus, estará com você por onde andar.”"
-                    ),
-                    biblical_basis=["Josué 1:9"],
-                    claim_classification=["biblical_text"],
-                    visual_direction=(
-                        "Josué em primeiro plano antes de conduzir o povo, com decisão no gesto"
-                    ),
-                ),
-                ScriptSection(
-                    section_id="reflection",
-                    role="reflection",
-                    title="Comentário",
-                    narration="O medo ainda existe, mas você não precisa resolver tudo hoje.",
-                    biblical_basis=["Josué 1:9"],
-                    claim_classification=["interpretation"],
-                ),
-            ],
-        ),
+
+    long_manifest = long_layout.load_manifest()
+    short_manifest = layout.load_manifest()
+    assert long_manifest.config.images.visual_standard_id == (
+        short_manifest.config.images.visual_standard_id
     )
-
-    manifest = build_scenes(layout, target_scene_seconds=3, skip_approvals=True)
-    persisted = read_model(layout.scenes, SceneManifest)
-    opening_scenes = [scene for scene in manifest.scenes if scene.section_id == "verse"]
-
-    assert persisted == manifest
-    assert len(opening_scenes) >= 2
-    opening = opening_scenes[0]
-    continuation = opening_scenes[1]
-    assert "imagem-âncora da abertura" in opening.narrative_function
-    assert "alto impacto" in opening.prompt.composition
-    assert "45% a 65%" in opening.prompt.assembled_prompt
-    assert "uma área do mesmo fundo contínuo" in opening.prompt.assembled_prompt
-    assert "nunca transformar essa área em faixa branca" in opening.prompt.assembled_prompt
-    assert "mudança visual dentro da abertura" in continuation.narrative_function
-    assert "variação clara de escala e ângulo" in continuation.prompt.composition
-    assert "leitura visual em menos de um segundo" in opening.prompt.emotion
+    assert long_manifest.config.images.scene_planning_standard == (
+        short_manifest.config.images.scene_planning_standard
+    )
+    assert read_model(long_layout.style_profile, StyleProfile) == read_model(
+        layout.style_profile, StyleProfile
+    )

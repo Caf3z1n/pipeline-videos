@@ -49,6 +49,10 @@ def test_catalog_exposes_sixteen_distinct_creative_modes() -> None:
         "devotional_application",
         "pastoral_encouragement",
     }
+    storytelling = CREATIVE_MODE_SPECS["biblical_storytelling"]
+    assert storytelling.interpretive_stance == "factual"
+    assert "o relato não explica" in storytelling.forbidden_narration_patterns
+    assert any("contando uma história" in rule for rule in storytelling.narration_rules)
 
 
 def test_requested_hook_templates_are_available_and_recognized() -> None:

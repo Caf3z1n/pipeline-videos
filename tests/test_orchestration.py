@@ -74,10 +74,7 @@ def _write_parallel_queues(layout) -> None:
         layout.growth_queue,
         {
             "status": "waiting_external",
-            "outputs": {
-                "package": "youtube/staging/youtube-growth-specialist/package.json",
-                "thumbnails": ["youtube/staging/youtube-growth-specialist/thumbnail-001.png"],
-            },
+            "outputs": {"package": "youtube/staging/youtube-growth-specialist/package.json"},
         },
     )
     for stage in ("shorts_script", "script", "biblical_review", "scenes"):
@@ -116,12 +113,13 @@ def test_plan_is_read_only_serializable_and_exposes_dependency_waves(tmp_path) -
     assert first["waves"][1]["execution"] == "parallel_lanes"
     assert first["waves"][2]["execution"] == "sequential_single_writer"
     assert _task(first, "captions")["depends_on"] == ["audio"]
-    assert _task(first, "independent_biblical_review")["owner"] == "biblical_reviewer"
-    assert _task(first, "shorts_script_import")["depends_on"] == ["independent_biblical_review"]
-    assert _task(first, "growth_import")["depends_on"] == [
-        "youtube_growth_specialist",
-        "images_import_batch",
-    ]
+    assert all(
+        task["task_id"] != "independent_biblical_review"
+        for wave in first["waves"]
+        for task in wave["tasks"]
+    )
+    assert _task(first, "shorts_script_import")["depends_on"] == ["shorts_script_generation"]
+    assert _task(first, "growth_import")["depends_on"] == ["youtube_growth_specialist"]
     assert _task(first, "render")["depends_on"] == ["production_join"]
     assert _task(first, "validation")["depends_on"] == ["render"]
     assert first["dynamic_image_assignment"]["max_parallel_workers"] == 2
@@ -147,7 +145,7 @@ def test_compact_one_shot_plan_assigns_visual_planner_without_script_reviewer(tm
     assert "independent_biblical_review" not in task_ids
 
 
-def test_plan_pauses_for_independent_review_before_the_single_script_import(tmp_path) -> None:
+def test_plan_skips_independent_review_before_the_single_script_import(tmp_path) -> None:
     layout = _short_layout(tmp_path)
     package = layout.shorts_script_package_staging
     package.parent.mkdir(parents=True, exist_ok=True)
@@ -163,8 +161,8 @@ def test_plan_pauses_for_independent_review_before_the_single_script_import(tmp_
 
     waiting = build_one_shot_plan(layout)
 
-    assert waiting["current_pause"] == "independent_biblical_review"
-    assert _task(waiting, "shorts_script_import")["status"] == "blocked"
+    assert waiting["current_pause"] == "shorts_script_import"
+    assert _task(waiting, "shorts_script_import")["status"] == "ready"
 
     layout.shorts_biblical_review_staging_file.write_text("{}", encoding="utf-8")
     ready = build_one_shot_plan(layout)
@@ -271,10 +269,7 @@ def test_single_agent_plan_assigns_script_images_and_growth_to_main(tmp_path) ->
         layout.growth_queue,
         {
             "status": "waiting_external",
-            "outputs": {
-                "package": "youtube/staging/youtube-growth-specialist/package.json",
-                "thumbnails": [],
-            },
+            "outputs": {"package": "youtube/staging/youtube-growth-specialist/package.json"},
         },
     )
 
@@ -374,6 +369,55 @@ def test_manual_short_bootstrap_applies_mode_voice_hook_and_music_in_one_command
     assert (project / "audio/music/Leaning.mp3").read_bytes() == b"leaning"
 
 
+def test_character_cli_defaults_to_human_storytelling_profile(tmp_path) -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "new-character-video",
+            "Judas",
+            "--format",
+            "long",
+            "--duration",
+            "180",
+            "--json",
+            "--projects-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    project = next((tmp_path / "videos-longos").iterdir())
+    briefing = read_model(project / "editorial/briefing.json", Briefing)
+    assert briefing.creative_mode == "biblical_storytelling"
+    assert briefing.interpretive_stance == "factual"
+    assert "humano" in briefing.narration_tone
+
+
+def test_character_cli_keeps_analytical_portrait_as_explicit_opt_in(tmp_path) -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "new-character-video",
+            "Judas",
+            "--format",
+            "long",
+            "--duration",
+            "180",
+            "--profile",
+            "portrait",
+            "--json",
+            "--projects-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    project = next((tmp_path / "videos-longos").iterdir())
+    briefing = read_model(project / "editorial/briefing.json", Briefing)
+    assert briefing.creative_mode == "character_portrait"
+    assert briefing.interpretive_stance == "analytical"
+
+
 def test_manual_short_cli_accepts_fifteen_second_duration(tmp_path) -> None:
     result = CliRunner().invoke(
         cli.app,
@@ -431,7 +475,6 @@ def test_staged_jobs_leave_the_pool_and_join_becomes_ready_for_import(tmp_path) 
         layout.root / "images/staging/scene-002-v001.png",
         layout.root / "images/staging/scene-003-v001.png",
         layout.root / "youtube/staging/youtube-growth-specialist/package.json",
-        layout.root / "youtube/staging/youtube-growth-specialist/thumbnail-001.png",
     ):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"staged")

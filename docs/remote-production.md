@@ -1,147 +1,115 @@
 # Produção remota
 
-## Contrato
+## Modelo operacional
 
-A VPS executa o mesmo pipeline atual usado localmente. Não existe modo remoto alternativo nem
-fallback para o executor antigo. Cada job usa um coordenador persistente em `gpt-5.6-sol` e os
-mesmos contratos do fluxo local; o compacto cria somente os especialistas ainda necessários e
-mantém roteiro/revisão no Python.
+Cada job remoto possui:
 
-Cada pedido declara:
+- uma pasta própria;
+- uma sessão persistente do coordenador;
+- checkpoints retomáveis;
+- um projeto independente;
+- estado serializado e idempotente.
 
-- `video_format`: `short` ou `long`;
-- `topic`: tema opcional; vazio usa o catálogo local e evita repetir passagens;
-- `creative_mode`: modo editorial explícito ou `auto` para variar conforme passagem e histórico;
-- `hook_policy`: `auto`, `required`, `optional` ou `none`; Shorts não aceitam `none`;
-- `hook_family`: família concreta ou `auto`; Shorts padrão aceitam somente as seis famílias de
-  `hook_contract=user_six_v1`; Shorts compactos aceitam somente `emotional_interruption`;
-- `editorial_profile`: `verse_led_v1` (padrão) ou `high_stakes_biblical_question_v1`; o segundo
-  seleciona automaticamente uma pergunta curada e aceita somente Shorts de 45 a 60 segundos;
-- `duration_seconds`: opcional, mínimo de 15 s e padrão de 50 s para Short; mínimo de 30 s e padrão
-  de 540 s para longo;
-- `voice_variant`: `jesus_1` (padrão) ou `jesus_2`;
-- `music_track`: `leaning` ou `aloboi` quando o pedido exigir uma das faixas verificadas;
-- `start_policy`: `immediate` ou `overnight`;
-- `publication_mode`: `private_review` ou `scheduled`;
-- `publish_at`: obrigatório somente em `scheduled`, sempre com fuso;
-- `external_services_authorized`: autoriza Imagegen, ElevenLabs e upload privado naquele job.
+O executor remoto cria o mesmo contrato do fluxo local. A pasta do projeto continua sendo a fonte
+de verdade.
 
-`overnight` inicia jobs somente entre 01:00 e 05:00 em `America/Sao_Paulo`. A fila executa um job
-por vez. Temas específicos também usam o catálogo bíblico verificado; o Python reconstrói briefing
-e fontes a partir dos IDs escolhidos.
+## Modelos e agentes
 
-## Sessão persistente e especialistas
+- coordenador: `gpt-5.6-sol`, raciocínio médio;
+- especialista de roteiro: `gpt-5.6-sol`, raciocínio alto;
+- validação de fontes incorporada, sem agente revisor;
+- planejador visual compacto: `gpt-5.6-sol`, raciocínio médio;
+- especialista de metadados: `gpt-5.6-sol`, raciocínio médio;
+- workers de imagem: `gpt-5.6-sol`, raciocínio baixo.
 
-O primeiro checkpoint inicia `codex exec`. O executor captura o identificador da sessão raiz e o
-salva em `codex_session_id`. Os checkpoints retomam essa sessão com `codex exec resume`. O
-No compacto, o coordenador cria um planejador visual em raciocínio médio, até dois workers de imagem
-em baixo e um especialista de crescimento em médio, todos com `fork_turns=none`. Hook, citação,
-referência, seções e revisão bíblica vêm deterministicamente do catálogo verificado. Fora do
-compacto, roteirista e revisor independente continuam em raciocínio alto quando a fila os exigir.
+Use no máximo dois workers de imagem simultaneamente. Todos partem com `fork_turns=none` e contexto
+compacto.
 
-O remoto usa o mesmo perfil adaptativo local. Um Short de 15 segundos usa até dois workers de
-imagem, aceita somente `devotional_application` ou `pastoral_encouragement`, seleciona apenas fala
-direta de Jesus cujo trecho literal caiba no limite de 28 palavras e sela os limites persistidos de
-41 a 46 palavras e cinco a seis cenas. O hook curado ocupa de 0 a 3,5 segundos, a
-citação de 3,5 a 12,3 e a referência de 12,3 a 15 segundos; não existe CTA. A seleção remota recebe
-somente combinações que passam os pisos de força do hook, valor da mensagem, replay e duração. O
-áudio nunca é estendido com silêncio. Cobertura do alvo preferencial, pausa e silêncio terminal são
-avisos em `completion_first_v1`; integridade e duração solicitada continuam bloqueantes. A música é selecionada exclusivamente
-entre `Aloboi .mp3` e `Leaning.mp3` na biblioteca compacta.
+## Responsabilidades
 
-O modelo não varia: coordenador e especialistas usam Sol. O esforço varia somente pelo contrato da
-função. Áudio, música, legendas, imports, render, validação e YouTube não são entregues aos agentes.
+O coordenador:
 
-## Imagens e thumbnail
+- cria e retoma especialistas;
+- serializa escrita de estado;
+- importa roteiro, revisão, imagens e metadados;
+- conduz o pipeline até o candidato final.
 
-Cada cena segue a política retomável: prompt original, repetição idêntica após
-`moderation_blocked` e, somente após o segundo bloqueio, uma alternativa que preserve personagem,
-idade aparente, rosto, cabelo, figurino, proporções, estilo, paleta, ambiente e sentido narrativo.
+Workers:
 
-A fila de crescimento declara exatamente um título. No perfil pintado de Shorts, o modelo devolve
-somente um rascunho compacto de metadados, não chama Imagegen e o YouTube escolhe um frame do vídeo.
-No perfil 3D legado, o bitmap nasce no Imagegen editando a abertura. Em vídeos longos, nasce como
-`generated_theme_art`: horizontal 16:9, sem imagem de referência, texto ou marcações e baseada no
-tema central. Não há compositor nem overlay local.
+- escrevem somente no staging declarado;
+- não alteram `project.json`;
+- não importam;
+- não aprovam;
+- não publicam.
 
-## Estados e publicação
+Áudio, música, legendas, imports, render, validação, upload e agendamento são determinísticos e não
+devem ser delegados ao modelo.
 
-```text
-queued -> running -> completed
-       <- recuperaÃ§Ã£o automÃ¡tica com backoff
-                  -> waiting_youtube -> completed
-                     recuperaÃ§Ã£o automÃ¡tica com backoff
-failed -> queued (retry de jobs legados)
-queued/waiting_youtube -> cancelled
-```
+## Roteiro e cenas
 
-Falhas de execução não encerram novos jobs. Erros corrigíveis acionam no máximo um checkpoint de
-reparo agregado. No compacto, uma segunda falha materializa o fallback determinístico de roteiro
-visual ou metadados e continua a produção. Somente falhas técnicas realmente bloqueantes voltam para
-`queued` (ou permanecem em `waiting_youtube`) com backoff, preservando projeto, sessão e artefatos.
+Toda locução autoral usa `jesus_first_person_v1`. Jesus fala em primeira pessoa, e citações literais
+permanecem claramente separadas e verificadas.
 
-No crescimento, o checkpoint de reparo é limitado a uma execução por tentativa. O validador exige
-o padrão 3D como estilo positivo e ignora termos fotográficos presentes dentro de seções negativas
-como `Avoid:`; fotografia ou live action declarados como estilo positivo continuam bloqueados.
+Shorts e vídeos longos usam o mesmo padrão visual `biblical-midcentury-gouache-v1` e o mesmo
+planejamento `narration_block_visual_v1`. Cada bloco de narração recebe uma cena concreta e distinta.
 
-`render-review` usa os ativos ativos em qualidade final sem registrar aprovação humana. Upload
-automatizado exige a política de revisão privada, render candidato válido, validação técnica e
-visibilidade inicial `private`. Agendamento exige também `publication_mode=scheduled` e
-`publish_at` explícito. O executor Python, não o Codex, chama a API do YouTube.
+O especialista de metadados não depende de imagens e produz somente um título, descrição, tags e
+comentário fixado.
 
-## Segurança e operação
+## Imagens
 
-`.env`, OAuth, músicas, jobs e projetos ficam em `shared/`, fora dos releases Git. A VPS mantém
-`ELEVENLABS_VOICE_ID`, os presets `ELEVENLABS_VOICE_JESUS_1_ID` e
-`ELEVENLABS_VOICE_JESUS_2_ID`, além de `ELEVENLABS_MODEL_ID`, nesse arquivo persistente. Nunca envie
-esses arquivos ao GitHub ou aos logs. O registro compartilhado de conteúdo permanece em
-`shared/content-registry.git` e guarda somente metadados editoriais sem roteiro, mídia ou segredo.
+Cada item pendente da fila vira um job isolado. Em `moderation_blocked`:
 
-Antes de criar um projeto automático, o worker carrega o catálogo base e o banco curado de expansão
-BPM. A capacidade é calculada por formato e somente passagens principais do mesmo formato consomem
-o ciclo. Referências complementares de vídeos longos não reduzem o estoque de Shorts. Se todas as
-passagens já foram usadas, o próximo ciclo é aberto automaticamente; uma passagem ainda reservada
-por outro job nunca é reutilizada.
+1. repita exatamente o mesmo prompt;
+2. após novo bloqueio, use uma alternativa equivalente;
+3. preserve identidade, idade aparente, rosto, cabelo, figurino, proporções, silhueta, estilo,
+   paleta, ambiente e sentido.
 
-O timer systemd chama `pipeline-videos remote work-once` a cada minuto:
+O coordenador importa o lote uma única vez.
 
-```bash
-/home/deploy/pipeline-videos/bin/video-job list
-/home/deploy/pipeline-videos/bin/video-job status JOB_ID
-/home/deploy/pipeline-videos/bin/video-job cancel JOB_ID
-/home/deploy/pipeline-videos/bin/video-job retry JOB_ID
-```
+## Retomada
 
-## Agenda diária de Shorts
+`autopilot --wait-external` mantém a mesma execução até que uma integração externa produza o
+artefato esperado. Polling de estado usa `status --json`; não abra novas sessões apenas para
+consultar progresso.
 
-Uma agenda pode criar um ou dois Shorts por dia. Cada slot vira um job idempotente e uma sessão raiz
-independente. O render é enviado inicialmente como privado; a API só registra a publicação pública
-para o `publish_at` calculado no fuso configurado.
+Falhas recuperáveis preservam o projeto, os arquivos produzidos e a sessão raiz. O retry retoma do
+último checkpoint válido.
 
-Exemplo com dois Shorts produzidos na madrugada e publicados no dia seguinte:
+## Lane econômica de roteiros aprovados
 
-```bash
-uv run pipeline-videos remote schedule-create \
-  --name madrugada \
-  --production-time 01:00 \
-  --production-time 03:00 \
-  --publication-time 12:00 \
-  --publication-time 19:00 \
-  --publish-days-after 1 \
-  --timezone America/Sao_Paulo \
-  --authorize-external \
-  --authorize-public-schedule
+`approved_fast_v1` recebe um snapshot editorial imutável. O pacote contém briefing, fontes,
+narração, revisão bíblica sem bloqueios, plano visual por blocos, CTA escolhido, título, descrição,
+três hashtags específicas, `#biblia`, `#jesus` e hash. A aprovação é uma ação explícita do usuário
+vinculada ao hash; o pipeline nunca a inventa.
 
-uv run pipeline-videos remote schedule-list
-uv run pipeline-videos remote schedule-disable SCHEDULE_ID
-uv run pipeline-videos remote schedule-enable SCHEDULE_ID
-```
+As cinco hashtags acima ficam no final da descrição. O campo separado de tags do YouTube recebe
+automaticamente de dez a doze termos distintos, relevantes e sem `#`; esse campo técnico não
+precisa ser exibido durante a aprovação editorial.
 
-O timer materializa automaticamente os slots do dia antes de procurar o próximo job. Reinícios e
-chamadas repetidas não duplicam vídeos, pois o ID deriva da agenda, data local e índice do slot. A
-fila continua executando um job por vez; se a primeira produção ultrapassar o segundo horário, o
-segundo job começa em seguida sem compartilhar sessão.
+Na finalização remota:
 
-Logs ficam em `shared/jobs/logs/`. O status inclui `current_phase`, `codex_session_id`,
-`codex_run_count` e `codex_usage`. O contrato técnico está em
-[Contrato do agente remoto com paridade local](remote-agent-contract.md).
+- não há seleção de tema;
+- não há roteirista nem nova revisão;
+- não há especialista de metadados; o pacote SEO aprovado é reutilizado literalmente;
+- até dois workers geram somente as imagens ainda ausentes;
+- áudio, legendas, música, import, render, validação e upload continuam determinísticos;
+- qualquer alteração no roteiro, fontes, revisão ou plano visual quebra o lock antes do áudio ou
+  do upload.
+
+A agenda `approved_pool` reserva cada roteiro atomicamente. Um roteiro não pode alimentar dois
+jobs. Quando a fila se esgota, a agenda persiste o motivo e não usa o catálogo automático como
+fallback.
+
+## Upload e agendamento
+
+Upload exige pedido explícito. `private_review` usa `render-review`, validação concluída e upload
+privado; não registra aprovação humana.
+
+Agendamento automático só é permitido se a requisição original trouxer:
+
+- `publication_mode=scheduled`;
+- `publish_at` explícito;
+- fuso horário.
+
+O executor nunca compra créditos, habilita cobrança ou altera faturamento.

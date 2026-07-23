@@ -1,915 +1,413 @@
-# Pipeline de Vídeos Bíblicos
+# Pipeline de vídeos bíblicos
 
-Aplicação local, headless e orientada por arquivos para planejar, produzir, revisar e retomar
-vídeos bíblicos. O chat ajuda na criação; a pasta de cada vídeo é a fonte de verdade.
+Pipeline local e remoto para produzir Shorts e vídeos longos com roteiro bíblico verificável,
+narração, imagens, música, legendas, render final e metadados do YouTube.
 
-O modo único é `final_candidate_one_shot`: o Codex produz diretamente um candidato final V4.
-Localmente e na VPS, cada vídeo usa um coordenador isolado e especialistas apenas nas decisões
-criativas necessárias. No perfil compacto, o roteiro e a revisão bíblica são determinísticos; o
-modelo planeja somente os conceitos visuais, imagens e um pequeno rascunho de metadados. Shorts
-novos usam cenas pintadas por bloco de
-narração e deixam o YouTube selecionar um frame, sem thumbnail separada; vídeos longos geram uma
-thumbnail horizontal nova, baseada somente no tema central.
+## Contrato editorial atual
 
-O planejamento one-shot aparece em `run --dry-run` como cinco ondas. Depois do roteiro e das
-cenas, os trabalhadores de imagem rodam enquanto o agente principal produz áudio, música e
-legendas. Após o import das imagens, o especialista do YouTube produz metadados; somente o perfil
-3D legado recebe a abertura para gerar capa. Vídeos longos recebem o tema central.
-O principal continua sendo o único escritor do estado e realiza as importações serialmente antes do
-ponto de junção do render.
+- Jesus é o eu lírico de toda locução autoral, em Shorts e vídeos longos.
+- A voz usa primeira pessoa e linguagem humana, direta e fluida.
+- Citações bíblicas literais permanecem identificadas por aspas, referência, tradução e fonte.
+- Dramatização autoral nunca é apresentada como uma fala bíblica documentada.
+- Frases metalinguísticas e construções baseadas em listas de ausências são bloqueadas.
+- Curiosidade, tensão e retenção precisam ser honestas e entregar o payoff prometido.
 
-O MVP já prova o fluxo vertical sem serviços pagos: briefing → contrato bíblico verificado → cenas
-→ imagens fixture → áudio simulado → música local → alinhamento por palavra
-→ ASS/SRT/VTT → especialista YouTube → thumbnail final → MP4 final. O caminho de
-produção usa a geração de imagens embutida do Codex por uma fila de importação e ElevenLabs por um
-adaptador protegido pelo guard técnico `--allow-external`; Pedro já autorizou esse uso por padrão nas
-produções que pedir neste pipeline.
+## Contrato visual atual
 
-Projetos reais novos usam o perfil `token_optimized_v1`. O único render usa a qualidade V4 com CRF
-12, preset `slow` e supersampling 3. Trabalhadores recebem arquivos compactos em `images/jobs/`
-sem herdar o histórico. No perfil padrão de Shorts não existe geração de thumbnail nem primeiro
-frame artificial. O perfil 3D legado preserva texto e símbolos incorporados, e vídeos longos
-recebem uma imagem cinematográfica limpa, sem texto.
+Todo projeto usa exclusivamente `biblical-midcentury-gouache-v1`:
 
-O padrão editorial mantém toda a locução em português e exige citações bíblicas literais
-verificadas antes do import. No compacto, a revisão determinística compara o texto, a atribuição e a
-fonte com o catálogo; outros perfis podem exigir revisão independente. Projetos novos escolhem entre 16 modos criativos e usam
-`Enfoque concreto | Passagem`, sem converter automaticamente a conclusão em aplicação
-motivacional. Shorts padrão começam exatamente com uma de seis estruturas de hook; o perfil
-compacto começa com uma interrupção emocional e longos usam hook adaptativo. Shorts padrão e
-longos encerram com CTA de uma única ação; o perfil compacto termina somente com a referência
-bíblica. Longos recebem também uma timeline bíblica iniciada por
-`00:00 - Abertura`. As regras de palavra vermelha e marcação narrativa permanecem apenas no perfil
-3D legado. As capas longas preservam uma área limpa no lado oposto ao personagem.
+- guache opaco e têmpera;
+- acabamento fosco e impressão editorial limpa;
+- formas simples, rostos serenos e luz natural difusa;
+- paleta suavizada e continuidade visual entre cenas;
+- um momento, um ambiente e uma ação por imagem;
+- sem colagem, painéis ou texto legível dentro da arte.
 
-Depois de roteiro e revisão, o caminho recomendado é:
+Shorts e vídeos longos usam `narration_block_visual_v1`. A locução é dividida em blocos contíguos;
+cada bloco recebe uma cena concreta e distinta, classificada como `literal`, `contextual` ou
+`symbolic`. Os blocos precisam reconstruir integralmente a locução e preservar a ordem das seções.
 
-```powershell
-uv run pipeline-videos autopilot <projeto> --allow-external
-# inicie os workers declarados em logs/autopilot-state.json
-uv run pipeline-videos autopilot <projeto> --allow-external --wait-external
+A primeira cena usa `scroll_stop_concrete_v1`: sujeito ou objeto dominante, ação já em curso e
+tensão, escolha ou contraste coerente com a abertura.
+
+O pipeline não produz nem envia imagem de capa personalizada. O especialista de crescimento gera
+somente título, descrição, tags e comentário fixado.
+
+## Fluxo
+
+```text
+briefing e fontes
+→ roteiro e validação incorporada de fontes
+→ blocos visuais
+→ imagens em guache
+→ narração e música
+→ legendas
+→ render final
+→ validação
+→ metadados
+→ upload privado, somente quando solicitado
 ```
 
-O `autopilot` executa áudio, música e legendas enquanto os workers produzem staging; depois aguarda,
-importa cada lote uma única vez, renderiza e valida. O próprio processo monitora os arquivos, sem
-novas rodadas do coordenador para polling. Ao concluir, ele registra a auditoria local de tokens.
-O contrato completo está em
-[Produção otimizada](docs/optimized-production.md).
-
-Se uma cena ou thumbnail retornar `moderation_blocked`, o executor repete exatamente o mesmo prompt
-uma vez. Um segundo bloqueio libera apenas uma alternativa de ação ou enquadramento que preserve a
-identidade visual completa do personagem e do vídeo. Stagings válidos são reutilizados na retomada.
-
-## Marco validado
-
-O comando abaixo gera uma demonstração de 52,5 segundos baseada em Salmo 23:1-4, sem citação
-literal longa e sem chamada paga:
-
-```powershell
-uv sync --all-groups
-uv run pipeline-videos doctor
-uv run pipeline-videos demo
-```
-
-Artefatos principais:
-
-- `projects/videos-longos/14-07-2026_salmo-23/render/final.mp4`: H.264, 1280×720, 30 fps;
-- `projects/videos-longos/14-07-2026_salmo-23/captions/`: legendas ASS, SRT e VTT;
-- `projects/videos-longos/14-07-2026_salmo-23/youtube/`: metadados e thumbnail fixture;
-- `projects/videos-longos/14-07-2026_salmo-23/validation/`: contratos e mídia.
-
-As imagens, o áudio e a thumbnail da demonstração são marcados como `FIXTURE`: validam o
-pipeline, mas não são ativos publicáveis. Uma segunda execução reutiliza hashes e artefatos; o MP4
-não é refeito quando nada mudou.
+A pasta do projeto é a fonte de verdade. O estado compartilhado fica em `project.json`; workers
+escrevem apenas em staging e o coordenador principal importa cada lote uma única vez.
 
 ## Requisitos
 
-- Windows, Linux ou macOS;
-- [uv](https://docs.astral.sh/uv/) para Python 3.12 e dependências;
-- FFmpeg e FFprobe no `PATH`, com `libx264`, AAC e `libass`;
-- opcional: chave e voice ID da ElevenLabs para narração real;
-- opcional: cliente OAuth Desktop do Google para upload/publicação no YouTube;
-- uma conversa no Codex com geração de imagens disponível para ativos visuais reais.
+- Python 3.12
+- `uv`
+- FFmpeg e FFprobe no `PATH`
+- ImageMagick disponível quando necessário
+- ElevenLabs configurada para voz real
+- credenciais OAuth do YouTube somente para upload ou publicação solicitados
 
-Neste computador o projeto foi validado com Python 3.12.10, uv 0.11.21 e FFmpeg 8.1.1.
-
-## Começar o primeiro vídeo real
-
-Execute exatamente:
+Instalação:
 
 ```powershell
-uv run pipeline-videos new salmo-121 --title "De onde vem o meu socorro?" --duration 540
-uv run pipeline-videos resume-prompt salmo-121
+uv sync
+uv run pipeline-videos doctor
 ```
 
-Para um Short vertical 9:16, o fluxo recomendado agora não exige tema, título nem passagem:
-
-```powershell
-uv run pipeline-videos new-short
-```
-
-Para uma investigação bíblica de alto interesse — dúvida conhecida primeiro, evidências depois — use:
-
-```powershell
-uv run pipeline-videos new-short --profile high-stakes --duration 50
-```
-
-Esse perfil seleciona uma das grandes perguntas verificadas do banco próprio, abre com uma afirmação,
-contradição, consequência, reversão de crença ou pergunta curada e obriga o roteiro a entregar todos
-os pontos de resposta. A citação continua literal e verificada, mas sua posição é escolhida pela
-função narrativa dentro de `0–44s`; ela pode estabelecer a tensão, comprovar uma virada ou ser a
-recompensa. Inferências e lacunas permanecem explícitas e passam por revisão bíblica independente.
-O banco é de ciclo único: depois que os oito temas forem usados ou reservados, a próxima criação é
-bloqueada com uma mensagem explícita. O pipeline não inicia um segundo ciclo até que uma nova rodada
-curada seja incluída e validada.
-
-`--duration` define uma meta aproximada. Assim, `new-short --duration 50` preserva a interpretação
-natural da voz e aceita uma duração próxima sem tentar desacelerar a locução, inserir silêncio ou
-refazer o vídeo por poucos segundos. Somente um pedido explicitamente exato deve usar
-`--exact-duration`; limites declarados usam `--duration-min` e `--duration-max`.
-
-Esse comando usa `biblical-midcentury-gouache-v1`: ilustração editorial cristã em guache opaco e
-têmpera, com aparência de impressão offset limpa de aproximadamente 1955. O roteirista divide a
-locução em `strategy.visual_scenes`; cada item copia um bloco contíguo da narração e descreve uma
-cena concreta, distinta e `literal`, `contextual` ou `symbolic`. O mesmo bloco passa a identificar a
-cena, a imagem e o segmento de áudio. O perfil não reserva área para legendas nem evita rostos ou
-elementos nas bordas.
-
-No perfil compacto, a cena do último bloco — a referência bíblica falada — é fixa. Cada projeto
-recebe uma cópia portátil da ilustração de Bíblia aberta em `visual/reference-images/`; o manifesto
-ativa esse arquivo automaticamente e não envia esse bloco ao `imagegen`. Os demais blocos continuam
-recebendo cenas novas e específicas para a narração.
-
-Para pedir um Short de 15 segundos, informe a duração na criação:
-
-```powershell
-uv run pipeline-videos new-short --duration 15
-```
-
-Para aceitar o melhor encaixe real entre 15 e 20 segundos, mantenha 18 como alvo preferencial e
-persista a faixa:
-
-```powershell
-uv run pipeline-videos new-short --duration 18 --duration-min 15 --duration-max 20
-```
-
-Entre 15 e 44 segundos, o pipeline ativa `adaptive_compact_v1`, restrito aos modos
-`devotional_application` e `pastoral_encouragement`. O Short começa com uma interrupção emocional
-curada de 10 a 12 palavras, entra imediatamente em uma fala direta de Jesus entre aspas e termina
-com a referência bíblica falada, sem “lemos” e sem CTA. Em 15 segundos, usa de 41 a 46 palavras,
-até seis cenas, trecho literal de até 28 palavras e até dois trabalhadores de imagens. O seletor
-aceita somente combinações com força de hook, valor da mensagem e potencial de replay acima dos
-pisos do perfil. A duração nunca é completada com silêncio. Na faixa adaptativa, qualquer voz
-íntegra entre os limites passa; cobertura do alvo preferencial e pausas são avisos. A revisão
-bíblica determinística, a qualidade visual, o render final e as validações técnicas de upload
-permanecem.
-
-Para um vídeo dedicado a um personagem, use o índice narrativo. Ele seleciona somente uma história
-cadastrada para o nome ou alias informado, ativa `character_portrait` e preenche a fonte principal,
-o contexto completo e as passagens relacionadas. Por exemplo, para Judas com a segunda voz:
-
-```powershell
-uv run pipeline-videos new-character-video Judas --format short --duration 60 `
-  --voice-variant jesus_2
-```
-
-O formato padrão desse comando é vídeo longo de 540 segundos. Retratos narrativos em Short precisam
-ter de 45 a 180 segundos; o catálogo narrativo nunca entra no perfil devocional compacto de 15 a 44
-segundos. Nomes alternativos como `mulher siro-fenícia`, `Simão Pedro`, `Saulo` e `Madalena` são
-resolvidos pelo mesmo índice. As opções são validadas antes de criar a pasta ou reservar a passagem.
-
-Para usar uma locução anexada sem ElevenLabs:
-
-```powershell
-# O Codex entrega o roteiro e aguarda um único arquivo de voz anexado pelo usuário
-uv run pipeline-videos new-short-audio-manual
-```
-
-`new-short-audio-manual` mantém o roteiro completo, imagens e especialista de crescimento, mas troca
-somente a origem da voz. Quando as cenas estiverem prontas, o pipeline expõe
-`script/narration.txt` e pausa a etapa de áudio. Envie esse texto integralmente ao gerador de voz,
-devolva um único arquivo sem música ou efeitos e importe-o:
-
-```powershell
-uv run pipeline-videos audio prepare-manual <projeto>
-uv run pipeline-videos audio import-manual <projeto> .\narracao.mp3
-uv run pipeline-videos autopilot <projeto> --wait-external
-```
-
-WAV, MP3, M4A, AAC, FLAC, OGG, Opus e WebM são aceitos e normalizados para WAV PCM mono 16-bit/48
-kHz. O texto narrado precisa coincidir integralmente com `script/narration.txt`. O alinhamento usa
-WhisperX 3.8.6 e o modelo fonético português em processo CPU isolado; não usa chave, API, crédito ou
-`--allow-external`. A primeira importação baixa dependências e o modelo para o cache local; depois
-eles são reutilizados. Consulte [Áudio manual local](docs/local-manual-audio.md).
-
-### Produção remota sob demanda
-
-Na VPS, o mesmo pipeline local roda com um coordenador persistente por job. O executor inicia
-`codex exec` uma vez e usa `codex exec resume`; o coordenador delega roteiro, revisão bíblica, até
-dois lotes de imagens e crescimento aos mesmos especialistas locais. Todos usam `gpt-5.6-sol`, com
-raciocínio alto, baixo e médio conforme a função.
-
-Cada checkpoint recebe um JSON compacto. Áudio, música, legendas, imports, render, validação e upload
-rodam diretamente no Python. O status soma o uso por checkpoint e registra também o identificador
-da sessão persistente.
-
-Pedidos ficam em uma fila persistente e podem começar imediatamente ou somente entre 01:00 e 05:00
-no fuso `America/Sao_Paulo`. Todo upload automatizado começa como privado. `private_review` termina
-nesse ponto; `scheduled` só agenda quando o pedido original contém `publish_at` explícito com fuso.
-O render candidato e o upload privado não registram aprovação humana.
-
-```powershell
-# A skill local gera este JSON/Base64 e o envia por SSH; o comando abaixo é a interface da VPS.
-uv run pipeline-videos remote enqueue --payload-base64 "<PAYLOAD_BASE64>"
-uv run pipeline-videos remote list
-uv run pipeline-videos remote status <JOB_ID>
-uv run pipeline-videos remote cancel <JOB_ID>
-uv run pipeline-videos remote retry <JOB_ID>
-
-# Agenda diária idempotente de um ou dois Shorts, sempre em sessões separadas.
-uv run pipeline-videos remote schedule-create --name madrugada `
-  --production-time 01:00 --production-time 03:00 `
-  --publication-time 12:00 --publication-time 19:00 `
-  --publish-days-after 1 --authorize-external --authorize-public-schedule
-uv run pipeline-videos remote schedule-list
-```
-
-Instalação, estados da fila, segurança dos segredos e serviço systemd estão em
-[Produção remota](docs/remote-production.md).
-
-Esse comando consulta o catálogo bíblico local em domínio público, combina o histórico das pastas
-e o banco curado de expansão BPM com o registro Git compartilhado, escolhe um versículo-base com
-variedade de livro e tema,
-e preenche automaticamente `briefing.json` e `sources.json`. A varredura inclui passagem principal,
-referências complementares, fontes e bases bíblicas do roteiro. `projects/verse-usage.json` continua
-como cache legível; a autoridade de coordenação é `content-registry.json` no repositório Git bare
-descrito em [Produção remota](docs/remote-production.md). A reserva é commitada antes da criação.
-
-Passagens principais são controladas por formato: um uso principal em vídeo longo não esgota o
-estoque dos Shorts, e citações complementares de longos não bloqueiam nenhum futuro tema principal.
-Os bancos verificados são carregados automaticamente antes da seleção. O catálogo combinado possui
-557 candidatos: 76 legados, 120 falas diretas de Jesus curadas para Shorts compactos, 180 versos
-gerais, 100 âncoras extensas para vídeos longos e 81 histórias narrativas. O segmento
-`narrative_story` cobre 88 personagens e grupos, com 324 excertos verificados somando âncora e
-passagens relacionadas. Ele é estritamente opt-in por personagem; não participa da seleção comum.
-Candidatos `long_form_anchor` ficam fora da seleção de Shorts; `passage` registra a citação literal e
-`context_passage` preserva o intervalo maior para estudo. Quando todas as passagens principais de um
-formato completam um ciclo, o seletor inicia outro pela passagem menos utilizada, sem reutilizar
-referências ainda reservadas por jobs ativos.
-Consulte a capacidade sem reservar:
-
-```powershell
-uv run pipeline-videos catalog status --format short
-uv run pipeline-videos catalog status --format long
-```
-
-O banco de 400 itens está em `config/bible/curated-verse-bank-v2.json`. Ele é reproduzível a partir
-dos artefatos VPL e USFM da Bíblia Portuguesa Mundial publicados pelo eBible.org e registra revisão,
-URL e SHA-256 da fonte. Para reconstruí-lo após atualizar a fonte oficial:
-
-```powershell
-uv run python scripts/build_curated_verse_bank.py <porbrbsl_vpl.txt> <diretorio-usfm> `
-  config/bible/curated-verse-bank-v2.json `
-  --exclude-catalog config/bible/shorts-verse-catalog.json `
-  --exclude-catalog config/bible/shorts-verse-expansion-bank.json
-```
-
-O gerador extrai as falas compactas das marcações USFM de fala de Jesus, rejeita trechos sem valor
-autônomo e exige hooks curados de 10 a 12 palavras. Para 15 a 20 segundos, a contagem inclui a forma
-real da referência falada — inclusive as duas palavras adicionais de um intervalo de versículos — e
-mantém pelo menos 20 pacotes elegíveis por duração.
-
-O banco narrativo fica em `config/bible/narrative-character-bank-v1.json`. Cada item registra nomes e
-aliases do personagem, passagem-âncora, contexto da história, limites de interpretação e ao menos
-três excertos relacionados classificados como contexto, desenvolvimento, desfecho ou relato
-paralelo. Para reconstruí-lo a partir do VPL oficial da BPM:
-
-```powershell
-uv run python scripts/build_narrative_character_bank.py <porbrbsl_vpl.txt> `
-  config/bible/narrative-character-bank-v1.json
-```
-
-O projeto já nasce com `creative_retention_v3`: no perfil padrão, hook de até dois segundos,
-citação literal entre 8 e 20 segundos, desenvolvimento, reengajamento, resolução e CTA de uma única
-ação. O seletor
-considera potencial narrativo, passagem e histórico recente para variar modo criativo e família de
-hook. O briefing recebe postura interpretativa, resultado para o espectador, progressão visual,
-possível revelação e semente de título. O tom segue o modo — factual, expositivo, analítico,
-exploratório ou devocional — enquanto a revisão bíblica e o padrão visual
-`cinematic-family-3d-v1` permanecem obrigatórios. A aprovação humana do briefing continua pendente.
-
-O comando manual continua disponível quando você quiser definir explicitamente o tema:
-
-```powershell
-uv run pipeline-videos new davi-e-golias --title "Davi e Golias em 1 minuto" --duration 60 --format short
-```
-
-Projetos novos são organizados automaticamente em `projects/videos-longos/` ou `projects/shorts/`.
-O nome físico recebe a data local e o tema: `DD-MM-AAAA_tema-do-video`. O argumento curto continua
-funcionando como alias, portanto `status salmo-121` encontra a pasta datada correspondente.
-
-O segundo comando imprime uma mensagem pronta para colar na conversa com o Codex. Ela pede que o
-agente leia o estado persistido e conduza a conversa sobre tema, passagem, versículos, modo
-criativo, postura, política de hook, público, duração e limites sem gerar ativos prematuramente.
-
-Para retomar dias depois:
-
-```powershell
-uv run pipeline-videos status salmo-121
-uv run pipeline-videos resume-prompt salmo-121
-```
-
-## Fluxo de produção
-
-### 1. Briefing, fontes e decisões
-
-Edite, diretamente ou com o Codex:
-
-- `editorial/briefing.json`;
-- `editorial/sources.json`;
-- `editorial/decisions.jsonl`.
-
-Registre tradução, fonte e direitos antes de inserir citações literais. Depois:
-
-```powershell
-uv run pipeline-videos approve salmo-121 briefing --by "Pedro"
-```
-
-### 2. Roteiro e revisão bíblica
-
-Em Shorts compactos, a fila pede somente um `CompactVisualPlan`. Hook, citação, referência, seções,
-beats e revisão bíblica já estão selados pelo catálogo; o planejador não reescreve a locução. O
-preflight permite uma única correção agregada e depois usa o fallback determinístico. O import
-acontece uma vez:
-
-```powershell
-uv run pipeline-videos script shorts-prepare davi-e-golias
-# O planejador visual escreve apenas em script/staging/shorts-script-specialist/package.json
-uv run pipeline-videos script shorts-check-staging davi-e-golias
-# Se a única correção não resolver:
-uv run pipeline-videos script shorts-fallback davi-e-golias
-uv run pipeline-videos script shorts-import davi-e-golias
-```
-
-O `shorts-check-staging` é somente leitura e devolve, de uma vez, todos os erros detectáveis do
-plano. Fora do compacto, a fila pode solicitar o pacote completo e uma revisão independente. O import também
-sincroniza deterministicamente os campos duplicados sem reescrever o staging: `open_loop` nos
-formatos legados e promessa, pergunta opcional, resolução, valor final e CTA em
-`creative_retention_v3`.
-
-O roteiro anterior é arquivado em `script/versions/`. O mapa de retenção fica em
-`script/retention-strategy.json`. Vídeos longos continuam aceitando importação direta, mas projetos
-novos exigem `ScriptDocument.long_form_strategy` com o contrato de retenção e a cadência bíblica.
-Toda importação também deriva `script/creative-contract.json` sem chamada externa: modo, promessa,
-primeira fala, resolução, função de cada seção, componentes críticos e perfil de ritmo passam a ser reutilizados por
-cenas, crescimento e validação, em vez de serem decididos novamente.
-
-Novos Shorts padrão seguem `creative_retention_v3`, selecionam uma direção editorial e salvam
-`hook_contract=user_six_v1`. A primeira fala precisa corresponder exatamente a uma das seis
-estruturas documentadas e terminar em até dois segundos. A citação verificada entra entre 8 e 20
-segundos. No perfil compacto, `hook_contract=cinematic_interruption_v1`: a primeira fala parece
-Jesus interrompendo um pensamento do espectador e é seguida imediatamente por uma citação direta
-de Jesus. Em 15 segundos, o hook curado ocupa de 0 a 3,5 segundos, a citação de 3,5 a 12,3 e a
-referência falada de 12,3 a 15 segundos, sem CTA;
-qualquer falta de duração bloqueia o pacote em vez de gerar silêncio. No perfil padrão, o valor
-cresce até um reengajamento entre 40% e 60%
-da duração. A resolução pode ser factual,
-explicativa, analítica, filosófica ou devocional. Aplicação e callback só entram quando servem ao
-modo. Fora do perfil compacto, o encerramento pede somente comentar, inscrever-se ou compartilhar,
-em até quatro segundos.
-Contratos anteriores continuam válidos nos projetos que já os armazenam.
-O contrato completo está em
-[docs/shorts-script-standard.md](docs/shorts-script-standard.md).
-
-Vídeos longos novos seguem `creative_retention_long_v2`: o hook pode ser obrigatório, opcional ou
-dispensado conforme tema e modo. A abertura sempre entrega valor cedo; os movimentos acrescentam
-informação nova e os reengajamentos acompanham a duração. O alvo bíblico permanece entre 0,8 e 1,2
-citação literal por minuto, com primeira citação até 75 segundos, intervalo de 25 a 105 segundos
-entre âncoras e uma citação próxima da parte final. Pergunta, aplicação e callback são opcionais;
-a resolução segue o modo e exatamente uma ação de CTA encerra o vídeo.
-O contrato completo está em
-[docs/long-form-script-standard.md](docs/long-form-script-standard.md).
-O catálogo comum está em [docs/creative-direction.md](docs/creative-direction.md).
-
-Nas locuções, referências são sempre verbalizadas com `capítulo` e `versículo`: “Josué, capítulo
-1, versículo 9”. O formato compacto `Josué 1:9` permanece apenas nos campos técnicos e metadados.
-O roteiro não fala “Até aqui, o texto bíblico” nem outro rótulo de transição. As aspas, o itálico,
-as seções estruturadas e a classificação das afirmações separam a citação do comentário. As legendas
-não exibem rótulos de contexto: somente as palavras copiadas literalmente da fonte bíblica verificada
-aparecem em itálico; referência, paráfrase e reflexão permanecem sem itálico. A apresentação do
-narrador fica fora das aspas; somente o versículo literal é delimitado: `Em Josué, capítulo 1,
-versículo 9, lemos: “texto do versículo.”` No perfil compacto, as aspas continuam delimitando toda
-a fala direta de Jesus, mas a referência vem depois: `“texto do versículo.” João, capítulo 8,
-versículo 12.`
-
-Projetos longos novos exigem o JSON estruturado com `long_form_strategy`. Texto com parágrafos
-continua disponível para projetos legados:
-
-```powershell
-uv run pipeline-videos import-script salmo-121 .\meu-roteiro.json
-uv run pipeline-videos import-review salmo-121 .\minha-revisao.json
-uv run pipeline-videos approve salmo-121 biblical_review --by "Pedro"
-uv run pipeline-videos approve salmo-121 script --by "Pedro"
-```
-
-A aprovação do roteiro é bloqueada enquanto a revisão bíblica tiver apontamento `blocking` aberto.
-Cada afirmação pode ser classificada como texto bíblico, contexto verificado, interpretação ou
-elaboração criativa.
-
-### 3. Cenas e prompts modulares
-
-```powershell
-uv run pipeline-videos build-scenes salmo-121
-# Override compatível para um ritmo uniforme explícito:
-uv run pipeline-videos build-scenes salmo-121 --target-seconds 8
-```
-
-Sem override, Shorts preservam o corte rápido existente e longos novos usam o perfil
-`long_creative_v2`: abertura em planos curtos, reengajamentos em aproximadamente sete segundos,
-progressão regular em dez e planos mais longos somente em reflexão contemplativa com função
-declarada. Projetos longos anteriores preservam `balanced_long_v1`.
-
-O prompt de cada cena guarda separadamente perfil de estilo, paleta, continuidade, descrição,
-enquadramento, emoção e restrições negativas. Trocar a paleta não altera o estilo-base:
-
-```powershell
-uv run pipeline-videos set-palette salmo-121 amanhecer-quente
-uv run pipeline-videos set-style salmo-121 cinematic-family-3d-animation
-```
-
-Para criar um Short já no fluxo anterior de animação 3D com capa integrada, use explicitamente:
-
-```powershell
-uv run pipeline-videos new short-3d --title "Short 3D" --duration 60 --format short `
-  --style cinematic-family-3d-animation
-```
-
-Em um Short existente, `set-style ... cinematic-family-3d-animation` também restaura os contratos
-de planejamento por seção, thumbnail integrada e frame zero; voltar para
-`biblical-midcentury-gouache` restaura blocos por narração e frame automático.
-
-### 4. Imagens pelo Codex
-
-O processo local não possui um endpoint para invocar a ferramenta embutida da assinatura. Por isso
-ele cria uma fila retomável, sem trocar silenciosamente para uma API paga:
-
-```powershell
-uv run pipeline-videos images prepare salmo-121 --provider codex
-uv run pipeline-videos images queue salmo-121
-```
-
-Para cada item de `images/codex-queue.json`, o Codex faz uma chamada por tentativa e copia o PNG
-bem-sucedido para o `staging_path`. Em bloqueio de moderação, repete o mesmo prompt uma vez e só então
-pode usar uma alternativa visual que preserve integralmente a identidade. O `worker_id` é a afinidade
-inicial; depois, o planejador recomenda o próximo job ordenado ao primeiro trabalhador livre. Os
-trabalhadores não compartilham um `staging_path` nem alteram manifestos. Quando o lote terminar, o
-agente principal faz uma única importação:
-
-```powershell
-uv run pipeline-videos images import-batch salmo-121
-```
-
-As imagens importadas ficam como versões ativas para o rascunho, mas não são aprovadas. `--force`
-cria uma nova candidata sem sobrescrever a versão aprovada. Para um teste local sem geração externa:
-
-```powershell
-uv run pipeline-videos images prepare salmo-121 --provider fixture
-```
-
-### 5. Narração
-
-Copie `.env.example` para `.env` e defina os valores localmente. Nunca cole chaves no repositório.
-
-```powershell
-uv run pipeline-videos audio configure salmo-121 `
-  --provider elevenlabs `
-  --voice-variant jesus_1 `
-  --model eleven_multilingual_v2
-
-uv run pipeline-videos audio generate salmo-121 --allow-external
-```
-
-`jesus_1` é o preset padrão. Use `--voice-variant jesus_2` para a segunda variação; `--voice-id`
-continua disponível apenas para uma voz personalizada fora desses presets.
-
-`--allow-external` é obrigatório para a ElevenLabs porque a chamada consome créditos. O padrão de
-saída é `mp3_44100_128`, convertido localmente para WAV 48 kHz. No fluxo geral, o áudio é gerado por
-cena. Em `adaptive_compact_v1`, a narração completa é gerada em uma única chamada e os WAVs das
-cenas são recortes sem perda guiados pelo alinhamento de palavras; isso preserva a pronúncia e a
-interpretação vocal entre hook, versículo e referência. Hashes evitam repetir chamadas e, nesse
-perfil, `--scene scene-003 --force` regenera a unidade contínua completa à qual a cena pertence.
-
-Provedor gratuito de teste:
-
-```powershell
-uv run pipeline-videos audio generate salmo-121 --provider mock
-```
-
-`mock` é portátil, determinístico e não contém fala humana. Ele permanece disponível somente para
-demonstrações e testes; o caminho de produção usa ElevenLabs.
-
-Para uma voz real gerada fora do pipeline e alinhada inteiramente no computador:
-
-```powershell
-uv run pipeline-videos audio configure salmo-121 --provider local_manual
-uv run pipeline-videos audio prepare-manual salmo-121
-uv run pipeline-videos audio import-manual salmo-121 .\narracao.wav
-```
-
-Esse caminho não chama a ElevenLabs. O importador converte o arquivo, alinha o roteiro conhecido,
-reconstrói os segmentos de cena e mantém o contrato das legendas. Não há fallback proporcional: se
-o áudio omitir ou reformular palavras, a importação falha e pede uma nova narração.
-
-### 6. Música de fundo
-
-Adicione suas faixas diretamente em `music-library/` na raiz deste repositório. São aceitos MP3,
-WAV, M4A, AAC, FLAC e OGG. Para conferir a pasta e listar as faixas disponíveis:
-
-O perfil `adaptive_compact_v1` usa exclusivamente a biblioteca
-`music-library/adaptive-compact-v1/`, formada por `Aloboi .mp3` e `Leaning.mp3`. Essas faixas não
-entram no sorteio dos demais perfis, e músicas da biblioteca geral não entram no perfil compacto.
-
-```powershell
-uv run pipeline-videos music library
-```
-
-O fluxo completo seleciona automaticamente uma faixa aleatória. Também é possível executar somente
-essa etapa:
-
-```powershell
-uv run pipeline-videos music select salmo-121
-# Sorteia novamente, preservando o arquivo anteriormente copiado:
-uv run pipeline-videos music select salmo-121 --force
-# Registra diretamente um anexo, sem copiá-lo antes para a biblioteca global:
-uv run pipeline-videos music import salmo-121 "C:\caminho\musica.mp3"
-```
-
-A escolha é copiada para `audio/music/` dentro do projeto e registrada no manifesto da etapa. Ela é
-reutilizada nas execuções seguintes, mesmo que a biblioteca mude. O render usa -12 dB, com fades de
-entrada e saída de 2 e 3 segundos, preservando a narração como faixa principal.
-
-Para encerrar uma produção já autorizada com render, validação e upload privado no mesmo processo:
-
-```powershell
-uv run pipeline-videos autopilot <projeto> --allow-external --wait-external `
-  --upload-private --confirm-upload <id-exato-do-projeto> --json
-```
-
-O guard exige o ID exato, validação final aprovada e privacidade `private`; esse caminho não registra
-aprovação humana nem autoriza publicação pública ou agendamento.
-
-#### Mixagem padronizada
-
-Projetos novos usam `voice_music_loudness_v1`. O FFmpeg normaliza a narração para **-18 LUFS** e
-deriva o alvo da música pela diferença persistida de **13 LU**, resultando em **-31 LUFS** por
-padrão. Limites de true peak protegem contra clipping; os campos de ganho permanecem disponíveis
-somente como trims deliberados. Assim, uma música originalmente masterizada mais alta não cobre a
-voz, e a proporção se mantém entre faixas e vídeos diferentes. Projetos antigos continuam usando o
-contrato salvo, sem migração implícita.
-
-O manifesto de música e a validação final registram padrão, alvo da voz, alvo da música e diferença
-em LU. Qualquer divergência entre o projeto e o manifesto bloqueia a validação.
-
-### 7. Especialista de título, descrição, SEO e thumbnail
-
-Projetos reais usam um subagente `youtube_growth_specialist`. Nos Shorts novos, ele produz somente
-título, descrição, tags e estratégia; `external_image_generation_required=false`, sem arquivo de
-thumbnail. O perfil 3D legado edita a imagem ativa da abertura. Longos usam o tema central do
-briefing no template `biblical_cinematic_landscape_v1`, sem imagem de referência:
-
-```powershell
-uv run pipeline-videos metadata growth-prepare salmo-121
-# O subagente escreve apenas em youtube/staging/youtube-growth-specialist/
-uv run pipeline-videos metadata growth-import salmo-121
-```
-
-O especialista entrega exatamente um título no perfil padrão de Shorts; nos longos e no perfil 3D
-legado, entrega uma combinação de título e thumbnail. Também produz uma descrição única,
-palavras-chave, intenção de busca, hipótese de CTR e justificativas registradas em
-`youtube/seo-strategy.json`. O agente principal valida e importa o pacote; o subagente não altera
-`project.json`, aprovações ou ativos em uso.
-
-Na VPS, a mesma combinação é processada pelo `youtube_growth_specialist`, com contexto compacto e
-raciocínio médio. O contrato visual e a complementaridade entre título e capa permanecem iguais.
-
-Nos projetos novos, o título usa `Enfoque concreto | Passagem`. A passagem aparece uma única vez e
-somente no final, depois da barra; a referência bíblica nunca é repetida dentro do enfoque. O enfoque
-pode ser fato, personagem, curiosidade, pergunta, comparação, dilema, tese ou promessa prática. A descrição abre
-com resumo curto e, em vídeos longos, recebe uma timeline das citações no ponto em que entram na
-narrativa.
-
-O par editorial distribui funções entre os dois elementos. O título concentra referência, enfoque e
-intenção de busca. Em Shorts, a frase curta da capa acrescenta conflito, decisão, detalhe,
-contraste ou consequência. Em longos, a imagem comunica personagem, gesto, paisagem, objeto ou
-conflito sem qualquer texto,
-letra, logotipo ou marcação editorial.
-
-Nos Shorts, o título principal precisa conter a expressão de busca primária, pelo menos uma opção
-de título precisa ancorar a passagem bíblica e a descrição fica curta, sem capítulos. O especialista
-recebe um contexto compacto em `youtube/growth-context.json`, em vez de reler todos os manifestos e
-prompts completos. Esse contexto reutiliza o contrato criativo, omite a locução integral e os prompts
-montados, e inclui no máximo seis aprendizados observados de `analytics/experiments.json`, priorizando
-o mesmo formato. O importador rejeita promessa ou gancho que tenham sido reinterpretados.
-
-Métricas observadas podem ser registradas de forma idempotente sem executar nova geração:
-
-```powershell
-uv run pipeline-videos analytics import salmo-121 .\experimento.json
-
-# Para Shorts, importe uma observação imutável do Studio/API e gere alertas separados:
-uv run pipeline-videos analytics metrics-import meu-short .\snapshot-72h.json
-uv run pipeline-videos analytics diagnose meu-short
-```
-
-O diagnóstico de Shorts não cria um “score viral”. Ele separa apelo
-(`Continuaram assistindo`/`Deslizaram`), engajamento (duração e percentual assistido) e satisfação
-(likes, comentários, compartilhamentos e inscritos). Apelo exige ao menos 200 exposições e
-engajamento exige ao menos 200 `engaged_views`; resultados em processamento ou cuja janela termina
-antes de 48 horas permanecem provisórios. Uploads novos congelam o fingerprint editorial usado para
-comparabilidade. A linha de base inicial de 30,5% foi calibrada no canal e está versionada, não é um
-número universal. `engaged_views/views` nunca é apresentado como se fosse a métrica do Studio.
-Detalhes, schema e matriz de alertas estão em
-[Loop de desempenho para Shorts](docs/shorts-performance-loop.md).
-
-O objetivo é aumentar relevância, clareza e probabilidade de clique sem clickbait enganoso. Não há
-garantia de viralização: o próprio YouTube considera relevância, satisfação, watch time, histórico do
-público, concorrência e sazonalidade. Em Shorts novos, o especialista não chama `imagegen`, não cria
-PNG e não insere capa no frame zero. Em vídeos longos novos, faz uma geração horizontal 16:9 sem
-referência visual, usando integralmente o prompt temático versionado e proibindo texto, letras,
-logotipos e marcações. O importador apenas normaliza dimensões e formato, sem aplicar texto com
-Pillow. A primeira saída válida é mantida; nova tentativa automática ocorre somente quando
-`moderation_blocked` não produz imagem. Projetos legados preservam o contrato armazenado.
-
-Projetos novos usam também `search_first_unique_v2`. A descrição abre com a consulta principal,
-passagem e valor concreto, contém ao menos dois parágrafos e não aceita CTAs genéricos como
-“Compartilhe esta mensagem”. Também não usa metalinguagem como “este Short”, “neste vídeo”, “este
-conteúdo” ou “o vídeo mostra”: começa diretamente pelo assunto. O comentário fixado concentra uma pergunta específica. O especialista
-entrega de oito a quinze tags relevantes — consulta, passagem, livro e variações reais — sem tratar
-tags como motor principal de distribuição nem despejá-las na descrição. Hashtags são opcionais e
-limitadas a três diretamente relacionadas.
-
-No perfil 3D legado de Shorts, a tipografia integrada segue `integrated_extruded_3d_v1`: as letras são modeladas como
-objetos 3D da própria cena, com extrusão espessa, bordas chanfradas, textura material, highlights, sombras de
-contato/oclusão e perspectiva coerentes com a câmera e a iluminação. A palavra dominante recebe
-escala muito maior, enquanto a palavra vermelha e a marcação narrativa mantêm o mesmo volume e
-profundidade. O validador rejeita prompts sem esses marcadores para evitar texto plano, adesivo ou
-overlay genérico nas próximas thumbnails.
-
-As regras seguem as orientações oficiais de [títulos e thumbnails](https://support.google.com/youtube/answer/12340300),
-[descrições](https://support.google.com/youtube/answer/12948449),
-[busca](https://support.google.com/youtube/answer/16090438),
-[tags](https://support.google.com/youtube/answer/146402),
-[descoberta de Shorts](https://support.google.com/youtube/answer/11914225) e
-[A/B tests](https://support.google.com/youtube/answer/16391400).
-
-### 8. Legendas, metadados e render
-
-```powershell
-uv run pipeline-videos captions build salmo-121
-uv run pipeline-videos metadata growth-prepare salmo-121
-uv run pipeline-videos metadata growth-import salmo-121
-# Gera diretamente o candidato final V4 usando as versões ativas:
-uv run pipeline-videos render salmo-121
-
-# Depois da revisão do usuário, registre as aprovações sem renderizar novamente:
-uv run pipeline-videos approve salmo-121 images --by "Pedro"
-uv run pipeline-videos approve salmo-121 metadata --by "Pedro"
-uv run pipeline-videos validate salmo-121
-uv run pipeline-videos approve salmo-121 final_render --by "Pedro"
-```
-
-O candidato fica em `render/final.mp4`. A renderização usa os ativos ativos, passa pela validação
-técnica e não registra aprovação humana automaticamente.
-
-O padrão final aprovado continua sendo o da V4 de Davi e Golias: resolução completa, H.264 com CRF
-12, preset `slow` e supersampling 3; movimento pendular suave entre 1,02× e 1,105×; transições
-`cinematic_mix`; e legendas Montserrat ExtraBold em caixa alta, com no máximo três palavras por
-linha e card vermelho sólido arredondado na palavra ativa. O caminho antigo de prévia rápida foi
-removido; projetos existentes têm seus campos antigos ignorados ao serem carregados. Em Shorts, o bloco de legenda fica no
-centro da tela; os prompts visuais reservam essa faixa para preservar a leitura. Um marcador menor
-Somente citações bíblicas literais usam itálico. A fonte e sua licença OFL são copiadas
-automaticamente para cada projeto novo.
-
-As imagens seguem separadamente o padrão `cinematic-family-3d-v1`: animação 3D cinematográfica
-familiar premium, no espírito do apelo emocional de longas Pixar/Disney, sem copiar personagens ou
-elementos de filmes existentes. Personagens expressivos, formas arredondadas, materiais estilizados,
-profundidade em camadas e iluminação de longa-metragem formam a identidade visual. A fila protege
-esse padrão contra deriva para fotorrealismo, live action, vetor flat, anime, low-poly, aparência de
-boneco de plástico ou render 3D genérico.
-
-A música de fundo é escolhida pela etapa `music`; nenhuma faixa específica é fixa no padrão global.
-SRT e VTT continuam usando blocos naturais sem marcação visual. Alterar somente o estilo da legenda
-reutiliza a base visual em cache.
-
-### 9. Upload e publicação no YouTube
-
-A integração com a YouTube Data API é opt-in e não faz parte de `run`. O primeiro comando apenas
-autoriza o canal e guarda o token fora dos projetos:
-
-```powershell
-uv run pipeline-videos youtube auth `
-  --client-secrets "C:\caminho-seguro\client_secrets.json" `
-  --allow-external
-```
-
-Depois de aprovar metadados e render final, revise localmente o pacote e faça o upload inicial como
-privado ou não listado:
-
-```powershell
-uv run pipeline-videos youtube preflight salmo-121
-uv run pipeline-videos youtube upload salmo-121 `
-  --confirm-upload "DD-MM-AAAA_salmo-121" `
-  --allow-external
-```
-
-O upload inclui título, descrição/capítulos, tags e legenda SRT. Vídeos longos usam por padrão a
-categoria Educação (`27`); Shorts permanecem em Pessoas e blogs (`22`). Em vídeos longos, o upload
-inclui também a thumbnail. Nos Shorts, a capa é incorporada ao frame zero e o quadro precisa ser selecionado
-manualmente no aplicativo móvel do YouTube. O estado fica em `youtube/publication.json`; tentativas
-repetidas retomam o mesmo `video_id` em vez de duplicar o vídeo. Publicar ou agendar é uma segunda
-ação, com confirmação pelo ID remoto:
-
-```powershell
-# Publicar agora
-uv run pipeline-videos youtube publish salmo-121 `
-  --confirm-publication "VIDEO_ID" `
-  --allow-external
-
-# Ou agendar com fuso explícito
-uv run pipeline-videos youtube publish salmo-121 `
-  --confirm-publication "VIDEO_ID" `
-  --publish-at "2026-07-20T19:00:00-03:00" `
-  --allow-external
-```
-
-Configuração do Google Cloud, escopos, guards, classificações e limitações estão em
-[Publicação no YouTube](docs/youtube-publishing.md).
-
-O render das cenas usa no máximo dois processos FFmpeg em paralelo, preservando a ordem da timeline
-e o cache individual. Bases visuais equivalentes de rascunho/final são compartilhadas por cópia
-atômica. Quando a configuração da prévia é idêntica à do final, o arquivo é copiado sem uma segunda
-recodificação completa.
-
-Projetos novos usam blur uniforme com sigma 8 em todo o fundo. O perfil padrão de Shorts começa
-diretamente na primeira cena narrativa; somente o perfil 3D legado mantém a thumbnail sobreposta no
-frame zero. As legendas `active_card_v2` entram progressivamente, palavra por palavra,
-com animação curta de posição, escala e opacidade, sem alterar tipografia, card ou sincronização.
-
-O primeiro bloco visual de todo Short novo usa `scroll_stop_concrete_v1`: sujeito dominante, ação
-já em curso, transição visível entre estados concretos, tensão coerente com o hook e enquadramento de leitura imediata. No perfil pintado
-`unrestricted_scene_v1`, isso usa plano médio/close sem reintroduzir área vazia obrigatória para
-legendas ou thumbnail. A imagem e a primeira fala devem abrir a mesma pergunta que o payoff resolve.
-
-Nos Shorts novos, `visual_scenes` define os blocos antes do áudio e cada segmento guarda tanto
-`scene_id` quanto `narration_block_id`. As filas continuam usando
-schemas compactados e arquivos de contexto dedicados. Em `completion_first_v1`, somente mídia,
-duração solicitada, Bíblia/fonte, ativos, segurança, privacidade e custo autorizado bloqueiam; SEO,
-estética e heurísticas de retenção são avisos.
-
-Para conferir tudo sem alterar arquivos nem consumir créditos:
-
-```powershell
-uv run pipeline-videos run salmo-121 --dry-run
-uv run pipeline-videos status salmo-121 --json
-```
-
-O status JSON é a interface compacta para automações. A auditoria de tokens é atualizada pelo
-`autopilot` concluído e também pode ser recalculada localmente, sem chamar modelo:
-
-```powershell
-uv run pipeline-videos audit tokens salmo-121
-```
-
-Ela separa coordenação, roteiro, revisão bíblica, imagens e crescimento em
-`audit/production-metrics.json`, compara o uso efetivo aos orçamentos persistidos e atualiza uma
-seção idempotente de `audit/report.md` sem apagar conteúdo anterior. Orçamento excedido é apenas
-telemetria: aciona fallback quando necessário, mas nunca abandona a entrega.
-
-## Estrutura de cada vídeo
+## Estrutura
 
 ```text
 projects/
-├── videos-longos/DD-MM-AAAA_tema-do-video/
-└── shorts/DD-MM-AAAA_tema-do-video/
+├── shorts/
+└── videos-longos/
 
-<projeto>/
-├── project.json                    # estado, hashes, config e aprovações
-├── editorial/
-│   ├── briefing.json
-│   ├── sources.json
-│   └── decisions.jsonl
-├── script/
-│   ├── script.json
-│   ├── creative-contract.json
-│   ├── shorts-context.json
-│   ├── shorts-queue.json
-│   ├── narration.txt
-│   └── versions/
-├── reviews/
-│   ├── biblical-consistency.json
-│   ├── shorts-review-queue.json
-│   ├── shorts-review-context.json
-│   └── staging/biblical-reviewer/review.json
-├── visual/
-│   ├── style-profile.json
-│   ├── palette.json
-│   └── continuity.json
-├── scenes/manifest.json
-├── images/
-│   ├── manifest.json
-│   ├── codex-queue.json
-│   └── assets/<scene>/vNNN.png
-├── audio/
-│   ├── manifest.json
-│   ├── narration.wav
-│   ├── segments/<scene>-vNNN.wav
-│   └── music/
-│       ├── manifest.json
-│       └── <faixa-selecionada>
-├── captions/
-│   ├── manifest.json
-│   ├── captions.ass
-│   ├── captions.srt
-│   └── captions.vtt
-├── render/
-│   ├── config.json
-│   └── final.mp4
-├── youtube/
-│   ├── metadata.json
-│   ├── description.md
-│   ├── growth-queue.json
-│   ├── growth-context.json
-│   ├── growth-package.json
-│   ├── seo-strategy.json
-│   ├── staging/youtube-growth-specialist/
-│   ├── thumbnail-prompt.json
-│   ├── thumbnail-vNNN.png
-│   ├── thumbnail.png
-│   └── publication.json
-├── analytics/
-│   ├── experiments.json
-│   ├── shorts-snapshots.json
-│   └── shorts-diagnostics.json
-├── audit/
-│   ├── production-metrics.json
-│   └── report.md
-├── validation/report.json
-└── logs/events.jsonl
+config/
+├── bible/
+├── palettes/
+└── styles/
+
+src/pipeline_videos/
+├── project.py
+├── shorts_script.py
+├── long_form_script.py
+├── scenes.py
+├── images.py
+├── audio.py
+├── captions.py
+├── render.py
+├── validation.py
+├── growth.py
+├── metadata.py
+├── publication.py
+└── remote_jobs.py
 ```
 
-Todos os caminhos armazenados são relativos à pasta do vídeo. Isso torna cada projeto portátil.
+Dentro de cada projeto:
 
-## ElevenLabs: decisões atuais
+```text
+project.json
+briefing/
+sources/
+script/
+visual/
+images/
+audio/
+captions/
+render/
+youtube/
+audit/
+```
 
-O adaptador segue o endpoint oficial
-[`POST /v1/text-to-speech/{voice_id}/with-timestamps`](https://elevenlabs.io/docs/api-reference/text-to-speech/convert-with-timestamps),
-prefere `normalized_alignment`, preserva headers de custo/diagnóstico e repete com backoff apenas
-erros transitórios. O padrão atual é `eleven_multilingual_v2` para Shorts e vídeos longos.
+## Criar projetos
 
-Os planos, limites e licenças mudam. Em 13/07/2026, a
-[página oficial de preços](https://elevenlabs.io/pricing/api?price.platform=api) informava 10.000
-créditos no plano Free e restrições de uso comercial. Confirme os termos atuais antes de publicar
-ou monetizar; o pipeline não habilita pay-as-you-go nem faturamento.
-
-Mais detalhes em [docs/elevenlabs.md](docs/elevenlabs.md).
-
-## Confiabilidade e segurança
-
-- cada etapa calcula hash de entrada e valida os artefatos antes de reutilizar;
-- `--force` é explícito e recursos aprovados permanecem versionados;
-- erros ficam em `project.json` e `logs/events.jsonl`;
-- upload e publicação só existem em comandos separados, com `--allow-external` e confirmações
-  literais; um pedido explícito de upload privado pode usar `render-review` e
-  `--automated-review` sem aprovação humana, sem publicação implícita, compra ou cobrança;
-- chaves vêm apenas de `.env`/ambiente e nunca são gravadas nos manifestos;
-- a validação compara contrato criativo, roteiro, cenas, imagens, áudio e legendas para detectar
-  componentes críticos ausentes, omissão, duplicação ou reordenação;
-- a publicação futura começa como privada; o fluxo tradicional exige aprovação humana, enquanto o
-  candidato privado automatizado exige pedido explícito, política habilitada e validação técnica.
-
-## Testes e qualidade
+Novo vídeo longo:
 
 ```powershell
-uv run ruff format --check .
-uv run ruff check .
-uv run pytest
-uv run pipeline-videos demo
-uv run pipeline-videos validate demo-salmo-23
+uv run pipeline-videos new historia-de-andre `
+  --title "A história de André" `
+  --duration 420
 ```
 
-Os testes cobrem alinhamento de caracteres, mock, guard da ElevenLabs, seleção e persistência
-da música local, versionamento de imagens, agrupamento e cobertura de legendas, planejamento das
-cinco ondas concorrentes, importação de thumbnails integradas, migração de manifestos antigos,
-cache paralelo do render e
-FFprobe real.
+Novo Short:
 
-## Arquitetura e próximos marcos
+```powershell
+uv run pipeline-videos new-short `
+  --duration 50
+```
 
-- [Arquitetura e contratos](docs/architecture.md)
-- [Integração de imagens no Codex](docs/image-generation.md)
-- [ElevenLabs](docs/elevenlabs.md)
-- [Roadmap incremental](docs/roadmap.md)
+Curiosidade bíblica de alto interesse:
 
-OAuth, upload, thumbnail, legenda e agendamento do YouTube ficam isolados em `publication.py` e não
-são chamados pelo pipeline de produção. Métricas e aprendizado por desempenho permanecem no próximo
-marco.
+```powershell
+uv run pipeline-videos new-short `
+  --profile high-stakes `
+  --duration 50
+```
+
+O catálogo high-stakes é de ciclo único. Quando todos os temas estiverem usados ou reservados, o
+pipeline bloqueia uma nova criação até que outra rodada curada seja adicionada.
+
+Vídeo dedicado a personagem:
+
+```powershell
+uv run pipeline-videos new-character-video andre `
+  --duration 420
+```
+
+## Duração
+
+Uma duração comum é preferência, não obrigação exata. A narração permanece em velocidade natural
+`1.0`; o pipeline não usa silêncio, padding, `atempo` ou time-stretch para preencher poucos
+segundos.
+
+Use duração exata somente quando ela for realmente necessária:
+
+```powershell
+uv run pipeline-videos new-short --duration 50 --exact-duration
+```
+
+## Produção
+
+Antes de produzir:
+
+```powershell
+uv run pipeline-videos status <id-ou-pasta>
+uv run pipeline-videos run <id-ou-pasta> --dry-run
+```
+
+Execução retomável:
+
+```powershell
+uv run pipeline-videos autopilot <id-ou-pasta> --wait-external --allow-external
+```
+
+O pedido explícito de criar, produzir ou retomar um vídeo autoriza a síntese real da ElevenLabs.
+Isso não autoriza upload, publicação, agendamento, compra ou mudança de faturamento.
+
+## Roteiro
+
+Shorts fora do perfil compacto usam um especialista de roteiro e validação incorporada de fontes,
+sem agente revisor separado. O perfil compacto sela deterministicamente hook, citação e referência;
+o modelo planeja somente as cenas.
+
+Vídeos longos usam progressão por movimentos, reengajamentos proporcionais à duração e citações
+literais distribuídas. O primeiro versículo entra até 75 segundos, o intervalo máximo é de 105
+segundos e a parte final não passa de 120 segundos sem âncora bíblica.
+
+Em todos os formatos:
+
+- `narrator_identity=jesus_first_person_v1`;
+- a maior parte do desenvolvimento avança por fatos, ações e acontecimentos;
+- explicações editoriais não aparecem dentro da locução;
+- cada cena cobre um bloco literal da narração.
+
+## Imagens
+
+O plano de imagens fica em `images/codex-queue.json`.
+
+- processe somente itens pendentes;
+- use no máximo dois workers simultâneos;
+- faça uma chamada de geração por tentativa;
+- em `moderation_blocked`, repita o prompt uma vez;
+- após um segundo bloqueio, tente uma alternativa que preserve identidade, figurino, proporções,
+  estilo, paleta, ambiente e sentido;
+- copie cada resultado para o staging declarado;
+- importe o lote uma única vez.
+
+## Áudio e música
+
+A voz padrão é `jesus_1`; `jesus_2` continua disponível por pedido explícito. O modelo padrão é
+`eleven_multilingual_v2`.
+
+Projetos novos usam `voice_music_loudness_v1`:
+
+- narração: `-18 LUFS`;
+- música: `-31 LUFS`;
+- diferença: `13 LU`;
+- limites de true peak antes do `amix`.
+
+## Render
+
+Existe um único candidato final:
+
+- H.264;
+- CRF 12;
+- preset `slow`;
+- supersampling 3;
+- movimento `smooth_pendulum`;
+- transições `cinematic_mix` de 0,38 s;
+- blur uniforme sigma 8.
+
+Legendas usam Montserrat ExtraBold, caixa alta, largura 0,68, até três palavras por linha e palavra
+ativa em card vermelho.
+
+## Validação
+
+```powershell
+uv run pipeline-videos validate <id-ou-pasta>
+```
+
+São bloqueantes:
+
+- mídia ausente, corrompida ou fora da política de duração;
+- fonte ou fidelidade bíblica inválida;
+- ativo obrigatório ausente;
+- risco de segurança ou privacidade;
+- publicação ou custo externo não autorizado;
+- mix de áudio fora do contrato.
+
+## YouTube
+
+O especialista gera um único título no padrão `Enfoque concreto | Passagem`, uma descrição única,
+oito a quinze tags relevantes e um comentário fixado específico. SEO é tratado como hipótese, nunca
+como promessa de alcance.
+
+O primeiro envio aceita somente `private` ou `unlisted`. O upload privado automatizado usa
+`render-review` e não registra aprovação humana.
+
+```powershell
+uv run pipeline-videos youtube upload <id-ou-pasta> `
+  --allow-external `
+  --confirm-upload <id-do-projeto> `
+  --automated-review
+```
+
+Publicação pública ou agendada é uma ação separada e exige pedido explícito.
+
+## Produção remota
+
+Cada job remoto tem uma sessão persistente do coordenador e checkpoints retomáveis. Áudio, música,
+legendas, imports, render, validação e upload são executados deterministicamente. O coordenador e
+especialistas usam `gpt-5.6-sol`; até dois workers de imagem podem atuar em paralelo.
+
+### Roteiros pré-aprovados
+
+Antes de existir um projeto de vídeo, temas e roteiros passam pela bancada editorial. O agente
+consulta a etapa atual e faz uma única pergunta curta; nenhuma ação é iniciada até a etapa ser
+confirmada:
+
+```powershell
+uv run pipeline-videos approved-scripts workflow-status
+```
+
+O fluxo é sequencial e cada comando executa somente sua própria etapa:
+
+```powershell
+# 1. Salvar sugestões, sem criar roteiro
+uv run pipeline-videos approved-scripts topic-suggest `
+  --title "Por que Jesus não chamou os anjos?" `
+  --question "Se eu podia chamar anjos, por que aceitei a prisão?"
+
+# 2. Aprovar vários temas, ainda sem escrever roteiros
+uv run pipeline-videos approved-scripts topic-approve `
+  --topic-id <tema-1> `
+  --topic-id <tema-2>
+
+# 3. Preparar uma única fila econômica para os temas aprovados
+uv run pipeline-videos approved-scripts draft-batch-prepare --count 3
+
+# 4. Depois da escrita e do preflight de fontes na mesma saída, mostrar os textos
+uv run pipeline-videos approved-scripts draft-batch-review <lote>
+
+# 5. Aprovar todos os textos exibidos com um único hash
+uv run pipeline-videos approved-scripts draft-batch-approve <lote> `
+  --confirm-hash <hash> `
+  --approved-by Pedro
+```
+
+`draft-batch-prepare` não inicia agente, não cria projeto e não produz mídia. Quando a escrita for
+confirmada, o contrato permite no máximo um roteirista e nenhum revisor bíblico separado. Fontes,
+pontos obrigatórios e limites de incerteza entram na fila; o mesmo roteirista faz a conferência de
+fonte e o importador aplica `inline_source_guard_v1`. Cada roteiro precisa começar com um hook
+high-stakes forte, manter Jesus como eu lírico, fechar o payoff prometido e atingir nota mínima 8
+em hook, clareza e payoff. A referência de qualidade é
+`published_high_stakes_last_three_v1`.
+
+Quando o usuário aprova os textos já exibidos, a transição é
+`hash_only_no_model_v1`: nenhuma pesquisa, revisão ou chamada de modelo é aberta depois da
+aprovação. O comando confere o hash, congela o lote e materializa automaticamente um pacote no pool
+de produção para cada roteiro. Essa ponte é idempotente e acontece antes de qualquer mídia.
+
+Um roteiro pode então ser liberado pelo título exato, sem procurar IDs manualmente:
+
+```powershell
+uv run pipeline-videos approved-scripts release `
+  --title "Por que usei barro para curar o cego?" `
+  --authorize-external
+```
+
+O comando reserva somente esse pacote e cria um job remoto `approved_fast_v1`, com voz `jesus_1`,
+música `leaning` e upload privado. Roteiro, CTA, SEO, fontes e plano visual já estão congelados; não
+há roteirista, revisor bíblico ou especialista de crescimento nessa liberação.
+
+A duração informada na bancada é somente uma estimativa. Depois da aprovação por hash, o roteiro
+usa `approved_script_locked_v1`: nenhuma contagem de palavras ou diferença em relação a 50 segundos
+pode alterar ou bloquear o texto. A voz natural define a duração efetiva do Short, seja ela menor
+ou maior que a estimativa. O pipeline preserva integralmente o roteiro e registra a duração real
+depois da síntese.
+
+O perfil `approved_fast_v1` separa a decisão editorial da produção. Um projeto de Short já
+roteirizado e revisado pode ser congelado com narração, CTA escolhido, fontes, revisão bíblica,
+plano visual e hash imutável:
+
+```powershell
+uv run pipeline-videos approved-scripts capture <projeto> `
+  --voice jesus_1 `
+  --music leaning
+
+uv run pipeline-videos approved-scripts cta-select <id> `
+  --option compartilhar
+
+uv run pipeline-videos approved-scripts seo-set <id> `
+  --title "Por que Jesus manteve Judas? | João 6:70-71" `
+  --description "Jesus sabia da futura traição de Judas. Entenda como conhecimento, escolha e responsabilidade aparecem nessa dúvida bíblica." `
+  --hashtag "Judas Iscariotes" `
+  --hashtag "Livre Arbítrio" `
+  --hashtag "Traição de Judas"
+
+uv run pipeline-videos approved-scripts approve <id> `
+  --confirm-hash <hash-exibido> `
+  --approved-by Pedro
+```
+
+Sem `--cta`, a captura apresenta o CTA atual e três alternativas de uma ação. `cta-select` substitui
+o texto no roteiro e no bloco visual correspondente e gera um novo hash; também aceita uma opção
+nova com `--text` e `--mode`. Em Shorts de 45 segundos ou mais, a captura consolida o plano em até
+sete cenas por padrão (`--max-scenes` altera o teto), preservando integralmente a narração e as
+fronteiras entre seções.
+
+O SEO nasce no mesmo rascunho: título, descrição e três hashtags específicas são gerados
+imediatamente e podem ser substituídos por `seo-set`. O pipeline sempre acrescenta `#biblia` e
+`#jesus`, totalizando cinco hashtags. Esses metadados entram no hash aprovado e não são
+reescritos durante a produção. Separadamente, o pipeline gera de dez a doze tags internas do
+YouTube, sem `#`; elas não precisam aparecer na revisão do roteiro.
+
+Depois da aprovação, a finalização não chama roteirista, revisor bíblico nem especialista de SEO.
+Ela gera apenas as imagens pendentes, executa áudio, legendas, música, render, validação e upload
+privado. O texto é verificado pelo lock antes da síntese e novamente antes do upload:
+
+```powershell
+uv run pipeline-videos approved-scripts list --status approved
+uv run pipeline-videos approved-scripts release --count 2 --authorize-external
+```
+
+Uma agenda privada pode consumir um ou dois roteiros por dia:
+
+```powershell
+uv run pipeline-videos approved-scripts schedule-create `
+  --name "Curiosidades aprovadas" `
+  --production-time 02:00 `
+  --production-time 04:00 `
+  --authorize-external
+```
+
+Quando a fila aprovada acaba, a agenda registra `last_depletion_reason`, não escolhe outro tema e
+não cria job. Um novo roteiro só entra após nova captura e aprovação explícita pelo hash.
+
+Consulte:
+
+- [docs/optimized-production.md](docs/optimized-production.md)
+- [docs/remote-production.md](docs/remote-production.md)
+- [docs/creative-direction.md](docs/creative-direction.md)
+- [docs/shorts-script-standard.md](docs/shorts-script-standard.md)
+- [docs/long-form-script-standard.md](docs/long-form-script-standard.md)
+- [docs/image-generation.md](docs/image-generation.md)
+
+## Testes
+
+```powershell
+uv run ruff check src tests
+uv run pytest -q
+```

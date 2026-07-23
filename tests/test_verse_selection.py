@@ -355,7 +355,6 @@ def test_auto_short_reserves_different_verses_and_populates_verified_source(tmp_
     assert manifest.config.youtube_growth.title_standard == "creative_pipe_passage_v3"
     assert manifest.config.images.visual_standard_id == "biblical-midcentury-gouache-v1"
     assert manifest.config.images.scene_planning_standard == "narration_block_visual_v1"
-    assert manifest.config.youtube_growth.thumbnail_generation_mode == "youtube_auto_frame_v1"
     assert (tmp_path / "verse-usage.json").is_file()
     assert first.root != second.root
 
@@ -553,9 +552,9 @@ def test_curated_multiformat_bank_has_the_promised_400_candidates() -> None:
 def test_narrative_character_bank_has_verified_story_packages() -> None:
     bank = read_model(DEFAULT_NARRATIVE_CHARACTER_BANK, VerseCatalog)
 
-    assert len(bank.candidates) == 81
-    assert len({character for item in bank.candidates for character in item.characters}) == 88
-    assert sum(1 + len(item.related_passages) for item in bank.candidates) == 324
+    assert len(bank.candidates) == 82
+    assert len({character for item in bank.candidates for character in item.characters}) == 89
+    assert sum(1 + len(item.related_passages) for item in bank.candidates) == 332
     assert len(bank.source_artifact_sha256) == 64
     assert bank.source_revision == "2026-04-25"
     assert all(item.catalog_segment == "narrative_story" for item in bank.candidates)
@@ -569,6 +568,43 @@ def test_narrative_character_bank_has_verified_story_packages() -> None:
     )
 
 
+def test_matthew_story_package_advances_beyond_the_tax_booth() -> None:
+    bank = read_model(DEFAULT_NARRATIVE_CHARACTER_BANK, VerseCatalog)
+    mateus = next(item for item in bank.candidates if item.candidate_id == "bpm-narrative-mateus")
+
+    assert mateus.title == "Mateus, da coletoria aos doze"
+    assert [passage.reference for passage in mateus.related_passages] == [
+        "Lucas 5:27-29",
+        "Mateus 10:1-8",
+        "Mateus 28:16-20",
+        "Atos 1:12-14",
+    ]
+    assert [passage.role for passage in mateus.related_passages] == [
+        "parallel_account",
+        "character_development",
+        "character_outcome",
+        "character_outcome",
+    ]
+
+
+def test_andrew_story_package_covers_his_biblical_trajectory() -> None:
+    bank = read_model(DEFAULT_NARRATIVE_CHARACTER_BANK, VerseCatalog)
+    andre = next(item for item in bank.candidates if item.candidate_id == "bpm-narrative-andre")
+
+    assert andre.reference == "João 1:35-42"
+    assert "André" in andre.character_aliases
+    assert "Andre" in andre.character_aliases
+    assert [passage.reference for passage in andre.related_passages] == [
+        "Mateus 4:18-20",
+        "Mateus 10:1-4",
+        "João 6:5-9",
+        "João 12:20-22",
+        "Marcos 13:3-4",
+        "Atos 1:12-14",
+    ]
+    assert andre.related_passages[-1].role == "character_outcome"
+
+
 def test_narrative_candidates_are_opt_in_and_aliases_select_the_story() -> None:
     catalog = load_verse_catalog()
     usage = VerseUsageIndex(generated_at="2026-07-21T00:00:00Z")
@@ -579,7 +615,7 @@ def test_narrative_candidates_are_opt_in_and_aliases_select_the_story() -> None:
         if item.catalog_segment == "narrative_story"
     }
 
-    assert len(narrative_ids) == 81
+    assert len(narrative_ids) == 82
     assert default_ids.isdisjoint(narrative_ids)
 
     selected, _ = select_unused_verse(
@@ -598,7 +634,7 @@ def test_narrative_candidates_are_opt_in_and_aliases_select_the_story() -> None:
     }
 
 
-def test_character_project_receives_related_sources_and_portrait_mode(tmp_path) -> None:
+def test_character_project_receives_related_sources_and_storytelling_mode(tmp_path) -> None:
     layout, candidate, _ = create_auto_video(
         projects_dir=tmp_path,
         target_duration_seconds=540,
@@ -610,7 +646,7 @@ def test_character_project_receives_related_sources_and_portrait_mode(tmp_path) 
     sources = read_model(layout.sources, SourceLibrary)
 
     assert candidate.candidate_id == "bpm-narrative-judas-iscariotes"
-    assert briefing.creative_mode == "character_portrait"
+    assert briefing.creative_mode == "biblical_storytelling"
     assert briefing.main_passage == "Mateus 26:14-16"
     assert briefing.complementary_references == [
         "João 13:21-30",
@@ -907,7 +943,6 @@ def test_usage_scan_accepts_legacy_manifest_fields(tmp_path) -> None:
     )
     manifest = read_json(layout.manifest)
     manifest["config"]["production"]["manual_image_batch_size"] = 10
-    manifest["config"]["youtube_growth"]["reuse_scene_images_for_thumbnails"] = False
     write_json(layout.manifest, manifest)
 
     usage = build_usage_index(tmp_path)

@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import re
 import shutil
 
 from pipeline_videos.models import (
     ApprovalStatus,
     Briefing,
     ContinuityBible,
-    CreativeContract,
     Palette,
     PromptBlocks,
     Scene,
@@ -30,15 +28,6 @@ from pipeline_videos.state import (
 from pipeline_videos.storage import ProjectLayout, read_model, write_json
 from pipeline_videos.utils import aspect_ratio_label, relative_posix, sha256_value, tokenize_words
 
-SHOTS = (
-    "plano geral com forte leitura de silhueta",
-    "plano médio lateral com interação expressiva e profundidade em camadas",
-    "close emocional no rosto, gesto ou objeto simbólico",
-    "plano alto mostrando o caminho e o ambiente",
-    "plano sobre o ombro do personagem com amplo espaço negativo",
-    "silhueta em contraluz com composição assimétrica",
-)
-
 UNRESTRICTED_SHOTS = (
     "plano geral que revele com clareza a ação e o ambiente",
     "plano médio lateral com interação natural entre as figuras",
@@ -48,9 +37,7 @@ UNRESTRICTED_SHOTS = (
     "plano baixo suave que valorize a ação principal",
 )
 
-LEGACY_SCENE_ALGORITHM_VERSION = "6.1"
-SCENE_ALGORITHM_VERSION = "6.2"
-LEGACY_ENFORCED_VISUAL_STANDARD_IDS = {"davi-poupa-saul-flat-v1"}
+SCENE_ALGORITHM_VERSION = "7.0"
 FIXED_SPOKEN_REFERENCE_VISUAL_BRIEF = (
     "A imagem padrão do perfil mostra uma Bíblia aberta sobre uma mesa de madeira diante de "
     "uma paisagem serena, em pintura editorial bíblica de guache."
@@ -86,65 +73,6 @@ ROLE_DIRECTIONS = {
 }
 
 
-def _split_long_text(
-    text: str,
-    target_words: int,
-    *,
-    allow_clause_breaks: bool = False,
-) -> list[str]:
-    boundary = r"(?<=[.!?…;:,])\s+" if allow_clause_breaks else r"(?<=[.!?…])\s+"
-    sentences = [item.strip() for item in re.split(boundary, text.strip()) if item.strip()]
-    if not sentences:
-        return []
-    chunks: list[str] = []
-    current: list[str] = []
-    current_count = 0
-    for sentence in sentences:
-        words = tokenize_words(sentence)
-        if len(words) > target_words * 2:
-            if current:
-                chunks.append(" ".join(current))
-                current = []
-                current_count = 0
-            for start in range(0, len(words), target_words):
-                chunks.append(" ".join(words[start : start + target_words]))
-            continue
-        if current and current_count + len(words) > round(target_words * 1.45):
-            chunks.append(" ".join(current))
-            current = []
-            current_count = 0
-        current.append(sentence)
-        current_count += len(words)
-        if current_count >= target_words:
-            chunks.append(" ".join(current))
-            current = []
-            current_count = 0
-    if current:
-        chunks.append(" ".join(current))
-    return chunks
-
-
-def _scene_seconds_for_section(
-    contract: CreativeContract,
-    section: ScriptSection,
-    *,
-    explicit_seconds: float | None,
-) -> float:
-    if explicit_seconds is not None:
-        return explicit_seconds
-    beat = next(item for item in contract.beats if item.section_id == section.section_id)
-    functions = set(beat.functions)
-    if "hook" in functions:
-        return contract.pacing.opening_scene_seconds
-    if "reengagement" in functions:
-        return contract.pacing.reengagement_scene_seconds
-    if "contemplation" in functions:
-        return contract.pacing.contemplative_scene_seconds
-    if functions.intersection({"payoff", "resolution", "synthesis", "application", "cta"}):
-        return contract.pacing.payoff_scene_seconds
-    return contract.pacing.default_scene_seconds
-
-
 def _palette_description(palette: Palette) -> str:
     return ", ".join(f"{color.name} {color.hex} para {color.role}" for color in palette.colors)
 
@@ -166,22 +94,9 @@ def _resolved_style(layout: ProjectLayout) -> StyleProfile:
     if not image_config.enforce_visual_standard:
         return style
 
-    canonical = load_style(style.style_id)
-    if canonical.visual_standard_id != image_config.visual_standard_id:
-        previous_standard_id = image_config.visual_standard_id
-        if previous_standard_id not in LEGACY_ENFORCED_VISUAL_STANDARD_IDS:
-            raise RuntimeError(
-                "O perfil visual canônico não corresponde ao padrão configurado no projeto."
-            )
-        project.config.images.visual_standard_id = canonical.visual_standard_id or ""
-        layout.save_manifest(project)
-        layout.append_event(
-            {
-                "event": "visual_standard_migrated",
-                "previous_visual_standard_id": previous_standard_id,
-                "visual_standard_id": canonical.visual_standard_id,
-            }
-        )
+    canonical = load_style("biblical-midcentury-gouache")
+    if image_config.visual_standard_id != "biblical-midcentury-gouache-v1":
+        raise RuntimeError("O projeto precisa usar o padrão biblical-midcentury-gouache-v1.")
     if style == canonical:
         return style
 
@@ -211,7 +126,6 @@ def assemble_prompt(
     emotion: str,
     canvas_width: int,
     canvas_height: int,
-    reserve_caption_safe_area: bool = True,
 ) -> PromptBlocks:
     negative = list(style.negative_constraints)
     negative.extend(
@@ -231,18 +145,10 @@ def assemble_prompt(
         if is_vertical
         else f"quadro de cena horizontal {aspect} para vídeo reflexivo no YouTube"
     )
-    constraints = "imagem sem texto"
-    if reserve_caption_safe_area:
-        safe_area = (
-            "manter entre 42% e 58% da altura uma área do mesmo fundo contínuo, com poucos "
-            "detalhes e baixo contraste para as legendas; nunca transformar essa área em faixa "
-            "branca, painel, retângulo vazio ou divisor; posicionar rosto, gesto e símbolos "
-            "essenciais acima, abaixo ou lateralmente; evitar elementos essenciais nas bordas "
-            "direita e inferior da interface do Short"
-            if is_vertical
-            else "manter espaço seguro para legendas na parte inferior"
-        )
-        constraints = f"{safe_area}; {constraints}"
+    constraints = (
+        "imagem sem texto; composição artística livre, sem reservar áreas artificiais para "
+        "legenda ou interface"
+    )
     assembled = "\n".join(
         [
             "Use case: illustration-story",
@@ -292,13 +198,11 @@ def _scene_from_chunk(
     *,
     high_impact_opening: bool = False,
     scroll_stop_opening: bool = False,
-    opening_anchor: bool = False,
     retention_reset: bool = False,
     visual_brief: str | None = None,
     visual_relation: str = "contextual",
     image_source_mode: str = "generated",
     image_source_path: str | None = None,
-    reserve_caption_safe_area: bool = True,
 ) -> Scene:
     subject, environment, function = ROLE_DIRECTIONS[section.role]
     if visual_brief:
@@ -307,7 +211,7 @@ def _scene_from_chunk(
         subject = section.visual_direction
     if section.retention_goal:
         function = section.retention_goal
-    shots = SHOTS if reserve_caption_safe_area else UNRESTRICTED_SHOTS
+    shots = UNRESTRICTED_SHOTS
     shot = shots[index % len(shots)]
     emotional_intent = {
         "opening": "silêncio, pergunta e acolhimento",
@@ -321,19 +225,9 @@ def _scene_from_chunk(
             f"{subject}. Quadro inicial de interrupção do scroll: um sujeito ou objeto dominante, "
             "uma ação observável já em curso e uma tensão concreta coerente com o hook; emoção "
             "legível imediatamente e um único foco visual, sem acolhimento genérico ou pose parada"
-            + (
-                ". Esta é também a imagem-âncora e base da capa: acabamento especialmente "
-                "caprichado, limpo e intencional"
-                if opening_anchor
-                else ""
-            )
         )
         shot = (
-            "composição vertical de alto impacto, plano médio ou close, assunto dominante e ação "
-            "concreta legível em tela pequena, ocupando 45% a 65% do quadro, com luz direcional "
-            "forte e espaço negativo real, preservando organicamente a área das legendas"
-            if reserve_caption_safe_area
-            else "plano médio ou close de alto impacto, sujeito e ação dominantes, gesto ou emoção "
+            "plano médio ou close de alto impacto, sujeito e ação dominantes, gesto ou emoção "
             "imediatamente legível, tensão visual simples e enquadramento livre sem área vazia "
             "decorativa obrigatória"
         )
@@ -341,45 +235,22 @@ def _scene_from_chunk(
             "tensão e curiosidade imediatas, emoção clara e reverência; leitura visual em menos "
             "de um segundo, sem choque gratuito"
         )
-        anchor_function = "imagem-âncora da abertura; " if opening_anchor else ""
-        function = (
-            f"{anchor_function}interromper o scroll com ação concreta alinhada ao hook; {function}"
-        )
+        function = f"abrir com ação concreta alinhada ao hook; {function}"
     elif high_impact_opening:
-        is_vertical = canvas_height > canvas_width
-        role = "imagem-âncora e base da capa" if opening_anchor else "continuação visual dinâmica"
         subject = (
-            f"{subject}. {role} da abertura do vídeo: um único personagem, objeto ou símbolo "
+            f"{subject}. Abertura do vídeo: um único personagem, objeto ou símbolo "
             "dominante, fiel ao trecho narrado neste quadro, com gesto ou emoção "
             "imediatamente legível; acabamento especialmente caprichado, limpo e intencional"
         )
         shot = (
-            (
-                "composição vertical de alto impacto, plano médio ou close, assunto ocupando "
-                "45% a 65% do quadro, conflito visual simples, luz direcional forte e espaço "
-                "negativo limpo no terço superior, sem bloquear a faixa central das legendas"
-            )
-            if opening_anchor and is_vertical
-            else (
-                "composição horizontal de alto impacto, plano médio ou close, assunto dominante "
-                "no primeiro ou segundo terço, conflito visual simples, luz direcional forte e "
-                "espaço negativo real para a futura thumbnail"
-            )
-            if opening_anchor
-            else (
-                f"{SHOTS[index % len(SHOTS)]}, variação clara de escala e ângulo em relação ao "
-                "primeiro quadro, ação ou símbolo diferente e leitura imediata"
-            )
+            f"{UNRESTRICTED_SHOTS[index % len(UNRESTRICTED_SHOTS)]}, variação clara de escala e "
+            "ângulo em relação ao primeiro quadro, ação ou símbolo diferente e leitura imediata"
         )
         emotional_intent = (
             "tensão e curiosidade imediatas, emoção clara e reverência; leitura visual em menos "
             "de um segundo, sem choque gratuito"
         )
-        function = (
-            f"imagem-âncora da abertura e base reutilizável da capa; {function}"
-            if opening_anchor
-            else f"mudança visual dentro da abertura para sustentar retenção; {function}"
-        )
+        function = f"mudança visual dentro da abertura para sustentar retenção; {function}"
     elif retention_reset:
         shot = (
             f"{shots[(index + 2) % len(shots)]}, mudança deliberada de escala, direção de olhar "
@@ -401,7 +272,6 @@ def _scene_from_chunk(
         emotion=emotional_intent,
         canvas_width=canvas_width,
         canvas_height=canvas_height,
-        reserve_caption_safe_area=reserve_caption_safe_area,
     )
     scene_id = f"scene-{index + 1:03d}"
     narration_block_id = f"audio-block-{index + 1:03d}"
@@ -450,6 +320,11 @@ def build_scenes(
     force: bool = False,
     skip_approvals: bool = False,
 ) -> SceneManifest:
+    if target_scene_seconds is not None:
+        raise ValueError(
+            "A divisão manual por segundos foi removida; as cenas seguem blocos contíguos "
+            "planejados junto do roteiro."
+        )
     if not skip_approvals:
         require_approval(layout, "briefing")
         require_approval(layout, "script")
@@ -468,19 +343,21 @@ def build_scenes(
         and project.config.images.opening_visual_standard == "scroll_stop_concrete_v1"
     )
     narration_block_planning = (
-        project.video_format == "short"
-        and (
-            project.config.images.scene_planning_standard == "narration_block_visual_v1"
-            or compact_visual_planning
-        )
-        and target_scene_seconds is None
+        project.config.images.scene_planning_standard == "narration_block_visual_v1"
+        or compact_visual_planning
     )
     shorts_strategy = (
         read_model(layout.shorts_script_strategy, ShortsScriptStrategy)
         if project.video_format == "short" and layout.shorts_script_strategy.is_file()
         else None
     )
-    visual_strategy = shorts_strategy if narration_block_planning else None
+    visual_strategy = (
+        shorts_strategy
+        if project.video_format == "short"
+        else script.long_form_strategy
+        if narration_block_planning
+        else None
+    )
     opening_visual_contract = (
         shorts_strategy.creative_direction.opening_visual_contract
         if shorts_strategy is not None and shorts_strategy.creative_direction is not None
@@ -490,9 +367,7 @@ def build_scenes(
         project.config.images.opening_visual_standard == "scroll_stop_concrete_v1"
     )
     stable_inputs = {
-        "algorithm": (
-            SCENE_ALGORITHM_VERSION if scroll_stop_contract else LEGACY_SCENE_ALGORITHM_VERSION
-        ),
+        "algorithm": SCENE_ALGORITHM_VERSION,
         "script": script,
         "briefing": briefing,
         "style": style,
@@ -504,7 +379,6 @@ def build_scenes(
         "spoken_reference_image_mode": (project.config.images.spoken_reference_image_mode),
         "spoken_reference_image_path": (project.config.images.spoken_reference_image_path),
         "visual_scenes": visual_strategy.visual_scenes if visual_strategy else None,
-        "target_scene_seconds": target_scene_seconds,
         "short_verse_visual_change_seconds": (
             project.config.shorts_script.verse_visual_change_seconds
             if project.video_format == "short"
@@ -524,12 +398,10 @@ def build_scenes(
         scenes: list[Scene] = []
         contract_beats = {beat.section_id: beat for beat in contract.beats}
         section_by_id = {section.section_id: section for section in script.sections}
-        reserve_caption_safe_area = (
-            project.config.images.composition_safety_mode == "caption_safe_area_v1"
-        )
         fixed_reference_section_id = (
             visual_strategy.cinematic_devotional.reference_section_id
-            if visual_strategy is not None
+            if project.video_format == "short"
+            and visual_strategy is not None
             and visual_strategy.cinematic_devotional is not None
             and project.config.images.spoken_reference_image_mode == "fixed_profile_asset_v1"
             else None
@@ -549,13 +421,6 @@ def build_scenes(
                     len(scenes) == 0
                     and section.role == "opening"
                     and project.config.images.opening_visual_standard == "scroll_stop_concrete_v1"
-                )
-                opening_anchor = (
-                    scroll_stop_opening
-                    and project.config.youtube_growth.thumbnail_generation_mode
-                    == "integrated_imagegen_v1"
-                    and project.config.youtube_growth.thumbnail_reference_mode
-                    == "opening_scene_edit_v1"
                 )
                 planned_visual_brief = (
                     FIXED_SPOKEN_REFERENCE_VISUAL_BRIEF
@@ -579,7 +444,6 @@ def build_scenes(
                         render_config.height,
                         retention_reset=retention_reset,
                         scroll_stop_opening=scroll_stop_opening,
-                        opening_anchor=opening_anchor,
                         visual_brief=planned_visual_brief,
                         visual_relation=(
                             "contextual" if uses_fixed_reference_image else planned.visual_relation
@@ -592,78 +456,12 @@ def build_scenes(
                             if uses_fixed_reference_image
                             else None
                         ),
-                        reserve_caption_safe_area=reserve_caption_safe_area,
                     )
                 )
         else:
-            for section_index, section in enumerate(script.sections):
-                high_impact_opening = (
-                    section_index == 0
-                    and section.role == "opening"
-                    and (
-                        project.video_format == "short"
-                        or project.config.long_form_script.narrative_standard
-                        in {"retention_story_long_v1", "creative_retention_long_v2"}
-                    )
-                )
-                retention_reset = "reengagement" in contract_beats[section.section_id].functions
-                section_seconds = _scene_seconds_for_section(
-                    contract,
-                    section,
-                    explicit_seconds=target_scene_seconds,
-                )
-                section_target_words = (
-                    max(
-                        8,
-                        round(
-                            145
-                            / 60
-                            * (
-                                project.config.shorts_script.verse_visual_change_seconds
-                                if project.video_format == "short"
-                                else section_seconds
-                            )
-                        ),
-                    )
-                    if high_impact_opening
-                    else max(8, round(145 / 60 * section_seconds))
-                )
-                chunks = _split_long_text(
-                    section.narration,
-                    section_target_words,
-                    allow_clause_breaks=high_impact_opening,
-                )
-                for chunk_index, chunk in enumerate(chunks):
-                    scroll_stop_opening = (
-                        high_impact_opening
-                        and chunk_index == 0
-                        and project.config.images.opening_visual_standard
-                        == "scroll_stop_concrete_v1"
-                    )
-                    opening_visual_brief = None
-                    if scroll_stop_opening and opening_visual_contract is not None:
-                        opening_visual_brief = _opening_contract_visual_brief(
-                            None,
-                            opening_visual_contract,
-                        )
-                    scenes.append(
-                        _scene_from_chunk(
-                            section,
-                            chunk,
-                            len(scenes),
-                            style,
-                            palette,
-                            recurring,
-                            render_config.width,
-                            render_config.height,
-                            high_impact_opening=high_impact_opening,
-                            scroll_stop_opening=scroll_stop_opening,
-                            opening_anchor=high_impact_opening and chunk_index == 0,
-                            retention_reset=retention_reset,
-                            visual_brief=opening_visual_brief,
-                            reserve_caption_safe_area=reserve_caption_safe_area,
-                        )
-                    )
+            raise ValueError(
+                "O roteiro precisa fornecer visual_scenes no padrão narration_block_visual_v1."
+            )
         if not scenes:
             raise ValueError("O roteiro não produziu nenhuma cena.")
         if (

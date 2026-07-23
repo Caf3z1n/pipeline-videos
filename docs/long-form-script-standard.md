@@ -37,6 +37,35 @@ Aplicação prática só é obrigatória em `devotional_application` e `pastoral
 Callback é sempre opcional no v2. Os três arquétipos antigos não são preenchidos no novo
 contrato; a estrutura vem do `creative_mode`.
 
+## Voz autoral em todos os modos
+
+Todo roteiro longo usa `human_authorial_voice_v1`, inclusive curiosidades, explicações, reflexões,
+investigações e formatos legados quando forem reprocessados. A locução não pode comentar o método
+de leitura com frases como “o relato registra”, “a sequência é compacta” ou “não podemos afirmar”,
+nem construir valor por listas do que não aconteceu ou pela fórmula `não A nem B, mas C`. O
+validador exige que `C` seja declarado diretamente e examina apenas a voz autoral: citações
+bíblicas literais permanecem intactas.
+
+## Storytelling bíblico de personagem
+
+`biblical_character_storytelling_v1` é o padrão dos novos pedidos de história de personagem. Ele
+usa `creative_mode=biblical_storytelling` e postura factual, mas factualidade não significa narrar
+uma auditoria do texto. A voz acompanha a pessoa por uma sequência compreensível: mundo inicial,
+encontro ou virada, escolha, consequência, caminho posterior documentado e último lugar bíblico
+conhecido.
+
+- a maior parte das seções de desenvolvimento usa `biblical_narrative`;
+- beats de `analysis` e `comparison` são inválidos nesse perfil;
+- passagens paralelas só entram quando acrescentam uma etapa ou consequência, não para comparar
+  redações do mesmo momento;
+- citações são incorporadas à história e seguidas imediatamente por ação ou consequência;
+- detalhes sem fonte são omitidos silenciosamente; a revisão registra a cautela fora da locução;
+- além do filtro autoral global, títulos de seção metalinguísticos e beats de análise/comparação
+  também são bloqueados neste perfil narrativo.
+
+`character_portrait` continua disponível por seleção explícita quando o objetivo for análise de
+traços, limites ou contrastes, e não uma biografia bíblica breve.
+
 ## Hooks longos
 
 Quando o tema pede hook, a família escolhida precisa corresponder à fala real. As formas
@@ -105,15 +134,16 @@ crescimento e validação. O perfil visual é `long_creative_v2`.
 - comparação e investigação temática exigem ao menos duas fontes bíblicas verificadas;
 - incerteza textual ou histórica é preservada, não preenchida por imaginação.
 
-## Título, thumbnail e direção visual
+## Título, seleção de imagem e direção visual
 
-Vídeos novos usam `Enfoque concreto | Passagem` e geram um título e uma thumbnail. O enfoque
+Vídeos novos usam `Enfoque concreto | Passagem` e geram um único título. O enfoque
 pode ser fato, personagem, curiosidade, pergunta, comparação, dilema, tese ou promessa prática.
 Não force tensão motivacional em um vídeo factual ou contemplativo.
 
-A thumbnail usa `biblical_cinematic_landscape_v1`: horizontal 16:9, baseada no tema central, sem
-imagem de referência, texto ou marcação editorial. A direção visual muda ação, escala, ângulo,
-evidência ou consequência nos reengajamentos e representa um único momento por imagem.
+Depois da produção, o usuário escolhe manualmente uma imagem do próprio vídeo para usar como capa.
+O pipeline não cria conceito, prompt, design, arquivo separado nem chamada de `imagegen` para essa
+seleção. A direção visual muda ação, escala, ângulo, evidência ou consequência nos reengajamentos e
+representa um único momento por imagem. O mesmo contrato visual vale para todo projeto carregado.
 
 ## Critérios de aceitação
 

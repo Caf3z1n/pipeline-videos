@@ -108,6 +108,10 @@ class ProjectLayout:
         return self.root / "script" / "narration.txt"
 
     @property
+    def approved_script_lock(self) -> Path:
+        return self.root / "script" / "approved-lock.json"
+
+    @property
     def biblical_review(self) -> Path:
         return self.root / "reviews" / "biblical-consistency.json"
 
@@ -228,10 +232,6 @@ class ProjectLayout:
         return self.root / "youtube" / "description.md"
 
     @property
-    def thumbnail_prompt(self) -> Path:
-        return self.root / "youtube" / "thumbnail-prompt.json"
-
-    @property
     def growth_queue(self) -> Path:
         return self.root / "youtube" / "growth-queue.json"
 
@@ -260,16 +260,8 @@ class ProjectLayout:
         return self.root / "youtube" / "growth-warnings.json"
 
     @property
-    def thumbnail(self) -> Path:
-        return self.root / "youtube" / "thumbnail.png"
-
-    @property
     def publication(self) -> Path:
         return self.root / "youtube" / "publication.json"
-
-    @property
-    def publication_thumbnail(self) -> Path:
-        return self.root / "youtube" / "publication-thumbnail.jpg"
 
     @property
     def publication_archive(self) -> Path:

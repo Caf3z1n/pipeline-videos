@@ -80,6 +80,30 @@ def test_ten_minute_video_requires_eight_to_twelve_verified_citations() -> None:
         )
 
 
+def test_scripture_citation_preserves_nested_curly_quotes() -> None:
+    excerpt = (
+        "Jesus lhes respondeu: “Não escolhi eu a vocês, os doze, e um de vocês é um diabo?” "
+        "Ora, ele falava de Judas, filho de Simão Iscariotes."
+    )
+    script = ScriptDocument(
+        title="Judas",
+        sections=[
+            ScriptSection(
+                section_id="scripture",
+                role="biblical_narrative",
+                title="Citação",
+                narration=f"Em João, capítulo 6, versículo 70, lemos: “{excerpt}”",
+                biblical_basis=["João 6:70"],
+                claim_classification=["biblical_text"],
+            )
+        ],
+    )
+
+    citations = scripture_citations(script)
+
+    assert [citation.quote for citation in citations] == [excerpt]
+
+
 @pytest.mark.parametrize(
     ("replacement", "message"),
     [
@@ -104,4 +128,26 @@ def test_narration_rejects_english_jargon_generic_text_and_unquoted_response(
             duration_seconds=600,
             policy=_policy(),
             sources=sources,
+        )
+
+
+def test_authorial_style_is_enforced_by_the_shared_editorial_policy() -> None:
+    script = ScriptDocument(
+        title="Teste",
+        sections=[
+            ScriptSection(
+                section_id="section-001",
+                role="opening",
+                title="Abertura",
+                narration="O relato registra uma mudança repentina.",
+                claim_classification=["verified_context"],
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="metalinguagem"):
+        validate_script_editorial_policy(
+            script,
+            duration_seconds=60,
+            policy=_policy(),
         )

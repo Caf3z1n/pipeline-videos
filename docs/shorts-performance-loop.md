@@ -148,7 +148,7 @@ visual, o planejador recebe estas exigências:
 - imagem e fala abrem a mesma pergunta que a fala de Jesus resolve.
 
 No perfil `unrestricted_scene_v1`, isso não recria área segura artificial para legenda, bordas ou
-thumbnail. O enquadramento permanece livre; apenas deixa de cair no plano geral contemplativo
+arte de capa. O enquadramento permanece livre; apenas deixa de cair no plano geral contemplativo
 genérico que enfraquecia o primeiro quadro pintado.
 
 Na seleção compacta, o pipeline também calcula um prior reproduzível — clareza, concretude e

@@ -8,6 +8,7 @@ import pytest
 from pipeline_videos.editorial import scripture_citations, validate_script_editorial_policy
 from pipeline_videos.long_form_script import (
     minimum_long_form_reengagements,
+    validate_biblical_storytelling_voice,
     validate_long_form_retention_script,
 )
 from pipeline_videos.models import (
@@ -18,6 +19,7 @@ from pipeline_videos.models import (
     LongFormScriptConfig,
     LongFormScriptStrategy,
     LongFormScriptureAnchor,
+    NarrationVisualScene,
     ProjectConfig,
     ScriptDocument,
     ScriptSection,
@@ -36,6 +38,24 @@ def _pad(text: str, target_words: int, *, ending: str = "") -> str:
     while len(tokenize_words(f"{body} {ending}")) < target_words:
         body += " A narrativa avança com clareza e propósito."
     return f"{body} {ending}".strip()
+
+
+def _sync_visual_scenes(document: ScriptDocument) -> None:
+    strategy = document.long_form_strategy
+    assert strategy is not None
+    document.long_form_strategy = strategy.model_copy(
+        update={
+            "visual_scenes": [
+                NarrationVisualScene(
+                    section_id=section.section_id,
+                    narration=section.narration,
+                    scene_description=f"Ação concreta atualizada para {section.section_id}.",
+                    visual_relation="contextual",
+                )
+                for section in document.sections
+            ]
+        }
+    )
 
 
 def _long_script_fixture() -> tuple[
@@ -205,6 +225,15 @@ def _long_script_fixture() -> tuple[
             spoken_text=cta,
             payoff_connection="Continuar acompanhando leituras bíblicas narradas com clareza.",
         ),
+        visual_scenes=[
+            NarrationVisualScene(
+                section_id=section.section_id,
+                narration=section.narration,
+                scene_description=f"Ação concreta do movimento {index}.",
+                visual_relation="contextual",
+            )
+            for index, section in enumerate(sections, start=1)
+        ],
         source_ids=source_ids,
     )
     document = ScriptDocument(
@@ -308,6 +337,15 @@ def _creative_long_fixture() -> tuple[
         resolution=legacy.payoff,
         viewer_takeaway=viewer_outcome,
         engagement=legacy.engagement,
+        visual_scenes=[
+            NarrationVisualScene(
+                section_id=section.section_id,
+                narration=section.narration,
+                scene_description=f"Cena concreta do movimento {index}.",
+                visual_relation="contextual",
+            )
+            for index, section in enumerate(sections, start=1)
+        ],
         source_ids=legacy.source_ids,
     )
     creative_document = document.model_copy(
@@ -394,6 +432,7 @@ def test_long_form_rejects_clustered_scripture_citations() -> None:
             ]
         }
     )
+    _sync_visual_scenes(document)
 
     with pytest.raises(ValueError, match="agrupadas"):
         validate_long_form_retention_script(
@@ -436,6 +475,7 @@ def test_long_form_rejects_sparse_reengagement_and_multiple_cta_actions() -> Non
             )
         }
     )
+    _sync_visual_scenes(multiple)
     with pytest.raises(ValueError, match="exatamente uma ação"):
         validate_long_form_retention_script(
             multiple,
@@ -478,7 +518,7 @@ def test_long_form_strategy_drives_creative_contract_and_visual_resets(tmp_path)
     assert contract.engagement_action == "subscribe"
     assert sum("reengagement" in beat.functions for beat in contract.beats) == 2
     assert len(contract.scripture_citation_timestamps) == 3
-    assert "composição horizontal de alto impacto" in scenes.scenes[0].shot
+    assert "plano médio ou close de alto impacto" in scenes.scenes[0].shot
     assert any(
         scene.section_id == "section-003" and "reengajamento visual" in scene.narrative_function
         for scene in scenes.scenes
@@ -551,3 +591,109 @@ def test_creative_long_accepts_hookless_explainer_without_application(tmp_path) 
     assert contract.hook_family == "none"
     assert contract.pacing.profile_id == "long_creative_v2"
     assert "resolution" in {function for beat in contract.beats for function in beat.functions}
+
+
+def _as_biblical_storytelling(document: ScriptDocument) -> ScriptDocument:
+    converted = document.model_copy(deep=True)
+    assert converted.long_form_strategy is not None
+    sections = []
+    for index, section in enumerate(converted.sections):
+        role = section.role if index in {0, len(converted.sections) - 1} else "biblical_narrative"
+        sections.append(
+            section.model_copy(
+                update={
+                    "role": role,
+                    "title": f"Acontecimento {index + 1}",
+                    "narration": (
+                        "José atravessou um novo acontecimento, tomou uma decisão concreta e "
+                        f"seguiu adiante no movimento {index + 1}."
+                    ),
+                }
+            )
+        )
+    beats = [
+        beat.model_copy(
+            update={
+                "functions": [
+                    "progression" if function in {"analysis", "comparison"} else function
+                    for function in beat.functions
+                ]
+            }
+        )
+        for beat in converted.long_form_strategy.progression
+    ]
+    converted.sections = sections
+    converted.long_form_strategy = converted.long_form_strategy.model_copy(
+        update={
+            "creative_mode": "biblical_storytelling",
+            "interpretive_stance": "factual",
+            "progression": beats,
+        }
+    )
+    return converted
+
+
+def test_storytelling_profile_rejects_ai_like_meta_analysis() -> None:
+    document, _, _, _ = _creative_long_fixture()
+    storytelling = _as_biblical_storytelling(document)
+    storytelling.sections[
+        1
+    ].narration = "O retrato começa no lugar de trabalho. O relato não explica suas emoções."
+
+    with pytest.raises(ValueError, match="metalinguagem de análise"):
+        validate_biblical_storytelling_voice(storytelling)
+
+
+def test_storytelling_profile_accepts_action_driven_human_narration() -> None:
+    document, _, _, _ = _creative_long_fixture()
+    storytelling = _as_biblical_storytelling(document)
+    storytelling.sections[1].narration = (
+        "José entrou na sala onde os irmãos esperavam. Eles ainda não o reconheceram, mas ele "
+        "já sabia exatamente quem estava diante dele."
+    )
+
+    validate_biblical_storytelling_voice(storytelling)
+
+
+@pytest.mark.parametrize(
+    "narration",
+    [
+        (
+            "Mateus estava na coletoria, sem preparação anterior, explicação emocional ou "
+            "qualquer aviso."
+        ),
+        "A cena não descreve seus pensamentos, nem explica seus medos.",
+        "Não fez um discurso longo. Jesus apenas disse: Siga-me.",
+        "Jesus não fez um discurso longo, mas o chamou imediatamente.",
+    ],
+)
+def test_storytelling_profile_rejects_negative_scaffolding(narration: str) -> None:
+    document, _, _, _ = _creative_long_fixture()
+    storytelling = _as_biblical_storytelling(document)
+    storytelling.sections[1].narration = narration
+
+    with pytest.raises(ValueError, match="negação retórica|lista de ausências"):
+        validate_biblical_storytelling_voice(storytelling)
+
+
+def test_storytelling_profile_ignores_negation_inside_literal_scripture() -> None:
+    document, _, _, _ = _creative_long_fixture()
+    storytelling = _as_biblical_storytelling(document)
+    storytelling.sections[1].narration = (
+        "Jesus chamou Mateus diante da coletoria. Em Mateus, capítulo 9, versículo 13, lemos: "
+        "“Eu não vim para chamar os justos, mas os pecadores.” Depois, Jesus entrou na casa e "
+        "se sentou à mesa."
+    )
+
+    validate_biblical_storytelling_voice(storytelling)
+
+
+def test_storytelling_profile_accepts_positive_concrete_action() -> None:
+    document, _, _, _ = _creative_long_fixture()
+    storytelling = _as_biblical_storytelling(document)
+    storytelling.sections[1].narration = (
+        "Mateus se levantou, deixou a coletoria para trás e seguiu Jesus. Pouco depois, recebeu "
+        "Jesus e outros convidados à mesa."
+    )
+
+    validate_biblical_storytelling_voice(storytelling)

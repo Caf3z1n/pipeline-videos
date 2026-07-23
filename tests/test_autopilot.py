@@ -116,10 +116,7 @@ def test_noncompact_short_coordinator_uses_script_specialist(tmp_path) -> None:
     job = prepare_local_coordinator_job(layout)
 
     assert job["external_roles"]["shorts_script_specialist"]["reasoning_effort"] == "high"
-    assert job["external_roles"]["biblical_reviewer"]["reasoning_effort"] == "high"
-    assert job["external_roles"]["biblical_reviewer"]["queue"].endswith(
-        "reviews/shorts-review-queue.json"
-    )
+    assert "biblical_reviewer" not in job["external_roles"]
     assert "shorts_visual_planner" not in job["external_roles"]
 
 
@@ -142,7 +139,7 @@ def test_noncompact_main_agent_short_does_not_declare_external_script_specialist
 
     assert "shorts_script_specialist" not in job["external_roles"]
     assert "shorts_visual_planner" not in job["external_roles"]
-    assert job["external_roles"]["biblical_reviewer"]["reasoning_effort"] == "high"
+    assert "biblical_reviewer" not in job["external_roles"]
 
 
 def test_autopilot_cli_reports_compact_external_pause(tmp_path, monkeypatch) -> None:

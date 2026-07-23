@@ -33,7 +33,7 @@ evita os modos usados recentemente e registra a escolha no índice compartilhado
 
 | Modo | Entrega principal | Postura | Hook longo padrão |
 | --- | --- | --- | --- |
-| `biblical_storytelling` | narra fatos, decisões, viradas e consequências bíblicas | factual | opcional |
+| `biblical_storytelling` | conta uma história humana por cenas, escolhas e consequências | factual | opcional |
 | `character_portrait` | acompanha escolhas, limites e mudanças de um personagem | analítica | opcional |
 | `passage_explainer` | explica progressão, relações e limites de uma passagem | expositiva | opcional |
 | `biblical_curiosity` | revela um detalhe verificável que muda a leitura | expositiva | obrigatório |
@@ -53,6 +53,17 @@ evita os modos usados recentemente e registra a escolha no índice compartilhado
 Os modos não são templates de texto. Cada um fornece uma estrutura sugerida, mas o roteirista
 pode mudar a ordem, combinar movimentos compatíveis e omitir pergunta, aplicação ou callback
 quando esses elementos não servirem ao tema.
+
+## Voz autoral global
+
+Todo modo criativo e todo formato usa `human_authorial_voice_v1`. A locução entrega diretamente o
+fato, a ação, a dúvida ou a explicação e nunca comenta o próprio método de leitura. Fórmulas como
+“o relato registra”, “o relato não explica”, “a sequência é compacta”, “o retrato começa”, “a
+passagem paralela acrescenta”, “comparar é observar” e “não podemos afirmar” são bloqueadas antes
+do import. Também são recusadas listas de ausência e negações usadas apenas como andaime para
+valorizar a frase seguinte. Isso inclui a fórmula `não A nem B, mas C`: a locução deve declarar
+`C` diretamente. Citações bíblicas literais ficam protegidas, assim como hooks negativos legítimos
+previstos pelo contrato, por exemplo `Nunca faça [X].`.
 
 ## Postura e evidência
 
@@ -126,16 +137,23 @@ menos 20 combinações elegíveis para cada duração de 15 a 20 segundos. Os se
 desenvolvimento longo. O seletor respeita `recommended_formats`, portanto uma âncora exclusiva de
 vídeo longo nunca é usada para preencher um Short.
 
-O segmento `narrative_story` acrescenta 81 histórias, 88 personagens ou grupos indexados e 324
+O segmento `narrative_story` acrescenta 81 histórias, 88 personagens ou grupos indexados e 325
 excertos verificados. Ele só é elegível quando há um personagem solicitado explicitamente. Cada
 pacote inclui uma âncora, o intervalo completo do relato e passagens relacionadas classificadas por
-função narrativa. Um pedido desse tipo usa `character_portrait` por padrão e nunca invade o perfil
-compacto de 15 a 44 segundos. Fragmentos narrativos, portanto, ficam disponíveis para histórias como
-a mulher cananeia, Judas, Pedro ou José, mas permanecem fora dos devocionais compactos.
+função narrativa. Um pedido desse tipo usa `biblical_storytelling` e o perfil
+`biblical_character_storytelling_v1` por padrão; `character_portrait` é opt-in para pedidos de
+análise. O storytelling percorre a linha temporal disponível, mantém a maior parte do
+desenvolvimento em `biblical_narrative` e não aceita beats de `analysis` ou `comparison`. A revisão
+preserva limites e lacunas silenciosamente. Além do filtro autoral global, esse perfil exige que a
+maior parte do desenvolvimento avance por acontecimentos e rejeita beats de análise ou comparação.
+
+O perfil nunca invade o compacto de 15 a 44 segundos. Fragmentos narrativos, portanto, ficam
+disponíveis para histórias como a mulher cananeia, Judas, Pedro ou José, mas permanecem fora dos
+devocionais compactos.
 
 ## Embalagem editorial
 
 Projetos novos usam `creative_pipe_passage_v3`: `Enfoque concreto | Passagem`. O enfoque antes da
 barra pode ser fato, personagem, curiosidade, pergunta, comparação, dilema, tese interpretativa ou
-promessa prática. Título e thumbnail continuam complementares, mas não precisam simular tensão
+promessa prática. Título e abertura visual continuam complementares, mas não precisam simular tensão
 motivacional quando o modo escolhido é factual, explicativo ou contemplativo.

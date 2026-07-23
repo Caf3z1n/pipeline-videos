@@ -529,7 +529,6 @@ def _write_publication_fingerprint(layout, *, video_id: str = "youtube-short-01"
             ),
             video=asset,
             metadata=asset,
-            thumbnail=YouTubePublicationAsset(status="skipped", updated_at=now),
             captions=asset,
             created_at=now,
             updated_at=now,

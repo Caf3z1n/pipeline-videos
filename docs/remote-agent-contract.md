@@ -33,7 +33,7 @@ especialistas independentes.
 - apps, browser, memories, goals e busca web desativados;
 - somente os arquivos declarados em `allowed_inputs` podem ser lidos em cada checkpoint;
 - agentes nunca leem segredos, publicam, agendam, aprovam ou alteram faturamento;
-- filas antigas, modos Light e fallbacks de thumbnail local não são aceitos em projetos novos.
+- filas antigas e modos Light não são aceitos em projetos novos.
 
 ## Validação e retomada
 

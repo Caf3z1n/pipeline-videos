@@ -1569,7 +1569,7 @@ def create_auto_video(
                 select_retention_archetype(candidate, usage) if video_format == "short" else None
             )
             creative_mode = creative_mode_override or (
-                "character_portrait"
+                "biblical_storytelling"
                 if requested_character
                 else select_compact_devotional_mode(usage)
                 if compact_profile

@@ -36,6 +36,7 @@ from pipeline_videos.models import (
     SourceLibrary,
     StageStatus,
 )
+from pipeline_videos.narration_style import validate_authorial_narration_style
 from pipeline_videos.review import save_biblical_review
 from pipeline_videos.script import save_script
 from pipeline_videos.state import complete_stage, invalidate, start_stage, wait_stage
@@ -52,7 +53,7 @@ from pipeline_videos.utils import (
 LEGACY_SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION = "5.2"
 SHORTS_SCRIPT_QUEUE_SCHEMA_VERSION = "5.4"
 LEGACY_SHORTS_SCRIPT_ALGORITHM_VERSION = "6.2"
-SHORTS_SCRIPT_ALGORITHM_VERSION = "6.4"
+SHORTS_SCRIPT_ALGORITHM_VERSION = "6.5"
 LEGACY_SCRIPTURE_BOUNDARY_PHRASE = "Até aqui, o texto bíblico."
 
 
@@ -386,7 +387,6 @@ def _stable_inputs(
             "composition_safety_mode": project.config.images.composition_safety_mode,
             "spoken_reference_image_mode": (project.config.images.spoken_reference_image_mode),
             "spoken_reference_image_path": (project.config.images.spoken_reference_image_path),
-            "thumbnail_generation_mode": (project.config.youtube_growth.thumbnail_generation_mode),
         }
         payload["confirmed_performance_advisories"] = performance_advisories or []
     return payload
@@ -1742,6 +1742,29 @@ def prepare_shorts_script_queue(
                 "não os copie de forma mecânica."
             ),
             (
+                "A voz autoral é sempre Jesus em primeira pessoa. Escreva como Jesus falando "
+                "diretamente ao espectador ou contando o acontecimento que viveu; não use um "
+                "narrador externo descrevendo Jesus em terceira pessoa."
+            ),
+            (
+                "Não apresente a dramatização autoral como Escritura. Somente o excerpt "
+                "verificado, entre aspas e ligado à fonte, é citação bíblica literal."
+            ),
+            (
+                "Toda locução autoral segue human_authorial_voice_v1. Narre diretamente o fato, "
+                "a ação, a dúvida ou a explicação; nunca descreva o próprio método de leitura. "
+                "São proibidas fórmulas como 'o relato registra', 'o relato não explica', 'a "
+                "sequência é compacta', 'o retrato começa', 'a passagem paralela acrescenta', "
+                "'comparar é observar' e equivalentes."
+            ),
+            (
+                "Não valorize uma frase dizendo antes o que alguém não fez e não defina uma "
+                "cena por listas de ausência como 'afirmação, sem A, B ou C'. Hooks negativos "
+                "legítimos, como 'Nunca faça X', continuam permitidos; a proibição é contra "
+                "andaimes retóricos artificiais. Também não use a fórmula 'não A nem B, mas C'; "
+                "declare C diretamente. Citações bíblicas literais permanecem intactas."
+            ),
+            (
                 (
                     (
                         "Use obrigatoriamente creative_retention_v3 e o creative_mode do briefing. "
@@ -1992,8 +2015,7 @@ def prepare_shorts_script_queue(
                 "Planeje a narração e as direções visuais para produzir "
                 f"{_target_scene_instruction(config)}: "
                 "uma ação concreta por imagem e mudança visual no meio. Callback final é "
-                "obrigatório apenas no contrato v2 legado. A política de thumbnail é definida "
-                "separadamente pela configuração visual do projeto."
+                "obrigatório apenas no contrato v2 legado."
                 if is_retention_v2 or is_creative_v3
                 else "Preserve o perfil visual e o ritmo configurados no projeto."
             ),
@@ -2010,7 +2032,7 @@ def prepare_shorts_script_queue(
                 else "Na primeira seção, descreva em visual_direction uma única imagem-âncora "
                 "vertical, fiel ao gancho e visualmente forte: assunto dominante, emoção ou "
                 "gesto legível, conflito simples, luz direcional e espaço negativo no terço "
-                "superior. Não escreva texto de capa dentro da imagem e não use choque gratuito."
+                "superior. Não escreva texto dentro da imagem e não use choque gratuito."
             ),
             *(
                 [
@@ -2206,7 +2228,6 @@ def prepare_shorts_script_queue(
             "visual_standard_id": project.config.images.visual_standard_id,
             "composition_safety_mode": project.config.images.composition_safety_mode,
             "allowed_relations": ["literal", "contextual", "symbolic"],
-            "thumbnail_generation_mode": (project.config.youtube_growth.thumbnail_generation_mode),
             "spoken_reference_image": {
                 "mode": project.config.images.spoken_reference_image_mode,
                 "path": project.config.images.spoken_reference_image_path,
@@ -2241,8 +2262,8 @@ def prepare_shorts_script_queue(
                 ),
                 (
                     "Descreva somente o conteúdo da cena; não repita estilo, paleta, proporção, "
-                    "regras de legenda ou thumbnail. O prompt matriz do perfil visual será "
-                    "acrescentado automaticamente depois."
+                    "ou regras de legenda. O prompt matriz do perfil visual será acrescentado "
+                    "automaticamente depois."
                 ),
                 (
                     "Mantenha o bloco de strategy.cinematic_devotional.reference_section_id no "
@@ -3782,6 +3803,19 @@ def _collect_creative_direction_errors(
     return section_by_id, structurally_valid
 
 
+def _hook_exceeds_configured_limit(
+    *,
+    hook: str,
+    hook_max_words: int,
+    briefing: Briefing,
+) -> bool:
+    if briefing.hook_contract == "high_stakes_opening_v1" and _normalized(hook) == _normalized(
+        briefing.opening_hook
+    ):
+        return False
+    return len(tokenize_words(hook)) > hook_max_words
+
+
 def _collect_package_validation_errors(
     layout: ProjectLayout,
     package: ShortsScriptPackage,
@@ -3789,9 +3823,14 @@ def _collect_package_validation_errors(
     errors: list[str] = []
     project = layout.load_manifest()
     config = project.config.shorts_script
+    briefing = read_model(layout.briefing, Briefing)
     script = package.script
     strategy = package.strategy
     sections = script.sections
+    try:
+        validate_authorial_narration_style(script)
+    except ValueError as exc:
+        _add_validation_error(errors, str(exc))
     if not sections or sections[0].role != "opening" or sections[-1].role != "closing":
         _add_validation_error(
             errors, "O roteiro precisa começar com opening e terminar com closing."
@@ -3849,7 +3888,11 @@ def _collect_package_validation_errors(
     hook_words = tokenize_words(strategy.hook)
     if len(hook_words) < config.hook_min_words:
         _add_validation_error(errors, "O gancho está curto demais para o perfil configurado.")
-    if len(hook_words) > config.hook_max_words:
+    if _hook_exceeds_configured_limit(
+        hook=strategy.hook,
+        hook_max_words=config.hook_max_words,
+        briefing=briefing,
+    ):
         _add_validation_error(errors, "O gancho ultrapassa o limite de palavras configurado.")
     if strategy.hook_target_end_seconds > config.hook_target_seconds + 0.5:
         _add_validation_error(errors, "O gancho termina tarde demais para a meta inicial do Short.")
@@ -4896,7 +4939,7 @@ def import_shorts_script_package(
     write_json(layout.shorts_script_queue, completed_queue)
     invalidate(
         layout,
-        stages=("youtube_growth", "metadata", "thumbnail", "render", "validation"),
+        stages=("youtube_growth", "metadata", "render", "validation"),
         approvals=("metadata", "final_render"),
         note="O roteiro especializado de Short foi importado.",
     )

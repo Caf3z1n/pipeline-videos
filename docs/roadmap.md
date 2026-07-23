@@ -10,7 +10,7 @@
 - mock para testes e ElevenLabs para produção;
 - timestamps por palavra, ASS/SRT/VTT;
 - render final/prévia e validação FFprobe;
-- metadados, thumbnail e memória de experimentos.
+- metadados e memória de experimentos.
 - organização datada em vídeos longos/Shorts e especialista de crescimento com staging.
 
 ## Marco 2 — produção assistida
@@ -26,7 +26,7 @@
 
 - OAuth e secrets fora dos projetos;
 - upload inicialmente privado ou não listado;
-- thumbnail, legenda e agendamento como etapas separadas;
+- legenda e agendamento como etapas separadas;
 - resumo final de custo e checklist antes de qualquer publicação;
 - idempotency key para impedir upload duplicado.
 
@@ -36,7 +36,7 @@
 - relacionar métricas aos manifests editoriais e visuais;
 - registrar hipótese, mudança, período, vídeos, resultado e limitações;
 - propor experimentos, não conclusões causais exageradas;
-- comparar temas, abertura, duração, ritmo, título, thumbnail, estilo e frequência;
-- analisar exemplos públicos sem copiar conteúdo, identidade ou thumbnails.
+- comparar temas, abertura, duração, ritmo, título, estilo e frequência;
+- analisar exemplos públicos sem copiar conteúdo ou identidade.
 
 `analytics/experiments.json` já usa um schema compatível com essa evolução.

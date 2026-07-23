@@ -36,7 +36,7 @@ def _create_layout(tmp_path: Path, *, scene_count: int = 2, demo: bool = False) 
     for index in range(1, scene_count + 1):
         scene_id = f"scene-{index:03d}"
         assembled = (
-            "Visual standard: cinematic-family-3d-v1\n"
+            "Visual standard: biblical-midcentury-gouache-v1\n"
             f"PROMPT MONTADO {index}: viajante diante de uma paisagem ampla"
         )
         scenes.append(
@@ -51,8 +51,8 @@ def _create_layout(tmp_path: Path, *, scene_count: int = 2, demo: bool = False) 
                 shot="plano geral",
                 narrative_function="estabelecer o ambiente",
                 prompt=PromptBlocks(
-                    style_profile_id="cinematic-family-3d-animation",
-                    palette_id="noite-azul-dourada",
+                    style_profile_id="biblical-midcentury-gouache",
+                    palette_id="midcentury-devotional-print",
                     continuity=["roupa azul consistente"],
                     scene="viajante no deserto",
                     composition="plano geral cinematográfico",
@@ -67,8 +67,8 @@ def _create_layout(tmp_path: Path, *, scene_count: int = 2, demo: bool = False) 
         layout.scenes,
         SceneManifest(
             script_version=1,
-            style_profile_id="cinematic-family-3d-animation",
-            palette_id="noite-azul-dourada",
+            style_profile_id="biblical-midcentury-gouache",
+            palette_id="midcentury-devotional-print",
             total_estimated_duration_seconds=20 * scene_count,
             scenes=scenes,
         ),
@@ -89,11 +89,11 @@ def test_manifest_and_codex_queue_are_idempotent_and_can_target_one_scene(
     assert layout.images.read_bytes() == manifest_bytes
     assert [item.prompt for item in first.items] == [
         (
-            "Visual standard: cinematic-family-3d-v1\n"
+            "Visual standard: biblical-midcentury-gouache-v1\n"
             "PROMPT MONTADO 1: viajante diante de uma paisagem ampla"
         ),
         (
-            "Visual standard: cinematic-family-3d-v1\n"
+            "Visual standard: biblical-midcentury-gouache-v1\n"
             "PROMPT MONTADO 2: viajante diante de uma paisagem ampla"
         ),
     ]
@@ -112,9 +112,11 @@ def test_manifest_and_codex_queue_are_idempotent_and_can_target_one_scene(
     assert retry_policy["same_prompt_attempts"] == 2
     assert retry_policy["alternative_scene_attempts"] == 1
     assert "apparent_age" in retry_policy["immutable_on_alternative"]
-    assert queue["visual_standard"]["id"] == "cinematic-family-3d-v1"
+    assert queue["visual_standard"]["id"] == "biblical-midcentury-gouache-v1"
     assert queue["visual_standard"]["enforced"] is True
-    assert any("cinematic-family-3d-v1" in instruction for instruction in queue["instructions"])
+    assert any(
+        "biblical-midcentury-gouache-v1" in instruction for instruction in queue["instructions"]
+    )
     assert any("restrições negativas" in instruction for instruction in queue["instructions"])
     assert any(
         "uma única composição contínua" in instruction for instruction in queue["instructions"]
@@ -154,7 +156,9 @@ def test_worker_jobs_deduplicate_common_prompt_without_changing_reconstructed_te
 ) -> None:
     layout = _create_layout(tmp_path, scene_count=4)
     scenes = read_model(layout.scenes, SceneManifest)
-    common = "Visual standard: cinematic-family-3d-v1\n" + ("continuidade premium; " * 20) + "\n"
+    common = (
+        "Visual standard: biblical-midcentury-gouache-v1\n" + ("continuidade premium; " * 20) + "\n"
+    )
     expected: dict[str, str] = {}
     for scene in scenes.scenes:
         prompt = common + f"momento exclusivo da {scene.scene_id}"

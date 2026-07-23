@@ -707,34 +707,6 @@ def _background_music_filter(audio: AudioManifest, config: RenderConfig) -> str:
     )
 
 
-def _short_cover_video_filter(
-    ass_filter: str,
-    config: RenderConfig,
-    cover_input_index: int,
-) -> str:
-    duration = config.short_cover_duration_seconds
-    transition = min(config.short_cover_transition_seconds, duration)
-    cover_filters = [
-        (
-            f"scale={config.width}:{config.height}:"
-            "force_original_aspect_ratio=increase:flags=lanczos"
-        ),
-        f"crop={config.width}:{config.height}",
-        "setsar=1",
-        "format=rgba",
-        "setpts=PTS-STARTPTS",
-    ]
-    if transition > 0:
-        fade_start = max(0.0, duration - transition)
-        cover_filters.append(f"fade=t=out:st={fade_start:.6f}:d={transition:.6f}:alpha=1")
-    return (
-        f"[0:v]{ass_filter}[captioned];"
-        f"[{cover_input_index}:v]{','.join(cover_filters)}[cover];"
-        f"[captioned][cover]overlay=0:0:enable='lt(t,{duration:.6f})':"
-        "eof_action=pass[video_out]"
-    )
-
-
 def _render_final(
     layout: ProjectLayout,
     base_video: Path,
@@ -747,7 +719,6 @@ def _render_final(
     caption_canvas: tuple[int, int] | None = None,
     caption_font_file: Path | None = None,
     background_music: Path | None = None,
-    short_cover: Path | None = None,
 ) -> None:
     destination = destination or layout.final_video
     _require_nonempty_file(base_video, label="Base visual")
@@ -757,8 +728,6 @@ def _render_final(
         _require_nonempty_file(caption_font_file, label="Fonte da legenda")
     if background_music is not None:
         _require_nonempty_file(background_music, label="MÃºsica de fundo")
-    if short_cover is not None:
-        _require_nonempty_file(short_cover, label="Capa inicial do Short")
     if audio.duration <= 0 or audio.sample_rate <= 0:
         raise ValueError("DuraÃ§Ã£o e sample rate da narraÃ§Ã£o devem ser positivos.")
     temp = destination.with_name(destination.stem + ".part.mp4")
@@ -794,58 +763,29 @@ def _render_final(
                 relative_posix(background_music, layout.root),
             ]
         )
-    cover_input_index = 3 if background_music is not None else 2
-    if short_cover is not None:
-        args.extend(
-            [
-                "-loop",
-                "1",
-                "-framerate",
-                str(config.fps),
-                "-i",
-                relative_posix(short_cover, layout.root),
-            ]
-        )
-        filter_graph = _short_cover_video_filter(ass_filter, config, cover_input_index)
-        filter_graph += ";" + (
-            _background_music_filter(audio, config)
-            if background_music is not None
-            else _narration_filter(config)
-        )
+    args.extend(["-map", "0:v:0"])
+    if background_music is not None:
         args.extend(
             [
                 "-filter_complex",
-                filter_graph,
+                _background_music_filter(audio, config),
                 "-map",
-                "[video_out]",
-                "-map",
-                "[mixed_audio]" if background_music is not None else "[voice_audio]",
+                "[mixed_audio]",
             ]
         )
     else:
-        args.extend(["-map", "0:v:0"])
-        if background_music is not None:
-            args.extend(
-                [
-                    "-filter_complex",
-                    _background_music_filter(audio, config),
-                    "-map",
-                    "[mixed_audio]",
-                ]
-            )
-        else:
-            args.extend(
-                [
-                    "-filter_complex",
-                    _narration_filter(config),
-                    "-map",
-                    "[voice_audio]",
-                ]
-            )
-    video_filter_args = [] if short_cover is not None else ["-vf", ass_filter]
+        args.extend(
+            [
+                "-filter_complex",
+                _narration_filter(config),
+                "-map",
+                "[voice_audio]",
+            ]
+        )
     args.extend(
         [
-            *video_filter_args,
+            "-vf",
+            ass_filter,
             *_codec_args(
                 config.video_codec,
                 preset=config.final_preset,
@@ -1011,11 +951,6 @@ def _render_project_output(
         if config.background_music_path
         else None
     )
-    short_cover = (
-        _project_file(layout.root, layout.thumbnail, label="Capa inicial do Short")
-        if project.video_format == "short" and config.short_cover_enabled
-        else None
-    )
     plans = _scene_plans(
         layout,
         scenes,
@@ -1033,7 +968,6 @@ def _render_project_output(
             "captions_hash": sha256_file(ass_file),
             "caption_font_hash": sha256_file(caption_font_file) if caption_font_file else None,
             "background_music_hash": sha256_file(background_music) if background_music else None,
-            "short_cover_hash": sha256_file(short_cover) if short_cover else None,
             "render_config": config.model_dump(mode="json"),
             "audio_sample_rate": audio.sample_rate,
             "audio_duration": audio.duration,
@@ -1091,7 +1025,6 @@ def _render_project_output(
             config,
             caption_font_file=caption_font_file,
             background_music=background_music,
-            short_cover=short_cover,
         )
         final_report = validate_render_output(
             layout.final_video,
@@ -1113,9 +1046,6 @@ def _render_project_output(
                 "scenes": len(plans),
                 "frames": sum(plan.frame_count for plan in plans),
                 "base_reused": int(reused_base),
-                "short_cover_frames": (
-                    round(config.short_cover_duration_seconds * config.fps) if short_cover else 0
-                ),
             },
         )
         return RenderResult(

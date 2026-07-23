@@ -149,6 +149,30 @@ def test_exact_duration_remains_blocking_only_when_explicitly_configured() -> No
     ]
 
 
+@pytest.mark.parametrize("video_duration", [18.2, 73.6])
+def test_approved_script_duration_never_blocks_or_warns(
+    video_duration: float,
+) -> None:
+    now = utc_now()
+    manifest = ProjectManifest(
+        project_id="short-aprovado-imutavel",
+        title="Short aprovado imutável",
+        created_at=now,
+        updated_at=now,
+        target_duration_seconds=50,
+        duration_policy="approved_script_locked_v1",
+        video_format="short",
+    )
+    report = ValidationReport(project_id=manifest.project_id, generated_at=now)
+
+    _apply_final_duration_policy(manifest, video_duration, report)
+
+    assert report.errors == []
+    assert report.warnings == []
+    assert report.checks["editorial_duration_estimate_seconds"] == 50
+    assert report.checks["script_driven_duration_seconds"] == video_duration
+
+
 def test_ffprobe_validation_accepts_expected_h264_aac(monkeypatch, tmp_path) -> None:
     output = tmp_path / "fixture.mp4"
     output.touch()
@@ -495,22 +519,6 @@ def test_loudness_standard_also_normalizes_narration_without_music() -> None:
     assert filter_graph.endswith("[voice_audio]")
 
 
-def test_short_cover_filter_overlays_after_captions_and_fades_out() -> None:
-    config = RenderConfig(
-        width=1080,
-        height=1920,
-        short_cover_duration_seconds=0.75,
-        short_cover_transition_seconds=0.18,
-    )
-
-    filter_graph = render._short_cover_video_filter("ass=caption.ass", config, 3)
-
-    assert "[0:v]ass=caption.ass[captioned]" in filter_graph
-    assert "[3:v]scale=1080:1920" in filter_graph
-    assert "fade=t=out:st=0.570000:d=0.180000:alpha=1" in filter_graph
-    assert "overlay=0:0:enable='lt(t,0.750000)'" in filter_graph
-
-
 def _render_plans(tmp_path, count: int = 3) -> list[render.SceneRenderPlan]:
     plans = []
     for index in range(1, count + 1):
@@ -667,8 +675,6 @@ def test_short_end_to_end_render_reuses_visual_base_when_only_caption_style_chan
             motion_strength=0.001,
             background_music_path="audio/narration.wav",
             background_music_gain_db=-18.0,
-            short_cover_duration_seconds=0.2,
-            short_cover_transition_seconds=0.05,
         )
     )
     config.captions.font_size = 20
@@ -693,8 +699,6 @@ def test_short_end_to_end_render_reuses_visual_base_when_only_caption_style_chan
     image_paths = [layout.image_assets / "image-001.png", layout.image_assets / "image-002.png"]
     for path, color in zip(image_paths, ["#20304A", "#A8793B"], strict=True):
         Image.new("RGB", (400, 240), color).save(path)
-    layout.thumbnail.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (320, 180), "#E5484D").save(layout.thumbnail)
     scenes = [
         _scene("scene-001", 1, "image-001", "A graça"),
         _scene("scene-002", 2, "image-002", "permanece sempre."),

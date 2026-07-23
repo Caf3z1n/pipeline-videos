@@ -264,7 +264,7 @@ def run_demo(
     from pipeline_videos.audio import generate_audio
     from pipeline_videos.captions import generate_captions
     from pipeline_videos.images import approve_image, build_image_manifest, generate_fixture_images
-    from pipeline_videos.metadata import build_metadata, generate_fixture_thumbnail
+    from pipeline_videos.metadata import build_metadata
     from pipeline_videos.music import select_music
     from pipeline_videos.render import render_project
     from pipeline_videos.validation import validate_project
@@ -278,7 +278,6 @@ def run_demo(
     select_music(layout, force=force)
     generate_captions(layout, force=force)
     build_metadata(layout, force=force)
-    generate_fixture_thumbnail(layout, force=force)
     result = render_project(layout, force=force)
     report = validate_project(layout, require_render=True)
     return layout, {"render": result, "validation": report}

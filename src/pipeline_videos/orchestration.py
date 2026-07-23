@@ -74,9 +74,6 @@ def _queue_output_paths(
         candidates.append(outputs["package"])
     if outputs.get("review") is not None:
         candidates.append(outputs["review"])
-    thumbnails = outputs.get("thumbnails")
-    if isinstance(thumbnails, list):
-        candidates.extend(thumbnails)
     return [
         _isolated_staging_path(
             layout,
@@ -580,11 +577,7 @@ def build_one_shot_plan(
         growth_external_status,
         enabled=growth_enabled,
     )
-    growth_import_dependencies = (
-        ("youtube_growth_specialist", "images_import_batch")
-        if manifest.video_format == "short"
-        else ("youtube_growth_specialist",)
-    )
+    growth_import_dependencies = ("youtube_growth_specialist",)
     join_requirements = [
         images_import_status,
         growth_import_status,
@@ -592,7 +585,6 @@ def build_one_shot_plan(
         _stage_status(manifest, "captions"),
         _stage_status(manifest, "music"),
         _stage_status(manifest, "metadata"),
-        _stage_status(manifest, "thumbnail"),
     ]
     join_status = _barrier_status(join_requirements)
     join_tasks = [
@@ -620,13 +612,6 @@ def build_one_shot_plan(
             writes_project_state=True,
         ),
         _task(
-            "thumbnail",
-            owner="main",
-            status=_stage_status(manifest, "thumbnail"),
-            depends_on=("growth_import",),
-            writes_project_state=True,
-        ),
-        _task(
             "production_join",
             owner="main",
             status=join_status,
@@ -637,7 +622,6 @@ def build_one_shot_plan(
                 "captions",
                 "music",
                 "metadata",
-                "thumbnail",
             ),
             writes_project_state=False,
         ),

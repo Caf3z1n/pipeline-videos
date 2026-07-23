@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import mimetypes
 import os
 import shutil
 from collections.abc import Callable
@@ -10,8 +9,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Any, Literal, Protocol
-
-from PIL import Image
 
 from pipeline_videos.models import (
     ApprovalStatus,
@@ -29,7 +26,6 @@ YOUTUBE_SCOPES = (
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.force-ssl",
 )
-MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024
 DEFAULT_TOKEN_FILE = Path.home() / ".config" / "pipeline-videos" / "youtube" / "token.json"
 
 
@@ -87,8 +83,6 @@ class YouTubeClient(Protocol):
         self, video_id: str, *, snippet: dict[str, Any], status: dict[str, Any]
     ) -> None: ...
 
-    def set_thumbnail(self, video_id: str, path: Path) -> dict[str, Any]: ...
-
     def upsert_caption(
         self, video_id: str, path: Path, *, language: str, name: str
     ) -> dict[str, Any]: ...
@@ -123,8 +117,6 @@ class PublicationPlan:
     video_path: Path
     video_hash: str
     metadata_hash: str
-    thumbnail_path: Path | None
-    thumbnail_hash: str | None
     captions_path: Path | None
     captions_hash: str | None
     automated_review_candidate: bool = False
@@ -132,7 +124,6 @@ class PublicationPlan:
     def input_hash(self) -> str:
         payload = asdict(self)
         payload["video_path"] = str(self.video_path)
-        payload["thumbnail_path"] = str(self.thumbnail_path) if self.thumbnail_path else None
         payload["captions_path"] = str(self.captions_path) if self.captions_path else None
         return sha256_value(payload)
 
@@ -203,13 +194,6 @@ class GoogleYouTubeClient:
             part="status",
             body={"id": video_id, "status": merged_status},
         ).execute()
-
-    def set_thumbnail(self, video_id: str, path: Path) -> dict[str, Any]:
-        from googleapiclient.http import MediaFileUpload
-
-        mimetype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        media = MediaFileUpload(str(path), mimetype=mimetype, resumable=False)
-        return self.service.thumbnails().set(videoId=video_id, media_body=media).execute()
 
     def upsert_caption(
         self, video_id: str, path: Path, *, language: str, name: str
@@ -382,15 +366,6 @@ def prepare_publication(
         raise RuntimeError("A validação final precisa estar concluída antes do upload.")
     if not layout.final_video.is_file():
         raise FileNotFoundError(f"Render final ausente: {layout.final_video}")
-    youtube_auto_frame = (
-        manifest.video_format == "short"
-        and manifest.config.youtube_growth.thumbnail_generation_mode == "youtube_auto_frame_v1"
-    )
-    if not youtube_auto_frame and not layout.thumbnail.is_file():
-        raise FileNotFoundError(f"Thumbnail aprovada ausente: {layout.thumbnail}")
-    if manifest.stages["thumbnail"].provider == "fixture":
-        raise RuntimeError("A thumbnail fixture não pode ser enviada ao YouTube.")
-
     if verify_validation:
         from pipeline_videos.validation import validate_project
 
@@ -411,16 +386,13 @@ def prepare_publication(
         {
             "metadata": sha256_file(layout.metadata),
             "description": sha256_file(layout.description),
-            "thumbnail": None if youtube_auto_frame else sha256_file(layout.thumbnail),
         }
     )
     if (
         not automated_candidate
         and manifest.approvals["metadata"].artifact_hash != metadata_approval_hash
     ):
-        raise RuntimeError(
-            "Metadados, descrição ou thumbnail mudaram após a aprovação. Aprove-os novamente."
-        )
+        raise RuntimeError("Metadados ou descrição mudaram após a aprovação. Aprove-os novamente.")
     if not metadata.title.strip() or len(metadata.title) > 100:
         raise ValueError("O título do YouTube precisa ter entre 1 e 100 caracteres.")
     if len(description) > 5000:
@@ -460,29 +432,11 @@ def prepare_publication(
         video_path=layout.final_video,
         video_hash=sha256_file(layout.final_video),
         metadata_hash=sha256_value(metadata_payload),
-        thumbnail_path=None if youtube_auto_frame else layout.thumbnail,
-        thumbnail_hash=None if youtube_auto_frame else sha256_file(layout.thumbnail),
         captions_path=captions_path,
         captions_hash=sha256_file(captions_path) if captions_path else None,
         automated_review_candidate=automated_candidate,
         **metadata_payload,
     )
-
-
-def _thumbnail_for_upload(layout: ProjectLayout, source: Path) -> Path:
-    if source.stat().st_size <= MAX_THUMBNAIL_BYTES:
-        return source
-    with Image.open(source) as image:
-        rgb = image.convert("RGB")
-        for quality in (92, 88, 84, 80, 74, 68, 60):
-            temporary = layout.publication_thumbnail.with_suffix(".jpg.tmp")
-            temporary.parent.mkdir(parents=True, exist_ok=True)
-            rgb.save(temporary, format="JPEG", quality=quality, optimize=True, progressive=True)
-            if temporary.stat().st_size <= MAX_THUMBNAIL_BYTES:
-                os.replace(temporary, layout.publication_thumbnail)
-                return layout.publication_thumbnail
-            temporary.unlink(missing_ok=True)
-    raise RuntimeError("Não foi possível preparar a thumbnail abaixo do limite de 2 MB.")
 
 
 def _asset(
@@ -606,18 +560,12 @@ def upload_project(
                     source_hash=plan.metadata_hash,
                     updated_at=now,
                 ),
-                thumbnail=_asset(
-                    path=plan.thumbnail_path, layout=layout, digest=plan.thumbnail_hash
-                ),
                 captions=_asset(path=plan.captions_path, layout=layout, digest=plan.captions_hash),
                 created_at=now,
                 updated_at=now,
             )
             if not plan.upload_captions:
                 record.captions.status = "skipped"
-            if plan.video_format == "short":
-                record.thumbnail.status = "skipped"
-                record.thumbnail.updated_at = now
             _save_record(layout, record)
         else:
             record = existing
@@ -643,33 +591,6 @@ def upload_project(
                 record.made_for_kids = plan.made_for_kids
                 record.contains_synthetic_media = plan.contains_synthetic_media
                 _save_record(layout, record)
-
-        if plan.video_format == "short" and (
-            record.thumbnail.status != "skipped"
-            or record.thumbnail.source_hash != plan.thumbnail_hash
-        ):
-            record.thumbnail = _asset(
-                path=plan.thumbnail_path,
-                layout=layout,
-                digest=plan.thumbnail_hash,
-            )
-            record.thumbnail.status = "skipped"
-            record.thumbnail.updated_at = utc_now()
-            _save_record(layout, record)
-        elif plan.video_format != "short" and (
-            record.thumbnail.status != "uploaded"
-            or record.thumbnail.source_hash != plan.thumbnail_hash
-        ):
-            assert plan.thumbnail_path is not None
-            thumbnail_path = _thumbnail_for_upload(layout, plan.thumbnail_path)
-            client.set_thumbnail(record.video_id, thumbnail_path)
-            record.thumbnail = YouTubePublicationAsset(
-                status="uploaded",
-                source_path=relative_posix(plan.thumbnail_path, layout.root),
-                source_hash=plan.thumbnail_hash,
-                updated_at=utc_now(),
-            )
-            _save_record(layout, record)
 
         if plan.upload_captions and (
             record.captions.status != "uploaded"
@@ -701,23 +622,13 @@ def upload_project(
             input_hash,
             [relative_posix(layout.publication, layout.root)],
             provider="youtube-data-api-v3",
-            note=(
-                (
-                    "Upload do Short concluído sem thumbnail personalizada; o YouTube "
-                    f"selecionará um frame: {record.youtube_url}"
-                    if plan.thumbnail_path is None
-                    else "Upload do Short concluído; selecione manualmente o frame da capa no "
-                    f"app do YouTube: {record.youtube_url}"
-                )
-                if plan.video_format == "short"
-                else f"Upload concluído como {record.privacy_status}: {record.youtube_url}"
-            ),
+            note=f"Upload concluído como {record.privacy_status}: {record.youtube_url}",
         )
         return record
     except Exception as exc:
         if layout.publication.is_file():
             record = read_model(layout.publication, YouTubePublicationRecord)
-            for asset in (record.thumbnail, record.captions):
+            for asset in (record.captions,):
                 if asset.status == "pending":
                     asset.status = "failed"
                     asset.error = str(exc)

@@ -5,8 +5,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageChops, ImageOps, ImageStat
-
 from pipeline_videos.long_form_script import (
     minimum_long_form_reengagements,
     validate_long_form_retention_script,
@@ -26,23 +24,22 @@ from pipeline_videos.models import (
     YouTubeGrowthStrategy,
     YouTubeMetadata,
 )
+from pipeline_videos.narration_style import validate_authorial_narration_style
 from pipeline_videos.script import ensure_creative_contract
 from pipeline_videos.state import complete_stage, fail_stage, start_stage
 from pipeline_videos.storage import ProjectLayout, read_json, read_model, write_json, write_text
 from pipeline_videos.utils import (
     aspect_ratio_label,
-    executable,
     ffprobe_json,
     matches_aspect_ratio,
     relative_posix,
-    run_process,
     sha256_file,
     sha256_value,
     tokenize_words,
     utc_now,
 )
 
-VALIDATION_ALGORITHM_VERSION = "7"
+VALIDATION_ALGORITHM_VERSION = "8"
 
 _COMPLETION_FIRST_ADVISORY_PATTERNS = (
     "O contrato criativo",
@@ -88,6 +85,11 @@ def _apply_final_duration_policy(
 ) -> None:
     """Validate explicit constraints while keeping ordinary duration targets advisory."""
 
+    if manifest.duration_policy == "approved_script_locked_v1":
+        report.checks["duration_policy"] = "approved_script_locked_v1"
+        report.checks["editorial_duration_estimate_seconds"] = manifest.target_duration_seconds
+        report.checks["script_driven_duration_seconds"] = video_duration
+        return
     if manifest.duration_policy == "adaptive_range_v1":
         assert manifest.requested_duration_min_seconds is not None
         assert manifest.requested_duration_max_seconds is not None
@@ -185,53 +187,6 @@ def _validate_video(
     report.checks[f"{prefix}_duration_seconds"] = round(duration, 3)
 
 
-def _validate_short_cover_first_frame(
-    layout: ProjectLayout,
-    report: ValidationReport,
-    *,
-    width: int,
-    height: int,
-) -> None:
-    if not layout.final_video.is_file() or not layout.thumbnail.is_file():
-        return
-    frame_path = layout.render_work / "validated-first-frame.png"
-    frame_path.parent.mkdir(parents=True, exist_ok=True)
-    run_process(
-        [
-            executable("ffmpeg"),
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-i",
-            relative_posix(layout.final_video, layout.root),
-            "-frames:v",
-            "1",
-            "-vf",
-            f"scale={width}:{height}:flags=lanczos",
-            relative_posix(frame_path, layout.root),
-        ],
-        cwd=layout.root,
-        timeout=120,
-    )
-    with Image.open(frame_path) as decoded, Image.open(layout.thumbnail) as thumbnail:
-        expected = ImageOps.fit(
-            thumbnail.convert("RGB"),
-            (width, height),
-            method=Image.Resampling.LANCZOS,
-        )
-        difference = ImageChops.difference(decoded.convert("RGB"), expected)
-        rms = sum(ImageStat.Stat(difference).rms) / 3
-    threshold = 18.0
-    report.checks["short_cover_first_frame_rms"] = round(rms, 3)
-    report.checks["short_cover_first_frame_match"] = rms <= threshold
-    if rms > threshold:
-        report.errors.append(
-            "O primeiro frame do Short não corresponde à thumbnail ativa "
-            f"(RMS {rms:.2f}, limite {threshold:.2f})."
-        )
-
-
 def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> ValidationReport:
     manifest = layout.load_manifest()
     if layout.script.is_file() and layout.briefing.is_file():
@@ -267,7 +222,6 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                     "metadata": layout.metadata,
                     "growth_package": layout.growth_package,
                     "growth_strategy": layout.growth_strategy,
-                    "thumbnail": layout.thumbnail,
                     "final": layout.final_video,
                 }.items()
             },
@@ -291,6 +245,7 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
     report = ValidationReport(project_id=manifest.project_id, generated_at=utc_now())
     try:
         script = read_model(layout.script, ScriptDocument)
+        validate_authorial_narration_style(script)
         contract = read_model(layout.creative_contract, CreativeContract)
         review = read_model(layout.biblical_review, BiblicalReview)
         scenes = read_model(layout.scenes, SceneManifest)
@@ -469,6 +424,9 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                         "A duração natural da narração ficou fora da janela preferencial; "
                         "isso não autoriza alterar a velocidade da voz nem preencher tempo."
                     )
+            elif manifest.duration_policy == "approved_script_locked_v1":
+                report.checks["effective_duration_seconds"] = audio.duration
+                report.checks["duration_is_defined_by_approved_script"] = True
             elif narration_ratio < shorts_config.minimum_audio_duration_ratio:
                 report.errors.append(
                     "A narração compacta é curta demais para a duração-alvo; use hook ou "
@@ -577,59 +535,12 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                             "O especialista entregou menos de "
                             f"{expected_variants} títulos distintos."
                         )
-                    if manifest.video_format == "short":
-                        report.checks["short_cover_timestamp_seconds"] = (
-                            strategy.short_cover_timestamp_seconds
-                        )
         if manifest.video_format != "short" and (
             not metadata.chapters or re.match(r"^0{1,2}:00(?:\s|$)", metadata.chapters[0]) is None
         ):
             report.warnings.append("Os capítulos do YouTube não começam em 0:00.")
-        youtube_auto_frame = (
-            manifest.video_format == "short"
-            and manifest.config.youtube_growth.thumbnail_generation_mode == "youtube_auto_frame_v1"
-        )
-        report.checks["youtube_thumbnail_mode"] = "auto_frame" if youtube_auto_frame else "custom"
-        if youtube_auto_frame:
-            if manifest.config.render.short_cover_enabled:
-                report.errors.append(
-                    "O modo de frame automático do YouTube não pode inserir capa no render."
-                )
-        elif not layout.thumbnail.is_file():
-            if not require_render:
-                report.warnings.append("A thumbnail ainda não foi gerada.")
-            else:
-                report.errors.append("A thumbnail está ausente.")
-        elif layout.thumbnail.is_file():
-            with Image.open(layout.thumbnail) as thumbnail:
-                width, height = thumbnail.size
-            report.checks["thumbnail_resolution"] = f"{width}x{height}"
-            render_config = manifest.config.render
-            expected_aspect = aspect_ratio_label(render_config.width, render_config.height)
-            if not matches_aspect_ratio(
-                width,
-                height,
-                render_config.width,
-                render_config.height,
-            ):
-                report.errors.append(f"A thumbnail não está em proporção {expected_aspect}.")
-            minimum_width, minimum_height = (
-                (render_config.width, render_config.height)
-                if manifest.video_format == "short"
-                else (1280, 720)
-            )
-            if width < minimum_width or height < minimum_height:
-                report.warnings.append(
-                    f"A thumbnail está abaixo da resolução mínima {minimum_width}×{minimum_height}."
-                )
-
         if require_render:
             render_config = manifest.config.render
-            if manifest.video_format == "short" and render_config.short_cover_enabled:
-                cover_frames = round(render_config.short_cover_duration_seconds * render_config.fps)
-                report.checks["short_cover_frames"] = cover_frames
-                if cover_frames != 1:
-                    report.errors.append("A capa inicial do Short deve ocupar exatamente um frame.")
             _validate_video(
                 layout.final_video,
                 report,
@@ -647,13 +558,6 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                     report.warnings.append(
                         "A duração final difere do áudio por mais de um frame; o container pode "
                         "incluir arredondamento ou silêncio residual."
-                    )
-                if manifest.video_format == "short" and render_config.short_cover_enabled:
-                    _validate_short_cover_first_frame(
-                        layout,
-                        report,
-                        width=render_config.width,
-                        height=render_config.height,
                     )
 
         if manifest.config.production.validation_policy == "completion_first_v1":

@@ -6,6 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 
 from pipeline_videos.models import EditorialPolicyConfig, ScriptDocument, SourceLibrary
+from pipeline_videos.narration_style import validate_authorial_narration_style
 from pipeline_videos.utils import tokenize_words
 
 _ENGLISH_EDITORIAL_JARGON = (
@@ -22,7 +23,7 @@ _GENERIC_TEXT_REFERENCE_RE = re.compile(
     r"(?:fala|diz|registra|mostra|ensina)\b",
     flags=re.IGNORECASE,
 )
-_QUOTED_TEXT_RE = re.compile(r'["“](?P<quote>.+?)["”]', flags=re.DOTALL)
+_STRAIGHT_QUOTED_TEXT_RE = re.compile(r'"(?P<quote>.+?)"', flags=re.DOTALL)
 _COMMENT_RESPONSE_RE = re.compile(
     r"\b(?:escreva|escreve|digite|comente)\s+"
     r"(?:(?:a|esta)\s+(?:palavra|frase)\s+)?"
@@ -44,6 +45,26 @@ def _normalized(value: str) -> str:
     return " ".join(re.findall(r"\w+", value, flags=re.UNICODE))
 
 
+def _quoted_text_spans(value: str) -> list[tuple[int, str]]:
+    spans: list[tuple[int, str]] = []
+    depth = 0
+    start = -1
+    for index, character in enumerate(value):
+        if character == "“":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif character == "”" and depth:
+            depth -= 1
+            if depth == 0:
+                spans.append((start, value[start + 1 : index]))
+                start = -1
+    spans.extend(
+        (match.start(), match.group("quote")) for match in _STRAIGHT_QUOTED_TEXT_RE.finditer(value)
+    )
+    return sorted(spans, key=lambda item: item[0])
+
+
 def quoted_comment_response(value: str) -> str | None:
     match = _COMMENT_RESPONSE_RE.search(value)
     return " ".join(match.group("response").split()) if match else None
@@ -58,8 +79,8 @@ def scripture_citations(
     word_cursor = 0
     for section_index, section in enumerate(document.sections):
         if "biblical_text" in section.claim_classification:
-            for match in _QUOTED_TEXT_RE.finditer(section.narration):
-                prefix = section.narration[max(0, match.start() - 180) : match.start()]
+            for quote_start, quote in _quoted_text_spans(section.narration):
+                prefix = section.narration[max(0, quote_start - 180) : quote_start]
                 reference_before_quote = (
                     re.search(r"\bcapítulo\s+\d+\b", prefix, flags=re.IGNORECASE)
                     and re.search(r"\bversículos?\s+\d+\b", prefix, flags=re.IGNORECASE)
@@ -87,11 +108,11 @@ def scripture_citations(
                     )
                 )
                 if reference_before_quote or reference_after_quote:
-                    offset = word_cursor + len(tokenize_words(section.narration[: match.start()]))
+                    offset = word_cursor + len(tokenize_words(section.narration[:quote_start]))
                     citations.append(
                         ScriptureCitation(
                             section_id=section.section_id,
-                            quote=" ".join(match.group("quote").split()),
+                            quote=" ".join(quote.split()),
                             word_offset=offset,
                             estimated_start_seconds=round(
                                 offset / words_per_minute * 60,
@@ -120,6 +141,7 @@ def validate_script_editorial_policy(
     policy: EditorialPolicyConfig,
     sources: SourceLibrary | None = None,
 ) -> None:
+    validate_authorial_narration_style(document)
     if policy.standard == "legacy":
         return
 

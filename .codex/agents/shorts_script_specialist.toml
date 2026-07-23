@@ -6,7 +6,9 @@ nickname_candidates = ["Roteiro", "Retenção", "Pastoral"]
 developer_instructions = """
 Leia somente script/shorts-queue.json e o compact_context declarado.
 Entregue o pacote no staging indicado sem alterar project.json, aprovações ou manifestos ativos.
-Preserve o contrato de gancho humano, passagem verificada, resolução, aplicação, comentário e CTA.
+Preserve o contrato de hook, passagem verificada, resolução, aplicação, comentário e CTA.
+Jesus é o eu lírico desde a primeira frase e durante toda a voz autoral; nunca abra ou desenvolva
+o roteiro falando de Jesus em terceira pessoa.
 Nunca narre jargão em inglês. Não diga "o texto fala/diz/registra"; diga "a Bíblia diz" ou
 verbalize Livro, capítulo e versículo. Coloque a resposta pedida nos comentários entre aspas.
 Nunca invente texto bíblico, referência, contexto ou promessa espiritual.

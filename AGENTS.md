@@ -66,8 +66,20 @@
   explicitamente, use o candidato automatizado validado em vez de preencher aprovações.
 - A locução permanece integralmente em português: não narre `open loop`, `payoff`, `storytelling`,
   `call to action` ou outro jargão editorial em inglês.
+- Toda locução autoral, em qualquer formato, perfil ou duração, usa
+  `human_authorial_voice_v1`: narre diretamente o fato, a ação, a dúvida ou a explicação. São
+  proibidas frases metalinguísticas como “o relato registra”, “o relato não explica”, “a sequência
+  é compacta”, “o retrato começa”, “a passagem paralela acrescenta”, “comparar é observar”, “não
+  podemos afirmar” e equivalentes. Também não valorize uma ação dizendo antes o que alguém não fez
+  nem defina cenas por listas de ausência como “afirmação, sem A, B ou C”. Também bloqueie a
+  fórmula autoral `não A nem B, mas C` e declare `C` diretamente. O filtro vale somente para voz
+  autoral: preserve citações bíblicas literais e hooks negativos legítimos como `Nunca faça [X].`.
 - Não diga “o texto fala/diz/registra”. Fora do perfil compacto, prefira “a Bíblia diz” ou “Em
   Livro, capítulo X, versículo Y, lemos:”. No compacto, não use introdução antes da citação.
+- Em Shorts e vídeos longos, a voz autoral usa `jesus_first_person_v1`: Jesus é o eu lírico e fala
+  em primeira pessoa. Separe claramente a dramatização autoral das citações bíblicas literais,
+  mantendo aspas, fonte e referência exatas; nunca apresente elaboração criativa como fala bíblica
+  documentada.
 - Em vídeo longo, use citações literais verificadas distribuídas pela narrativa: alvo de 0,8 a 1,2
   por minuto; dez minutos exigem de oito a doze citações. No padrão novo, a primeira entra até 75
   segundos, o intervalo máximo é de 105 segundos e a parte final não fica mais de 120 segundos sem
@@ -81,10 +93,8 @@
   apenas acompanha o resultado e não relê todo o histórico dentro do coordenador.
 - Workers escrevem somente no staging declarado e recebem contexto compacto com
   `fork_turns=none`.
-- Use no máximo dois trabalhadores de imagem simultaneamente. No perfil padrão pintado de Shorts,
-  o especialista do YouTube produz somente metadados e não depende da imagem de abertura. O perfil
-  3D legado inicia esse especialista somente depois de importar a imagem ativa da abertura. Vídeos
-  longos usam somente o tema central no prompt e não dependem dessa referência.
+- Use no máximo dois trabalhadores de imagem simultaneamente. O especialista do YouTube produz
+  somente metadados e não depende de imagens.
 - Imagens usam uma chamada `imagegen` por tentativa. Em `moderation_blocked`, repita o mesmo prompt
   uma vez; se bloquear novamente, tente uma única alternativa de cena preservando identidade, idade
   aparente, rosto, cabelo, figurino, proporções, silhueta, estilo, paleta, ambiente e sentido.
@@ -99,6 +109,61 @@
   legendas e estética de cena viram avisos e não iniciam loops de correção.
 
 ## Criação e modos de Shorts
+
+- Ideação editorial não é produção. Todo pedido para sugerir temas, discutir roteiros, preparar
+  roteiros em massa ou aprová-los começa com
+  `uv run pipeline-videos approved-scripts workflow-status`. Antes de qualquer mutação, faça
+  exatamente uma pergunta curta confirmando a etapa desejada. Se o usuário já nomear a operação e
+  disser para executá-la agora, essa frase vale como confirmação; não repita a pergunta.
+- Depois da confirmação, execute somente a etapa escolhida e encerre com uma resposta direta. Não
+  crie projeto, coordenador, subagente, revisão, SEO, plano visual, mídia ou produção que não
+  pertença explicitamente à etapa confirmada. Não explique o processo quando bastar informar o
+  resultado.
+- O fluxo editorial em massa é obrigatoriamente:
+  `temas sugeridos -> temas aprovados e salvos -> lote de roteiros -> revisão dos textos pelo
+  usuário -> aprovação em massa por hash -> produção solicitada separadamente`. Nunca pule da
+  sugestão de tema para criação de projeto ou produção.
+- Em roteiro pré-aprovado, duração é apenas estimativa editorial. Depois da aprovação por hash,
+  texto, pontuação, CTA, citações e ordem são sagrados e imutáveis: nunca corte, amplie, resuma,
+  complete, reescreva ou bloqueie o pacote para alcançar 50 segundos ou qualquer outra meta. Use
+  `duration_policy=approved_script_locked_v1`; o áudio em velocidade natural define a duração
+  efetiva, sem mínimo ou máximo de palavras. Diferença entre estimativa e duração real não gera
+  warning bloqueante, nova síntese nem reparo. Limitação técnica de mídia ou da plataforma deve ser
+  relatada sem alterar o roteiro aprovado.
+- Temas usam `approved-scripts topic-suggest`, `topic-list` e `topic-approve`. A preparação de
+  roteiros usa `draft-batch-prepare`, que não inicia agente automaticamente e não cria projeto.
+  Quando o usuário confirmar a escrita do lote, use no máximo um roteirista para todo o lote e
+  nenhum `biblical_reviewer`. O próprio lote recebe fontes, `required_answer_points` e
+  `uncertainty_boundaries`; o roteirista faz a conferência de fonte na mesma saída e o importador
+  aplica `inline_source_guard_v1`. Depois, importe e mostre os textos com
+  `draft-batch-import` e `draft-batch-review`; a aprovação de todos usa um único hash com
+  `draft-batch-approve`.
+- `draft-batch-approve` também materializa, de forma determinística e idempotente, um
+  `ApprovedShortScript` por roteiro no pool consumido por `approved-scripts release`. Essa ponte
+  preserva narração, CTA, SEO e hash, usa `jesus_1` e `leaning` como configuração padrão e cria o
+  plano visual por blocos sem modelo. Não deixe roteiro apenas no estado editorial `approved`.
+  Falha de preflight precisa ocorrer antes de mover tema ou roteiro, evitando aprovação parcial.
+- Para produzir um aprovado no servidor, aceite o título exato em
+  `approved-scripts release --title "<título>" --authorize-external`. A liberação reserva o pacote,
+  cria somente um job `approved_fast_v1`, usa upload privado e não reabre roteiro, revisão bíblica,
+  SEO ou planejamento visual. Repetição do pedido deve reutilizar o estado persistido ou informar
+  que o pacote já está reservado/produzido; nunca crie duplicata silenciosa.
+- A revisão bíblica e qualquer correção da bancada acontecem antes de mostrar a versão final ao
+  usuário. Depois que o usuário disser que aprovou os textos exibidos, não crie agente, não pesquise
+  fontes e não reabra revisão: apenas confira o hash e mude o estado para `approved`. Citação
+  literal deve ser copiada da fonte verificada, preservando a distinção entre fala e narração.
+  Tema com `uncertainty_boundaries` precisa expressar a inferência naturalmente, como “pode ser
+  compreendido” ou “você pode entender assim”, sem transformar interpretação em certeza universal.
+- Todo lote usa `quality_reference=published_high_stakes_last_three_v1`,
+  `narrator_identity=jesus_first_person_v1` e `hook_contract=high_stakes_opening_v1`. O hook deve
+  ser o prefixo literal da narração, abrir tensão ou curiosidade imediatamente, permanecer honesto
+  e receber payoff completo. A narração inteira mantém Jesus como eu lírico; abrir em terceira
+  pessoa com “Jesus...” é bloqueante. Hook, clareza e payoff precisam obter nota mínima 8/10 antes
+  da aprovação em massa.
+- Antes de mostrar no chat qualquer hook novo ou reescrito da bancada, valide todos de uma vez com
+  `approved-scripts hook-check --hook ...`. Se algum falhar, corrija somente o hook e repita a
+  validação; nunca apresente ao usuário um hook reprovado nem reescreva o roteiro inteiro quando o
+  erro estiver apenas na abertura.
 
 - Pedido simples de Short usa `new-short`, seguido de `status`, `run --dry-run` e one-shot; não peça
   novamente versículo, CTA, estilo ou fluxo já padronizados.
@@ -131,7 +196,7 @@
   `new-short --profile high-stakes` e o perfil `high_stakes_biblical_question_v1`, restrito a 45–60
   segundos. Ele seleciona a dúvida antes da passagem, copia um hook factual curado de
   `high_stakes_opening_v1`, exige todos os `required_answer_points`, preserva `answer_status` e
-  `uncertainty_boundaries` e usa revisão bíblica independente. A citação literal continua
+  `uncertainty_boundaries` e usa validação incorporada de fontes. A citação literal continua
   obrigatória, mas usa `adaptive_payoff_v1` entre 0 e 44 segundos conforme sua função de tensão,
   prova ou recompensa; não imponha a janela padrão de 8–20 segundos.
   Esse catálogo é de ciclo único: quando todos os temas tiverem sido usados ou reservados, informe
@@ -147,10 +212,14 @@
   livro, tema, personagem, testamento, modo criativo e família de hook. Falha do registro bloqueia a
   seleção; não use fallback local.
 - Pedido dedicado a personagem usa `new-character-video` e o segmento opt-in `narrative_story`.
-  Selecione pelo nome ou alias, use `character_portrait` por padrão e importe a âncora e todas as
-  passagens relacionadas do pacote. Fragmentos narrativos nunca entram na rotação automática comum
-  nem no perfil compacto de 15 a 44 segundos; nesse caso, exija Short de ao menos 45 segundos ou
-  vídeo longo.
+  Selecione pelo nome ou alias, use `biblical_storytelling` com o perfil
+  `biblical_character_storytelling_v1` por padrão e importe a âncora e todas as passagens
+  relacionadas do pacote. `character_portrait` permanece disponível somente por seleção explícita
+  quando o usuário pedir análise do personagem. No storytelling, a locução conta a história em
+  progressão humana e cronológica; cautelas, fontes e lacunas ficam na revisão e não viram frases
+  metalinguísticas como “o relato registra”, “a sequência mostra” ou “não podemos afirmar”.
+  Fragmentos narrativos nunca entram na rotação automática comum nem no perfil compacto de 15 a 44
+  segundos; nesse caso, exija Short de ao menos 45 segundos ou vídeo longo.
 - O catálogo combinado contém 476 candidatos: 76 legados e o banco reproduzível
   `curated-verse-bank-v2.json`, com 120 falas diretas de Jesus para compactos, 180 versos gerais e
   100 âncoras de vídeo longo. Reconstrua o banco somente pelo script a partir dos artefatos oficiais
@@ -162,9 +231,9 @@
   seções, beats e revisão bíblica a partir do catálogo verificado. Crie apenas um planejador visual
   em raciocínio médio para devolver descrições de cenas. A revisão determinística substitui o
   `biblical_reviewer`; não crie roteirista nem revisor de modelo nesse perfil.
-- Fora do perfil compacto, prepare `script/shorts-queue.json`, crie exatamente um
-  `shorts_script_specialist` em raciocínio alto e, quando a fila exigir revisão independente,
-  exatamente um `biblical_reviewer`. Importe uma única vez após o preflight final.
+- Fora do perfil compacto, prepare `script/shorts-queue.json` e crie exatamente um
+  `shorts_script_specialist` em raciocínio alto. Não crie `biblical_reviewer`; aplique a validação
+  incorporada de fontes e importe uma única vez após o preflight final.
 - `new-short-audio-manual` mantém o fluxo completo, mas usa `audio.provider=local_manual`: mostre
   integralmente `script/narration.txt`, aguarde um único arquivo de voz do usuário e importe com
   `audio import-manual`. O alinhamento usa WhisperX isolado em CPU, sem ElevenLabs e sem
@@ -206,34 +275,21 @@
   segundos. Pergunta, aplicação e callback são opcionais.
 - Retenção não implica mensagem motivacional. A resolução pode ser desfecho factual, explicação,
   descoberta, síntese, posição filosófica, incerteza preservada ou aplicação.
+- Em `biblical_character_storytelling_v1`, além do filtro autoral global, a maior parte do
+  desenvolvimento avança por ações e acontecimentos; beats de análise/comparação e títulos
+  metalinguísticos continuam bloqueados.
 - Crie exatamente um `youtube_growth_specialist` quando `youtube/growth-queue.json` estiver
   pendente, localmente ou na VPS, com raciocínio médio. Nenhum especialista publica nem promete
   CTR/alcance.
-- No perfil padrão pintado de Shorts, o especialista gera exatamente o título e os metadados, sem
-  chamar `imagegen`, sem criar arquivo de thumbnail e sem inserir capa no primeiro frame; o YouTube
-  fica livre para selecionar um frame do vídeo. O perfil 3D legado preserva a combinação
-  título+thumbnail, a edição da imagem ativa da abertura e a tipografia incorporada ao bitmap.
-- Em vídeos longos novos, gere a thumbnail com `biblical_cinematic_landscape_v1`: horizontal 16:9,
-  baseada exclusivamente no tema central do briefing, sem imagem de referência e sem texto, letras,
-  logotipos, marcas-d'água, seta, X, sublinhado, pincel ou outra marcação editorial. O personagem
-  ocupa 30% a 40% do quadro e o lado oposto preserva área limpa.
-- Thumbnails de Shorts usam conflito visual simples, emoção legível, assunto dominante, espaço
-  negativo e de duas a cinco palavras; setas e marcações exigem alvo narrativo real.
-- A tipografia padrão das thumbnails de Shorts é `integrated_extruded_3d_v1`: letras extrudadas com volume
-  espesso visível, bordas chanfradas, textura material, highlights, sombras de contato/oclusão e
-  perspectiva coerentes com a cena. A palavra dominante usa escala muito maior; palavra vermelha e
-  seta/X/sublinhado/pincel preservam o mesmo tratamento 3D. Nunca use texto plano, adesivo ou overlay.
+- O especialista gera exatamente um título e os metadados. Não chama `imagegen`, não produz imagem
+  de capa e não altera o primeiro frame.
 - Shorts e vídeos longos novos seguem `Enfoque concreto | Passagem`. A passagem aparece exatamente
   uma vez e somente depois da barra; o enfoque nunca repete a referência bíblica. O enfoque se
   adapta ao modo criativo sem forçar tensão motivacional. A descrição abre com resumo
   curto e, em vídeos longos,
   traz timeline das citações iniciada exatamente por `00:00 - Abertura`.
-- O especialista cria exatamente um título no perfil padrão de Shorts; nos vídeos longos e no perfil
-  3D legado, cria o par título+thumbnail. O título carrega referência, enfoque e busca. Quando houver
-  capa de Short, sua frase acrescenta decisão, contraste ou consequência. No padrão
-  `creative_pipe_passage_v3`, a capa de Short não repete o enfoque situado antes de `|`; projetos
-  legados com passagem primeiro continuam sem repetir a frase temática depois de `|`. Em longos, o
-  conceito visual complementa o título sem texto no bitmap.
+- O especialista cria exatamente um título em Shorts e vídeos longos. O título carrega referência,
+  enfoque e busca.
 - Projetos novos usam `search_first_unique_v2` para SEO. A descrição é única, abre com a consulta
   principal, passagem e entrega concreta, usa ao menos dois parágrafos e não repete CTA genérico
   como “Compartilhe esta mensagem”. Também não se refere ao próprio formato com expressões como
@@ -242,7 +298,11 @@
 - `metadata.topics` contém de oito a quinze tags distintas e diretamente relevantes, incluindo
   consulta principal, passagem, livro e variações reais de busca. Tags são metadado secundário:
   não use `#` nelas, não cole listas na descrição e não invente volume de busca. Hashtags na
-  descrição são opcionais, no máximo três e nunca `#viral`/`#fyp`.
+  descrição são opcionais, no máximo três e nunca `#viral`/`#fyp`. A lane pré-aprovada
+  `approved_fast_v1` é a exceção persistida: usa exatamente três hashtags específicas do vídeo
+  mais `#biblia` e `#jesus` na descrição, todas congeladas junto com título e descrição no hash do
+  roteiro. `metadata.topics` permanece separado e é gerado automaticamente com dez a doze tags
+  distintas, relevantes e sem `#`; não precisa ser exibido na aprovação editorial.
 - O comentário fixado formula uma pergunta específica ao tema ou passagem. O pacote registra
   `description_rationale`, `tag_strategy` e `discovery_hypothesis`; nunca afirma que SEO garante
   viralização. Para Shorts, trate escolha de assistir, duração média, percentual assistido e
@@ -258,12 +318,6 @@
 - Nunca implemente erro deliberado para provocar correção, comentário por conta alternativa,
   engajamento falso, medo inventado ou promessa vazia. Curiosidade precisa ser honesta e o payoff
   deve cumprir o mesmo loop aberto pelo hook.
-- Thumbnails novas de Shorts usam conflito/personagem reconhecível, destaque vermelho e ao menos uma
-  seta, X, sublinhado ou pincel com alvo real; evite frases abstratas quando o confronto for mais forte.
-- Planeje espaço negativo real e tente não cobrir rosto, corpo, ação principal ou o alvo narrativo.
-  Depois da primeira saída válida, aceite o bitmap sem repetir por qualidade, deriva visual ou texto
-  imperfeito; tentativas adicionais são permitidas somente quando `moderation_blocked` não gerar
-  arquivo.
 - Subagentes nunca importam, aprovam, publicam nem alteram `project.json`, filas ou manifestos.
 
 ## Filas e retomada
@@ -302,22 +356,13 @@
 - Coordenador e especialistas usam obrigatoriamente `gpt-5.6-sol`. O coordenador usa raciocínio
   médio; no compacto, o planejador visual e `youtube_growth_specialist` usam médio, sem roteirista
   nem revisor bíblico de modelo; cada `image_worker` usa baixo. Fora do compacto,
-  `shorts_script_specialist` e `biblical_reviewer` usam alto. Use até dois workers de imagem em
+  `shorts_script_specialist` usa alto. Não crie `biblical_reviewer`. Use até dois workers de imagem em
   paralelo e importe o lote uma única vez.
 - Agendas diárias materializam um ou dois jobs independentes por data e slot. Cada ocorrência deve
   ter `not_before`, upload inicial privado, `publication_mode=scheduled` e `publish_at` explícito
   com fuso. A materialização é idempotente e nunca reutiliza a sessão raiz de outro Short.
-- Gere exatamente um título e nenhuma thumbnail no perfil padrão pintado de Shorts. Não chame
-  `imagegen` nessa etapa e não altere o primeiro frame. No perfil 3D legado, edite a imagem ativa da
-  abertura e use essa arte no primeiro frame. Em vídeos longos, gere a composição horizontal somente
-  a partir do prompt temático e envie-a pela API como thumbnail personalizada.
-- Quando o perfil 3D legado estiver ativo, a thumbnail de Short deve usar exatamente o mesmo
-  `visual_standard`, estilo 3D, materiais,
-  desenho de personagem, paleta e iluminação das cenas. No remoto, use obrigatoriamente a
-  imagem produzida para a cena de abertura como referência visual e interrompa a etapa se ela ainda
-  não existir; nunca improvise fotografia, fotorrealismo ou live action.
-- Local e remoto usam `integrated_extruded_3d_v1` somente no perfil 3D legado, com o mesmo volume, bevel,
-  material, luz, perspectiva, sombra e hierarquia por escala definidos na fila de crescimento.
+- Gere exatamente um título e os metadados em Shorts e vídeos longos. Não chame `imagegen` nessa
+  etapa, não altere o primeiro frame e não envie imagem de capa personalizada.
 - `render-review` funciona em produções locais e remotas, usa os ativos ativos em qualidade final e
   nunca registra aprovação humana. Um candidato assim pode ser enviado automaticamente somente como
   `private`, quando a política do projeto permitir e a validação técnica estiver concluída.
@@ -329,10 +374,9 @@
 
 ## Padrão visual e render
 
-- Shorts novos usam `biblical-midcentury-gouache-v1`: ilustração editorial cristã de meados do
+- Shorts e vídeos longos usam exclusivamente `biblical-midcentury-gouache-v1`: ilustração editorial cristã de meados do
   século em guache opaco e têmpera, acabamento fosco, impressão offset limpa, formas simples, rostos
-  serenos, luz natural difusa e paleta suavizada. O perfil `cinematic-family-3d-v1` permanece
-  disponível por seleção explícita para regressão, com seu fluxo de thumbnail atual intacto.
+  serenos, luz natural difusa e paleta suavizada.
 - O perfil pintado usa `unrestricted_scene_v1`: não acrescente regras para preservar rostos diante
   das legendas, esvaziar o centro vertical, afastar elementos das bordas direita/inferior ou evitar
   poses intermediárias. As cenas passam rapidamente e a composição artística pode ocupar o quadro.
@@ -342,16 +386,14 @@
   contemplativo. No perfil pintado, isso não reintroduz área segura, centro vazio nem restrições de
   borda; apenas impede abertura genérica e faz imagem e fala abrirem a mesma pergunta. O contrato
   registra `action_kind`, `initial_state` e `resulting_state` concretos; esses campos dirigem o
-  primeiro prompt tanto no planejamento por bloco quanto no fluxo 3D por seção. No compacto 3D,
-  `strategy.visual_scenes` continua sendo a autoridade mesmo que o projeto preserve a configuração
-  legada `section_visual_direction_v1`.
+  primeiro prompt. Em todos os formatos, `strategy.visual_scenes` é a autoridade e divide
+  literalmente a narração em blocos contíguos com cenas concretas, distintas e criativas.
 - Uma imagem mostra um momento, um ambiente e uma ação; sem colagem ou painéis.
 - O único render é o candidato final V4: resolução completa, H.264, CRF 12, preset `slow`,
   supersampling 3. Não gere `draft-preview.mp4` nem `preview.mp4`.
 - Movimento: `smooth_pendulum`, zoom 1,02×–1,105×, pan 0,32.
 - Transições: `cinematic_mix`, 0,38 s.
-- Blur de fundo padrão: sigma 8 uniforme em todas as cenas. Somente o perfil 3D legado mantém o
-  primeiro frame integrado da thumbnail totalmente nítido.
+- Blur de fundo padrão: sigma 8 uniforme em todas as cenas.
 - Legendas: Montserrat ExtraBold, caixa alta, escala 88%, largura 0,68, até três palavras por linha
   e card ativo vermelho `#E5484D` com raio 24, sempre centralizadas.
 - As palavras da legenda entram progressivamente com animação curta de posição, escala e opacidade,

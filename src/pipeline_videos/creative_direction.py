@@ -24,24 +24,57 @@ class CreativeModeSpec:
     interpretive_stance: str
     long_hook_policy: str
     application_required: bool = False
+    narration_rules: tuple[str, ...] = ()
+    forbidden_narration_patterns: tuple[str, ...] = ()
 
 
 CREATIVE_MODE_SPECS: dict[str, CreativeModeSpec] = {
     "biblical_storytelling": CreativeModeSpec(
-        label="Storytelling bíblico factual",
+        label="Storytelling bíblico humano",
         purpose=(
-            "Narrar ações, decisões e consequências registradas na Bíblia sem inventar diálogo, "
-            "motivação ou detalhe histórico."
+            "Contar uma história bíblica de forma oral, cronológica, humana e visual, acompanhando "
+            "a pessoa por acontecimentos, escolhas e consequências sem transformar a locução em "
+            "análise do texto."
         ),
         suggested_structure=(
-            "situação inicial",
-            "progressão dos acontecimentos",
-            "virada documentada",
-            "consequência",
-            "desfecho factual",
+            "a pessoa no mundo em que a história a encontra",
+            "encontro ou acontecimento que muda sua direção",
+            "escolha visível e consequência imediata",
+            "caminho posterior documentado pelas fontes disponíveis",
+            "último lugar bíblico conhecido do personagem",
         ),
         interpretive_stance="factual",
         long_hook_policy="optional",
+        narration_rules=(
+            "Escreva como alguém contando uma história em voz alta, com frases naturais, "
+            "transições causais e acontecimentos concretos.",
+            "Faça a maior parte do desenvolvimento avançar no tempo ou mudar a situação do "
+            "personagem; contexto entra somente quando ajuda a visualizar o que está acontecendo.",
+            "Integre citações à história e retome imediatamente a ação, sem parar para comentar "
+            "a estrutura, o método, a fonte ou o processo de interpretação.",
+            "Use a cautela bíblica silenciosamente: omita detalhes não sustentados. Só explique "
+            "uma incerteza quando ela for indispensável para o público não entender algo errado.",
+            "Passagens paralelas podem completar uma etapa da história, mas não devem virar uma "
+            "comparação entre autores ou versões do mesmo episódio.",
+            "Narre o que aconteceu de forma positiva e concreta. Não valorize uma ação dizendo "
+            "antes o que o personagem não fez, e não construa frases como 'afirmação, sem A, B "
+            "ou C'.",
+            "Evite abstrações consecutivas. Depois de no máximo duas frases de contexto, volte a "
+            "uma pessoa, lugar, ação, decisão ou consequência concreta.",
+        ),
+        forbidden_narration_patterns=(
+            "o relato registra",
+            "o relato não explica",
+            "a sequência é compacta",
+            "o retrato começa",
+            "o primeiro traço",
+            "o segundo traço",
+            "a passagem paralela acrescenta",
+            "comparar é observar",
+            "precisam ser examinados",
+            "sem preencher os silêncios",
+            "sem monólogo inventado",
+        ),
     ),
     "character_portrait": CreativeModeSpec(
         label="Retrato de personagem",
@@ -347,7 +380,27 @@ MULTI_SOURCE_CREATIVE_MODES = frozenset({"thematic_investigation", "comparison_c
 
 def creative_mode_payload(mode: str) -> dict[str, Any]:
     spec = CREATIVE_MODE_SPECS[mode]
-    return {"id": mode, **asdict(spec)}
+    return {
+        "id": mode,
+        **asdict(spec),
+        "authorial_narration_standard": "human_authorial_voice_v1",
+        "narrator_identity": "jesus_first_person_v1",
+        "global_narration_rules": (
+            (
+                "A voz autoral é Jesus narrando em primeira pessoa; escreva como quem viveu, "
+                "ensinou, chamou e testemunhou os acontecimentos."
+            ),
+            (
+                "Não apresente dramatização autoral como citação bíblica: somente trechos "
+                "verificados entre aspas são citações literais."
+            ),
+            "Narre diretamente fatos, ações, dúvidas e explicações.",
+            "Não descreva o método de leitura nem use frases metalinguísticas.",
+            "Não valorize ações por negação retórica ou listas de ausências.",
+            "Não use a fórmula 'não A nem B, mas C'; declare C diretamente.",
+            "Preserve integralmente as citações bíblicas literais.",
+        ),
+    }
 
 
 def default_interpretive_stance(mode: str) -> str:
@@ -359,6 +412,8 @@ def default_long_hook_policy(mode: str) -> str:
 
 
 def narration_tone_for_mode(mode: str) -> str:
+    if mode == "biblical_storytelling":
+        return "humano, oral, fluido, visual, caloroso, sóbrio e cinematográfico"
     stance = default_interpretive_stance(mode)
     return {
         "factual": "narrativo, preciso, sóbrio, claro e cinematográfico",
@@ -371,6 +426,8 @@ def narration_tone_for_mode(mode: str) -> str:
 
 def viewer_outcome_for_mode(mode: str, *, theme: str, reveal: str = "") -> str:
     subject = theme.strip().rstrip(".")
+    if mode == "biblical_storytelling":
+        return f"Acompanhar com clareza a história bíblica ligada a {subject}."
     if mode == "biblical_curiosity" and reveal.strip():
         return reveal.strip()
     if default_interpretive_stance(mode) == "factual":

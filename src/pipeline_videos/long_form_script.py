@@ -14,6 +14,7 @@ from pipeline_videos.models import (
     SourceEntry,
     SourceLibrary,
 )
+from pipeline_videos.narration_style import validate_authorial_narration_style
 from pipeline_videos.utils import tokenize_words
 
 _GENERIC_OPENING_PATTERNS = (
@@ -27,6 +28,15 @@ _CTA_MARKERS = {
     "subscribe": ("inscrev", "inscric"),
     "share": ("compartilh", "envie este video", "mande este video"),
 }
+_STORYTELLING_META_TITLE_MARKERS = (
+    "analise",
+    "comparacao",
+    "evidencia",
+    "o relato",
+    "passagem paralela",
+    "sintese do retrato",
+    "traco do retrato",
+)
 
 
 def _normalized(value: str) -> str:
@@ -58,6 +68,46 @@ def minimum_long_form_reengagements(
     return max(2, math.floor(duration_seconds / config.maximum_reengagement_gap_seconds))
 
 
+def validate_biblical_storytelling_voice(document: ScriptDocument) -> None:
+    """Keep factual safeguards backstage instead of narrating the analysis process."""
+
+    validate_authorial_narration_style(document)
+    strategy = document.long_form_strategy
+    if strategy is None or strategy.creative_mode != "biblical_storytelling":
+        return
+
+    for section in document.sections:
+        normalized_title = _normalized(section.title)
+        if any(marker in normalized_title for marker in _STORYTELLING_META_TITLE_MARKERS):
+            raise ValueError(
+                "O storytelling bíblico precisa nomear movimentos da história, não etapas de "
+                f"análise: {section.title!r}."
+            )
+
+    analytical_beats = [
+        beat.beat_id
+        for beat in strategy.progression
+        if {"analysis", "comparison"}.intersection(beat.functions)
+    ]
+    if analytical_beats:
+        raise ValueError(
+            "O perfil de storytelling não aceita beats de analysis/comparison; transforme-os em "
+            "acontecimento, contexto, progressão, consequência ou revelação."
+        )
+
+    development_sections = document.sections[1:-1]
+    if development_sections:
+        narrative_sections = sum(
+            section.role == "biblical_narrative" for section in development_sections
+        )
+        minimum_narrative_sections = max(1, math.ceil(len(development_sections) * 0.6))
+        if narrative_sections < minimum_narrative_sections:
+            raise ValueError(
+                "O perfil de storytelling exige que a maior parte do desenvolvimento seja "
+                "narrativa bíblica em progressão, não reflexão ou comentário."
+            )
+
+
 def _validate_story_alignment(
     document: ScriptDocument,
     config: LongFormScriptConfig,
@@ -73,6 +123,7 @@ def _validate_story_alignment(
         raise ValueError("O roteiro longo precisa de seções.")
     if document.sections[0].role != "opening" or document.sections[-1].role != "closing":
         raise ValueError("O roteiro longo precisa começar com opening e terminar com closing.")
+    validate_biblical_storytelling_voice(document)
 
     section_ids = [section.section_id for section in document.sections]
     if len(set(section_ids)) != len(section_ids):
@@ -82,6 +133,7 @@ def _validate_story_alignment(
         raise ValueError(
             "A progressão longa precisa mapear cada seção exatamente uma vez e em ordem."
         )
+    _validate_visual_scenes(document)
 
     for section, beat in zip(document.sections, strategy.progression, strict=True):
         if not (section.retention_goal or "").strip():
@@ -208,6 +260,41 @@ def _validate_story_alignment(
             raise ValueError(evidence_errors[0])
     if not _normalized(closing).endswith(_normalized(strategy.engagement.spoken_text)):
         raise ValueError("O CTA precisa ser o último movimento da locução.")
+
+
+def _validate_visual_scenes(document: ScriptDocument) -> None:
+    strategy = document.long_form_strategy
+    assert strategy is not None
+    expected_section_ids = [section.section_id for section in document.sections]
+    planned_section_ids: list[str] = []
+    for visual_scene in strategy.visual_scenes:
+        if visual_scene.section_id not in expected_section_ids:
+            raise ValueError(
+                f"A cena visual aponta para seção inexistente: {visual_scene.section_id}."
+            )
+        if not planned_section_ids or planned_section_ids[-1] != visual_scene.section_id:
+            planned_section_ids.append(visual_scene.section_id)
+    if planned_section_ids != expected_section_ids:
+        raise ValueError(
+            "visual_scenes precisa cobrir todas as seções uma única vez e na ordem da locução."
+        )
+
+    for section in document.sections:
+        blocks = [
+            scene.narration
+            for scene in strategy.visual_scenes
+            if scene.section_id == section.section_id
+        ]
+        reconstructed = " ".join(block.strip() for block in blocks)
+        if _normalized(reconstructed) != _normalized(section.narration):
+            raise ValueError(
+                f"Os blocos visuais de {section.section_id} não reconstroem integralmente "
+                "a narração."
+            )
+
+    descriptions = [_normalized(scene.scene_description) for scene in strategy.visual_scenes]
+    if any(left == right for left, right in zip(descriptions, descriptions[1:], strict=False)):
+        raise ValueError("Cenas visuais consecutivas precisam ser concretas e distintas.")
 
 
 def _validate_timing_and_retention(

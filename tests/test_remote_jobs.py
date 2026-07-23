@@ -167,7 +167,6 @@ def test_prepare_job_project_enables_local_specialists_without_human_approval(tm
     assert manifest.config.youtube_growth.use_specialist_subagent is True
     assert manifest.config.youtube_growth.title_standard == "creative_pipe_passage_v3"
     assert manifest.config.youtube_growth.title_variants == 1
-    assert manifest.config.youtube_growth.thumbnail_variants == 0
     assert manifest.config.audio.voice_id == DEFAULT_ELEVENLABS_VOICE_ID
     assert manifest.config.audio.model_id == DEFAULT_ELEVENLABS_MODEL_ID
     assert manifest.duration_policy == "preferred_target_v1"
@@ -260,7 +259,7 @@ def test_remote_high_stakes_job_persists_profile_voice_and_requested_music(
     manifest = layout.load_manifest()
 
     assert manifest.config.shorts_script.editorial_profile == ("high_stakes_biblical_question_v1")
-    assert manifest.config.shorts_script.require_independent_biblical_review is True
+    assert manifest.config.shorts_script.require_independent_biblical_review is False
     assert manifest.config.audio.voice_id == ELEVENLABS_VOICE_VARIANTS["jesus_2"]
     assert manifest.config.render.background_music_path is not None
     assert manifest.config.render.background_music_path.endswith(expected_filename)
@@ -269,7 +268,7 @@ def test_remote_high_stakes_job_persists_profile_voice_and_requested_music(
     assert summary["music_track"] == music_track
 
 
-def test_remote_character_request_bootstraps_verified_portrait_sources(tmp_path) -> None:
+def test_remote_character_request_bootstraps_verified_storytelling_sources(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(character="Judas", duration_seconds=60))
 
@@ -277,7 +276,7 @@ def test_remote_character_request_bootstraps_verified_portrait_sources(tmp_path)
     briefing = read_model(layout.briefing, Briefing)
     sources = read_model(layout.sources, SourceLibrary)
 
-    assert briefing.creative_mode == "character_portrait"
+    assert briefing.creative_mode == "biblical_storytelling"
     assert briefing.main_passage == "Mateus 26:14-16"
     assert len(sources.entries) == 4
     assert all(source.verified for source in sources.entries)
@@ -305,6 +304,24 @@ def test_long_script_phase_declares_one_functional_pacing_contract(tmp_path) -> 
     }
     assert any("long_form_strategy" in item for item in task["instructions"])
     assert any("cada seção acrescenta" in item.casefold() for item in task["instructions"])
+
+
+def test_character_long_script_phase_requires_human_storytelling_voice(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request(video_format="long", duration_seconds=420, character="Mateus"))
+    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
+
+    spec = _long_script_phase_spec(layout)
+    task = spec.payload["task"]
+    instructions = " ".join(task["instructions"]).casefold()
+
+    assert task["creative_contract"]["storytelling_profile"] == (
+        "biblical_character_storytelling_v1"
+    )
+    assert task["briefing"]["creative_mode"] == "biblical_storytelling"
+    assert "conte a história em voz alta" in instructions
+    assert "não use analysis nem comparison" in instructions
+    assert "o relato não explica" in instructions
 
 
 def test_codex_agent_command_starts_persistent_sol_medium_session(tmp_path) -> None:
@@ -710,34 +727,22 @@ def test_growth_correction_checkpoint_preserves_queue_and_reports_error(tmp_path
     job = store.enqueue(_request(topic="Cuidado"))
     layout = prepare_job_project(job, projects_root=tmp_path / "projects")
     context = layout.root / "youtube" / "growth-context.json"
-    reference = layout.root / "images" / "opening.png"
     package = layout.growth_package_staging
-    thumbnail = layout.growth_staging / "thumbnail-001.png"
-    reference.parent.mkdir(parents=True, exist_ok=True)
-    reference.write_bytes(b"reference")
     write_json(context, {"project_id": job.job_id})
     write_json(package, {"invalid": True})
     write_json(
         layout.growth_queue,
         {
             "job_id": "growth-test",
-            "inputs": {
-                "compact_context": "youtube/growth-context.json",
-                "thumbnail_visual_reference_path": "images/opening.png",
-                "thumbnail_visual_reference_scene_id": "scene-001",
-            },
-            "outputs": {
-                "package": "youtube/staging/youtube-growth-specialist/package.json",
-                "thumbnails": ["youtube/staging/youtube-growth-specialist/thumbnail-001.png"],
-            },
-            "visual_standard": {"reference_policy": "required_opening_scene_image"},
+            "inputs": {"context": "youtube/growth-context.json"},
+            "outputs": {"package": "youtube/staging/youtube-growth-specialist/package.json"},
         },
     )
 
     spec = _growth_correction_checkpoint(layout, ValueError("estilo fotográfico inválido"))
 
     assert spec.phase == "youtube_growth_correction"
-    assert spec.expected_outputs == (package, thumbnail)
+    assert spec.expected_outputs == (package,)
     assert str(package) in spec.payload["allowed_inputs"]
     assert "estilo fotográfico inválido" in spec.payload["task"]["validation_error"]
 
@@ -759,7 +764,7 @@ def test_remote_image_phase_delegates_two_compact_workers_in_parallel(tmp_path) 
                 "recommended_model": "gpt-5.6-sol",
                 "reasoning_effort": "low",
             },
-            "visual_standard": {"id": "cinematic-family-3d-v1"},
+            "visual_standard": {"id": "biblical-midcentury-gouache-v1"},
             "generation_retry_policy": {"maximum_attempts_per_item": 3},
             "items": [
                 {
@@ -797,17 +802,13 @@ def test_remote_image_phase_delegates_two_compact_workers_in_parallel(tmp_path) 
     assert second_job["jobs"][0]["prompt"] == "PROMPT EXCLUSIVO DOIS"
 
 
-def test_remote_growth_requires_opening_scene_as_visual_reference(tmp_path) -> None:
+def test_remote_growth_produces_metadata_without_image_inputs(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Confiança"))
     layout = prepare_job_project(job, projects_root=tmp_path / "projects")
     context = layout.root / "youtube" / "growth-context.json"
     package = layout.root / "youtube" / "staging" / "youtube-growth-specialist" / "package.json"
-    thumbnail = package.parent / "thumbnail-001.png"
-    reference = layout.root / "images" / "staging" / "scene-001-v001.png"
     write_json(context, {"opening_scene": {"scene_id": "scene-001"}})
-    reference.parent.mkdir(parents=True, exist_ok=True)
-    reference.write_bytes(b"reference image")
     write_json(
         layout.growth_queue,
         {
@@ -816,81 +817,17 @@ def test_remote_growth_requires_opening_scene_as_visual_reference(tmp_path) -> N
                 "recommended_model": "gpt-5.6-sol",
                 "reasoning_effort": "low",
             },
-            "inputs": {
-                "compact_context": "youtube/growth-context.json",
-                "thumbnail_visual_reference_scene_id": "scene-001",
-            },
-            "outputs": {
-                "package": "youtube/staging/youtube-growth-specialist/package.json",
-                "thumbnails": ["youtube/staging/youtube-growth-specialist/thumbnail-001.png"],
-            },
-            "visual_standard": {
-                "id": "cinematic-family-3d-v1",
-                "reference_policy": "required_opening_scene_image",
-            },
-        },
-    )
-    write_json(
-        layout.image_queue,
-        {
-            "items": [
-                {
-                    "scene_id": "scene-001",
-                    "staging_path": "images/staging/scene-001-v001.png",
-                }
-            ]
-        },
-    )
-
-    spec = _growth_phase_spec(layout)
-
-    assert spec.payload["allowed_inputs"] == [
-        str(layout.growth_queue),
-        str(context),
-        str(reference),
-    ]
-    assert spec.payload["task"]["thumbnail_visual_reference_path"] == str(reference)
-    assert "não a converta em fotografia" in spec.payload["task"]["instructions"][1]
-    assert spec.expected_outputs == (package, thumbnail)
-
-
-def test_remote_long_growth_uses_theme_prompt_without_visual_reference(tmp_path) -> None:
-    store = RemoteJobStore(tmp_path / "jobs")
-    job = store.enqueue(_request(video_format="long", topic="Confiança"))
-    layout = prepare_job_project(job, projects_root=tmp_path / "projects")
-    context = layout.root / "youtube" / "growth-context.json"
-    package = layout.root / "youtube" / "staging" / "youtube-growth-specialist" / "package.json"
-    thumbnail = package.parent / "thumbnail-001.png"
-    write_json(context, {"thumbnail_theme": "Confiança em Deus"})
-    write_json(
-        layout.growth_queue,
-        {
-            "job_id": "youtube-growth-long-test",
-            "inputs": {
-                "compact_context": "youtube/growth-context.json",
-                "thumbnail_visual_reference_scene_id": None,
-                "thumbnail_visual_reference_path": None,
-                "thumbnail_theme": "Confiança em Deus",
-                "thumbnail_prompt": "Prompt temático horizontal sem texto.",
-            },
-            "outputs": {
-                "package": "youtube/staging/youtube-growth-specialist/package.json",
-                "thumbnails": ["youtube/staging/youtube-growth-specialist/thumbnail-001.png"],
-                "thumbnail_source_mode": "generated_theme_art",
-            },
-            "visual_standard": {
-                "id": "cinematic-family-3d-v1",
-                "reference_policy": "theme_only_no_reference",
-            },
+            "inputs": {"context": "youtube/growth-context.json"},
+            "outputs": {"package": "youtube/staging/youtube-growth-specialist/package.json"},
         },
     )
 
     spec = _growth_phase_spec(layout)
 
     assert spec.payload["allowed_inputs"] == [str(layout.growth_queue), str(context)]
-    assert spec.payload["task"]["thumbnail_visual_reference_path"] is None
-    assert "sem referenced_image_paths" in spec.payload["task"]["instructions"][1]
-    assert spec.expected_outputs == (package, thumbnail)
+    assert spec.payload["task"]["kind"] == "produce_youtube_metadata"
+    assert spec.payload["task"]["tool"] is None
+    assert spec.expected_outputs == (package,)
 
 
 def test_specific_topic_uses_compact_catalog_selection_phase(tmp_path) -> None:

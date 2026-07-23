@@ -68,7 +68,7 @@ from pipeline_videos.utils import compact_json_schema, slugify, utc_now
 from pipeline_videos.validation import validate_project
 from pipeline_videos.verse_selection import create_auto_video
 
-REMOTE_JOB_SCHEMA_VERSION = "1.0"
+REMOTE_JOB_SCHEMA_VERSION = "1.1"
 REMOTE_JOB_STATE_SCHEMA_VERSION = "1.4"
 DEFAULT_REMOTE_JOBS_DIR = REPO_ROOT / "remote-jobs"
 REMOTE_TIMEZONE = ZoneInfo("America/Sao_Paulo")
@@ -144,8 +144,11 @@ class CodexPhaseSpec:
 
 
 class RemoteVideoRequest(PipelineModel):
-    schema_version: Literal["1.0"] = REMOTE_JOB_SCHEMA_VERSION
+    schema_version: Literal["1.0", "1.1"] = REMOTE_JOB_SCHEMA_VERSION
     video_format: Literal["short", "long"]
+    production_profile: Literal["standard_v1", "approved_fast_v1"] = "standard_v1"
+    approved_script_id: str | None = None
+    approved_script_hash: str | None = None
     topic: str | None = Field(default=None, max_length=240)
     title: str | None = Field(default=None, max_length=240)
     character: str | None = Field(default=None, max_length=120)
@@ -187,9 +190,23 @@ class RemoteVideoRequest(PipelineModel):
             self.video_format == "short" and self.duration_seconds < COMPACT_SHORT_THRESHOLD_SECONDS
         )
         high_stakes = self.editorial_profile == "high_stakes_biblical_question_v1"
+        approved_fast = self.production_profile == "approved_fast_v1"
+        if approved_fast:
+            if self.video_format != "short":
+                raise ValueError("O fluxo pré-aprovado é exclusivo de Shorts.")
+            if not self.approved_script_id or not self.approved_script_hash:
+                raise ValueError("O fluxo pré-aprovado exige ID e hash do roteiro.")
+            if self.topic or self.character:
+                raise ValueError("O fluxo pré-aprovado não aceita tema ou personagem adicionais.")
+        elif self.approved_script_id is not None or self.approved_script_hash is not None:
+            raise ValueError("ID/hash de roteiro só podem ser usados em approved_fast_v1.")
         if self.video_format == "long" and high_stakes:
             raise ValueError("O perfil high-stakes é exclusivo de Shorts.")
-        if high_stakes and not COMPACT_SHORT_THRESHOLD_SECONDS <= self.duration_seconds <= 60:
+        if (
+            high_stakes
+            and not approved_fast
+            and not COMPACT_SHORT_THRESHOLD_SECONDS <= self.duration_seconds <= 60
+        ):
             raise ValueError("O perfil high-stakes exige duração entre 45 e 60 segundos.")
         if high_stakes and (self.topic or self.character):
             raise ValueError(
@@ -429,11 +446,36 @@ def prepare_job_project(
     job: RemoteVideoJob,
     *,
     projects_root: Path | None = None,
+    approved_store: Any | None = None,
 ) -> ProjectLayout:
     root = (projects_root or DEFAULT_PROJECTS_DIR).expanduser().resolve()
     if job.project_path:
         return ProjectLayout(_assert_project_path(Path(job.project_path), root))
     request = job.request
+    if request.production_profile == "approved_fast_v1":
+        from pipeline_videos.approved_scripts import (
+            ApprovedScriptStore,
+            materialize_approved_project,
+        )
+
+        script_store = approved_store or ApprovedScriptStore(remote_jobs_dir())
+        assert request.approved_script_id is not None
+        approved, _ = script_store.find(request.approved_script_id)
+        if approved.status != "reserved" or approved.reserved_by_job_id != job.job_id:
+            raise RuntimeError("O roteiro pré-aprovado não está reservado por este job.")
+        if approved.content_hash != request.approved_script_hash:
+            raise RuntimeError("O hash do roteiro reservado diverge do pedido remoto.")
+        layout = materialize_approved_project(
+            approved,
+            job_id=job.job_id,
+            projects_root=root,
+            publication_mode=request.publication_mode,
+            voice_id=elevenlabs_voice_id_for_variant(request.voice_variant),
+            voice_model_id=default_elevenlabs_model_id(),
+        )
+        if request.music_track is not None:
+            import_music(layout, REMOTE_MUSIC_TRACK_PATHS[request.music_track])
+        return layout
     video_format: Literal["landscape", "short"] = (
         "short" if request.video_format == "short" else "landscape"
     )
@@ -446,7 +488,9 @@ def prepare_job_project(
             video_format=video_format,
             production_mode="final_candidate_one_shot",
             creative_mode_override=(
-                request.creative_mode if request.creative_mode != "auto" else "character_portrait"
+                request.creative_mode
+                if request.creative_mode != "auto"
+                else "biblical_storytelling"
             ),
             hook_family_override=(request.hook_family if request.hook_family != "auto" else None),
             requested_character=request.character,
@@ -515,8 +559,6 @@ def prepare_job_project(
     manifest.config.audio.voice_id = elevenlabs_voice_id_for_variant(request.voice_variant)
     manifest.config.audio.model_id = default_elevenlabs_model_id()
     manifest.config.youtube_growth.title_variants = 1
-    if manifest.config.youtube_growth.thumbnail_generation_mode != "youtube_auto_frame_v1":
-        manifest.config.youtube_growth.thumbnail_variants = 1
     manifest.config.youtube_publication.allow_automated_private_review_upload = True
     manifest.config.youtube_publication.allow_automated_scheduled_release = (
         request.publication_mode == "scheduled"
@@ -532,7 +574,7 @@ def prepare_job_project(
             "start_policy": request.start_policy,
             "publication_mode": request.publication_mode,
             "publish_at": request.publish_at.isoformat() if request.publish_at else None,
-            "title_thumbnail_variants": 1,
+            "title_variants": 1,
             "short_duration_profile": manifest.config.shorts_script.duration_profile,
             "creative_mode": request.creative_mode,
             "hook_policy": request.hook_policy,
@@ -960,7 +1002,7 @@ def _import_editorial_source_selection(
         if current.creative_mode != "auto"
         else select_compact_devotional_mode(usage)
         if compact
-        else "character_portrait"
+        else "biblical_storytelling"
         if job.request.character
         else select_creative_mode(main, usage, video_format=project.video_format)
     )
@@ -1752,55 +1794,9 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
 
 def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     queue = read_json(layout.growth_queue)
-    thumbnail_source_mode = queue.get("outputs", {}).get("thumbnail_source_mode")
-    theme_based_thumbnail = thumbnail_source_mode == "generated_theme_art"
-    youtube_auto_frame = thumbnail_source_mode == "youtube_auto_frame"
-    context = _project_file(layout, queue["inputs"]["compact_context"])
+    context = _project_file(layout, queue["inputs"]["context"])
     package = _project_file(layout, queue["outputs"]["package"])
-    thumbnails = tuple(
-        _project_file(layout, str(value)) for value in queue["outputs"].get("thumbnails", [])
-    )
-    reference_scene_id = str(
-        queue.get("inputs", {}).get("thumbnail_visual_reference_scene_id", "")
-    ).strip()
-    visual_reference: Path | None = None
-    declared_reference = str(
-        queue.get("inputs", {}).get("thumbnail_visual_reference_path") or ""
-    ).strip()
-    if declared_reference:
-        candidate = _project_file(layout, declared_reference)
-        if candidate.is_file():
-            visual_reference = candidate
-    if reference_scene_id and layout.image_queue.is_file():
-        image_queue = read_json(layout.image_queue)
-        for item in image_queue.get("items", []):
-            if str(item.get("scene_id")) != reference_scene_id:
-                continue
-            candidate = _project_file(layout, str(item.get("staging_path", "")))
-            if visual_reference is None and candidate.is_file():
-                visual_reference = candidate
-            break
-    if visual_reference is None and reference_scene_id and layout.images.is_file():
-        image_manifest = read_json(layout.images)
-        for item in image_manifest.get("items", []):
-            if str(item.get("scene_id")) != reference_scene_id:
-                continue
-            active_version = item.get("active_version")
-            for version in item.get("versions", []):
-                if version.get("version") == active_version:
-                    candidate = _project_file(layout, str(version.get("path", "")))
-                    if visual_reference is None and candidate.is_file():
-                        visual_reference = candidate
-                    break
-            break
-    reference_policy = queue.get("visual_standard", {}).get("reference_policy")
-    if reference_policy == "required_opening_scene_image" and visual_reference is None:
-        raise RuntimeError(
-            "A thumbnail remota exige a imagem da cena de abertura como referência visual."
-        )
     allowed_inputs = [str(layout.growth_queue), str(context)]
-    if visual_reference is not None:
-        allowed_inputs.append(str(visual_reference))
     return CodexPhaseSpec(
         phase="youtube_growth",
         item_id=str(queue.get("job_id")),
@@ -1817,52 +1813,19 @@ def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
             },
             "allowed_inputs": allowed_inputs,
             "task": {
-                "kind": (
-                    "produce_youtube_metadata_without_thumbnail"
-                    if youtube_auto_frame
-                    else "produce_one_title_thumbnail_pair"
-                ),
-                "tool": None if youtube_auto_frame else "$imagegen",
+                "kind": "produce_youtube_metadata",
+                "tool": None,
                 "queue_path": str(layout.growth_queue),
-                "compact_context_path": str(context),
-                "thumbnail_visual_reference_path": (
-                    str(visual_reference) if visual_reference is not None else None
-                ),
+                "context_path": str(context),
                 "instructions": [
-                    "Siga integralmente instructions, schemas e generation_retry_policy da fila.",
-                    (
-                        "Não chame imagegen e não crie thumbnail; entregue somente o pacote de "
-                        "metadados, deixando o YouTube selecionar um frame do vídeo."
-                        if youtube_auto_frame
-                        else "Use somente inputs.thumbnail_prompt, sem referenced_image_paths; "
-                        "gere a "
-                        "thumbnail horizontal limpa e sem texto exatamente como a fila determina."
-                        if theme_based_thumbnail
-                        else (
-                            "Use thumbnail_visual_reference_path como edit obrigatório de "
-                            "imagegen: preserve a imagem, a cena e o personagem e acrescente a "
-                            "composição editorial, o texto e a marcação vermelha; não a converta "
-                            "em fotografia. Aceite a primeira saída válida sem repetir por "
-                            "qualidade ou deriva visual."
-                            if visual_reference is not None
-                            else "Siga integralmente o visual_standard textual da fila."
-                        )
-                    ),
-                    (
-                        "Gere exatamente o título configurado e nenhuma thumbnail."
-                        if youtube_auto_frame
-                        else "Gere exatamente um título e uma thumbnail nesta produção remota."
-                    ),
-                    (
-                        "Escreva apenas outputs.package."
-                        if youtube_auto_frame
-                        else "Escreva apenas outputs.package e outputs.thumbnails."
-                    ),
+                    "Siga integralmente instructions e schemas da fila.",
+                    "Gere somente o pacote de título, descrição, tags e comentário fixado.",
+                    "Escreva apenas outputs.package.",
                     "O executor importará o pacote; não altere metadados compartilhados.",
                 ],
             },
         },
-        expected_outputs=(package, *thumbnails),
+        expected_outputs=(package,),
     )
 
 
@@ -1877,40 +1840,13 @@ def _growth_correction_checkpoint(
     if package.is_file():
         allowed_inputs.append(str(package))
     task = dict(payload["task"])
-    theme_based_thumbnail = (
-        read_json(layout.growth_queue).get("outputs", {}).get("thumbnail_source_mode")
-        == "generated_theme_art"
-    )
-    youtube_auto_frame = (
-        read_json(layout.growth_queue).get("outputs", {}).get("thumbnail_source_mode")
-        == "youtube_auto_frame"
-    )
     task.update(
         {
-            "kind": (
-                "correct_youtube_metadata_without_thumbnail"
-                if youtube_auto_frame
-                else "correct_one_title_thumbnail_pair"
-            ),
+            "kind": "correct_youtube_metadata",
             "validation_error": str(validation_error)[:4000],
             "instructions": [
-                "Corrija somente o pacote e a thumbnail que falharam na validação.",
+                "Corrija somente o pacote de metadados que falhou na validação.",
                 ("Preserve título, promessa, passagem e todos os campos já válidos."),
-                (
-                    "Não crie prompt, design ou arquivo de thumbnail durante a correção."
-                    if youtube_auto_frame
-                    else "Mantenha o visual_standard da fila como estilo positivo. Termos "
-                    "fotográficos conflitantes podem aparecer somente dentro de restrições "
-                    "negativas como Avoid."
-                ),
-                (
-                    "Para a thumbnail temática longa, restaure metadata.thumbnail_prompt como "
-                    "cópia exata de inputs.thumbnail_prompt e regenere sem imagem de referência, "
-                    "texto ou marcação editorial."
-                    if theme_based_thumbnail
-                    else "Se o estilo positivo pedir fotografia, reescreva o prompt e regenere "
-                    "uma única vez a thumbnail a partir da imagem de abertura obrigatória."
-                ),
                 (
                     "Nesta correção, ignore a regra de pular staging já existente: sobrescreva "
                     "explicitamente cada saída que precisar ser corrigida."
@@ -1918,9 +1854,6 @@ def _growth_correction_checkpoint(
                 (
                     "Sobrescreva somente outputs.package. Não altere project.json, fila, "
                     "aprovações ou outros ativos."
-                    if youtube_auto_frame
-                    else "Sobrescreva outputs.package e outputs.thumbnails. Não altere "
-                    "project.json, fila, aprovações ou outros ativos."
                 ),
             ],
         }
@@ -2042,7 +1975,89 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
         "cta_max_words": long_config.cta_max_words,
         "cta_max_seconds": long_config.cta_max_seconds,
         "cta_actions": ["comment", "subscribe", "share"],
+        "storytelling_profile": (
+            "biblical_character_storytelling_v1"
+            if is_creative and briefing.creative_mode == "biblical_storytelling"
+            else None
+        ),
+        "authorial_narration_standard": "human_authorial_voice_v1",
+        "narrator_identity": "jesus_first_person_v1",
+        "visual_scene_standard": "narration_block_visual_v1",
+        "visual_style": "biblical-midcentury-gouache-v1",
     }
+    authorial_style_instructions = [
+        (
+            "Toda a voz autoral é Jesus narrando em primeira pessoa. Escreva como Jesus contando "
+            "o que viveu, ensinou, viu, fez e sentiu, sem transformar a narração em uma imitação "
+            "de versículo."
+        ),
+        (
+            "Separe com rigor a dramatização autoral das citações: apenas excerpts verificados "
+            "entre aspas são palavras bíblicas literais. As demais frases em primeira pessoa são "
+            "narração dramatizada sustentada pelas fontes."
+        ),
+        (
+            "Aplique human_authorial_voice_v1 a toda locução autoral, independentemente do modo. "
+            "Narre diretamente o fato, a ação, a dúvida ou a explicação e nunca descreva o próprio "
+            "método de leitura."
+        ),
+        (
+            "São proibidas fórmulas metalinguísticas como 'o relato registra', 'o relato não "
+            "explica', 'a sequência é compacta', 'o retrato começa', 'a passagem paralela "
+            "acrescenta', 'comparar é observar', 'não podemos afirmar' e equivalentes."
+        ),
+        (
+            "Não valorize uma ação dizendo antes o que alguém não fez e não defina cenas por "
+            "listas de ausência como 'afirmação, sem A, B ou C'. Também não use a fórmula "
+            "'não A nem B, mas C'; declare C diretamente. Citações bíblicas literais permanecem "
+            "intactas."
+        ),
+    ]
+    storytelling_instructions = (
+        [
+            (
+                "Aplique biblical_character_storytelling_v1: conte a história em voz alta como "
+                "uma sequência humana de cenas, escolhas e consequências. A precisão bíblica "
+                "deve controlar o que é escrito sem virar assunto da locução."
+            ),
+            (
+                "Use todas as passagens relacionadas para avançar a linha do tempo disponível "
+                "do personagem. Não permaneça analisando a passagem-âncora nem a repita para "
+                "preencher duração."
+            ),
+            (
+                "A maior parte das seções entre opening e closing deve usar role="
+                "biblical_narrative. Nos beats, use progression, context, evidence, reveal e "
+                "reengagement; não use analysis nem comparison."
+            ),
+            (
+                "Não narre o método de leitura. São proibidas formulações como 'o relato "
+                "registra', 'o relato não explica', 'a sequência é compacta', 'o retrato "
+                "começa', 'o primeiro traço', 'a passagem paralela acrescenta', 'comparar é "
+                "observar', 'sem preencher os silêncios' e equivalentes."
+            ),
+            (
+                "Não use negação retórica para valorizar a ação seguinte. São inválidas tanto "
+                "listas de ausência ('a cena começa, sem biografia, preparação ou explicação') "
+                "quanto frases isoladas como 'não fez um discurso longo' seguidas do que o "
+                "personagem fez. Não acumule 'sem', 'não' ou 'nem'. Narre diretamente a ação "
+                "positiva e concreta: 'Jesus encontrou Mateus na coletoria e disse: Siga-me'."
+            ),
+            (
+                "Quando um detalhe não estiver sustentado, simplesmente não o inclua. Mencione "
+                "uma dúvida ou tradição somente se ela for indispensável para compreender a "
+                "história e houver fonte apropriada; faça isso em uma frase natural, sem aula "
+                "sobre interpretação."
+            ),
+            (
+                "Depois de cada citação, retome imediatamente quem fez o quê, onde a situação "
+                "mudou ou qual consequência veio a seguir. Evite duas passagens paralelas que "
+                "apenas recontam o mesmo momento sem acrescentar uma etapa da vida."
+            ),
+        ]
+        if is_creative and briefing.creative_mode == "biblical_storytelling"
+        else []
+    )
     if is_creative:
         instructions = [
             (
@@ -2050,6 +2065,7 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 "pode ser factual, didático, investigativo, filosófico ou pastoral conforme "
                 "creative_mode; não converta automaticamente o conteúdo em aconselhamento."
             ),
+            *authorial_style_instructions,
             (
                 "Use somente excerpts verificados de sources em citações literais e distribua "
                 "entre "
@@ -2090,11 +2106,19 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 "evidência, contexto, comparação, argumento, consequência, revelação ou síntese; "
                 "não reformule a mesma mensagem motivacional."
             ),
+            *storytelling_instructions,
             (
                 "Cada beat mapeia exatamente uma seção em ordem; copie viewer_value em "
                 "retention_goal e visual_progression em visual_direction. Use ao menos "
                 f"{required_reengagements} reengajamentos e nunca passe de "
                 f"{long_config.maximum_reengagement_gap_seconds:.0f}s sem valor novo."
+            ),
+            (
+                "Divida integralmente a locução em long_form_strategy.visual_scenes. Cada item "
+                "copia um bloco contíguo da narração, preserva a ordem e descreve uma cena "
+                "concreta, distinta e criativa em guache editorial cristão de meados do século. "
+                "Use relações literal, contextual ou symbolic; varie ação, ambiente, objeto, "
+                "escala e simbolismo, sem colagem, painéis, texto legível ou visual 3D."
             ),
             (
                 "Mapeie cada citação em scripture_anchors na mesma ordem da locução. Insira a "
@@ -2121,6 +2145,7 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     else:
         instructions = [
             "Escreva locução integralmente em pt-BR, natural, pastoral e sem jargão editorial.",
+            *authorial_style_instructions,
             "Use somente excerpts verificados de sources em citações literais e distribua-os.",
             "Verbalize Livro, capítulo e versículo; deixe somente o excerpt entre aspas.",
             "Classifique afirmações e preserve limites de interpretação do briefing.",
@@ -2140,6 +2165,11 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 f"{long_config.maximum_reengagement_gap_seconds:.0f}s sem nova informação."
             ),
             "Preencha long_form_strategy por completo e mapeie cada seção em ordem.",
+            (
+                "Divida integralmente a locução em long_form_strategy.visual_scenes. Cada bloco "
+                "é contíguo, reconstrói a seção sem lacunas e recebe uma cena concreta e distinta "
+                "no padrão biblical-midcentury-gouache-v1, sem 3D, colagem ou texto legível."
+            ),
             "Mapeie cada citação em scripture_anchors na mesma ordem da locução.",
             "Reserve payoff e aplicação para o quarto final e retome a abertura no callback.",
             "A closing termina imediatamente após exatamente uma ação de CTA.",
@@ -2764,21 +2794,22 @@ def _produce_remote_candidate(
     from pipeline_videos.autopilot import run_autopilot_once
 
     _run_pipeline_diagnostics(job, layout, store, repo_root=repo_root)
-    job = _ensure_editorial_context(
-        job,
-        layout,
-        store,
-        projects_root=projects_root,
-        repo_root=repo_root,
-        timeout_seconds=timeout_seconds,
-    )
-    job = _ensure_long_script(
-        job,
-        layout,
-        store,
-        repo_root=repo_root,
-        timeout_seconds=timeout_seconds,
-    )
+    if job.request.production_profile != "approved_fast_v1":
+        job = _ensure_editorial_context(
+            job,
+            layout,
+            store,
+            projects_root=projects_root,
+            repo_root=repo_root,
+            timeout_seconds=timeout_seconds,
+        )
+        job = _ensure_long_script(
+            job,
+            layout,
+            store,
+            repo_root=repo_root,
+            timeout_seconds=timeout_seconds,
+        )
     for _ in range(8):
         job = _ensure_valid_shorts_script_staging(
             job,
@@ -2788,6 +2819,12 @@ def _produce_remote_candidate(
             timeout_seconds=timeout_seconds,
         )
         try:
+            if job.request.production_profile == "approved_fast_v1":
+                from pipeline_videos.approved_scripts import (
+                    verify_project_approved_script_lock,
+                )
+
+                verify_project_approved_script_lock(layout)
             result = run_autopilot_once(layout, allow_external=True)
         except Exception as exc:
             if _growth_package_repair_is_applicable(layout):
@@ -2800,6 +2837,8 @@ def _produce_remote_candidate(
                     timeout_seconds=timeout_seconds,
                 )
                 continue
+            if job.request.production_profile == "approved_fast_v1":
+                raise
             if not _shorts_pipeline_repair_is_applicable(layout):
                 raise
             job = _repair_shorts_pipeline_failure(
@@ -2868,6 +2907,10 @@ def _produce_remote_candidate(
 
 
 def _complete_private_upload(job: RemoteVideoJob, layout: ProjectLayout) -> tuple[str, str]:
+    if job.request.production_profile == "approved_fast_v1":
+        from pipeline_videos.approved_scripts import verify_project_approved_script_lock
+
+        verify_project_approved_script_lock(layout)
     report = validate_project(layout, require_render=True)
     if not report.valid:
         raise RuntimeError("A validação técnica do candidato remoto falhou.")
@@ -2911,6 +2954,7 @@ def work_once(
     dry_run: bool = False,
 ) -> RemoteVideoJob | None:
     if not dry_run:
+        from pipeline_videos.approved_scripts import ApprovedScriptStore
         from pipeline_videos.remote_schedules import (
             RemoteScheduleStore,
             materialize_daily_schedules,
@@ -2919,6 +2963,7 @@ def work_once(
         materialize_daily_schedules(
             store=store,
             schedule_store=RemoteScheduleStore(store.root),
+            approved_store=ApprovedScriptStore(store.root),
         )
     waiting = [job for job in reversed(store.list(status="waiting_youtube")) if job_is_due(job)]
     if waiting:
@@ -2963,7 +3008,12 @@ def work_once(
         next_retry_at=None,
     )
     try:
-        layout = prepare_job_project(job, projects_root=projects_root)
+        approved_store = ApprovedScriptStore(store.root)
+        layout = prepare_job_project(
+            job,
+            projects_root=projects_root,
+            approved_store=approved_store,
+        )
         job = store.transition(job, "running", project_path=str(layout.root))
         resolved_projects_root = (projects_root or DEFAULT_PROJECTS_DIR).expanduser().resolve()
         job = _produce_remote_candidate(
@@ -2975,9 +3025,20 @@ def work_once(
         )
         video_id, youtube_url = _complete_private_upload(job, layout)
         updates = {"video_id": video_id, "youtube_url": youtube_url, "error": None}
+        if (
+            job.request.production_profile == "approved_fast_v1"
+            and job.request.approved_script_id is not None
+        ):
+            approved_store.mark_produced(
+                job.request.approved_script_id,
+                job_id=job.job_id,
+                video_id=video_id,
+                youtube_url=youtube_url,
+            )
         if job.request.publication_mode == "scheduled":
             return store.transition(job, "waiting_youtube", **updates)
-        return store.transition(job, "completed", **updates)
+        completed = store.transition(job, "completed", **updates)
+        return completed
     except Exception as exc:
         latest, _ = store.find(job.job_id)
         return _schedule_automatic_recovery(
@@ -3043,6 +3104,8 @@ def job_summary(job: RemoteVideoJob) -> dict[str, Any]:
         "job_id": job.job_id,
         "status": job.status,
         "format": job.request.video_format,
+        "production_profile": job.request.production_profile,
+        "approved_script_id": job.request.approved_script_id,
         "topic": job.request.topic or "automatic",
         "duration_seconds": job.request.duration_seconds,
         "start_policy": job.request.start_policy,

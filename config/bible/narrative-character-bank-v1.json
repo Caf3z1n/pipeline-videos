@@ -5166,6 +5166,141 @@
       "spoken_by": "unspecified"
     },
     {
+      "candidate_id": "bpm-narrative-andre",
+      "source_id": "bpm-narrative-andre-anchor",
+      "reference": "João 1:35-42",
+      "context_reference": "João 1:35-42",
+      "book": "João",
+      "testament": "new",
+      "translation": "Bíblia Portuguesa Mundial (BPM)",
+      "verse_text": "Novamente, no dia seguinte, João estava lá com dois dos seus discípulos, e, olhando para Jesus, que andava por ali, disse: “Eis o Cordeiro de Deus!” Os dois discípulos o ouviram falar e seguiram a Jesus. Jesus voltou-se e, vendo que o seguiam, disse-lhes: “O que vocês estão procurando?” Eles lhe disseram: “Rabi” (que, traduzido, quer dizer Mestre), “onde o senhor está hospedado?” Ele lhes disse: “Venham e vejam.” Eles foram e viram onde ele estava hospedado, e passaram aquele dia com ele. Era por volta da décima hora. Um dos dois que ouviram João e seguiram a Jesus era André, irmão de Simão Pedro. Ele primeiro encontrou seu próprio irmão, Simão, e lhe disse: “Achamos o Messias!” (que, traduzido, é Cristo). Ele o levou a Jesus. Jesus olhou para ele e disse: “Você é Simão, filho de Jonas. Você será chamado Cefas” (que, traduzido, é Pedro).",
+      "source_url": "https://ebible.org/porbrbsl/JHN01.htm",
+      "accessed_at": "2026-07-20",
+      "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
+      "title": "André, o primeiro discípulo a seguir Jesus",
+      "slug": "personagem-andre",
+      "central_theme": "Do primeiro encontro à perseverança entre os apóstolos",
+      "practical_application": "Reconstruir a trajetória do personagem pelo texto bíblico, distinguindo fatos, contexto verificado e aplicação pastoral.",
+      "audience": "pessoas que desejam compreender personagens e histórias bíblicas",
+      "emotional_intent": "aproximar o espectador do conflito humano do relato sem inventar pensamentos, motivações ou diálogos",
+      "narration_tone": "narrativo, cinematográfico, reverente, claro e emocionalmente contido",
+      "themes": [
+        "character_story",
+        "do-primeiro-encontro-a-perseveranca-entre-os-apostolos"
+      ],
+      "characters": [
+        "André"
+      ],
+      "character_aliases": [
+        "André",
+        "Andre",
+        "apóstolo André",
+        "André, irmão de Pedro"
+      ],
+      "related_passages": [
+        {
+          "passage_id": "related-01",
+          "reference": "Mateus 4:18-20",
+          "context_reference": "Mateus 4:18-20",
+          "verse_text": "Andando à beira do mar da Galileia, ele viu dois irmãos: Simão, chamado Pedro, e André, seu irmão, lançando uma rede ao mar; pois eram pescadores. Ele lhes disse: “Venham após mim, e eu farei de vocês pescadores de homens.” Eles imediatamente deixaram suas redes e o seguiram.",
+          "source_url": "https://ebible.org/porbrbsl/MAT04.htm",
+          "role": "parallel_account",
+          "spoken_by": "unspecified"
+        },
+        {
+          "passage_id": "related-02",
+          "reference": "Mateus 10:1-4",
+          "context_reference": "Mateus 10:1-4",
+          "verse_text": "Chamando a si os seus doze discípulos, deu-lhes autoridade sobre os espíritos imundos, para expulsá-los e para curar toda doença e toda enfermidade. Ora, os nomes dos doze apóstolos são estes: primeiro, Simão, chamado Pedro; André, seu irmão; Tiago, filho de Zebedeu; João, seu irmão; Filipe; Bartolomeu; Tomé; Mateus, o publicano; Tiago, filho de Alfeu; Lebeu, que também era chamado Tadeu; Simão, o Zelote; e Judas Iscariotes, que também o traiu.",
+          "source_url": "https://ebible.org/porbrbsl/MAT10.htm",
+          "role": "character_development",
+          "spoken_by": "unspecified"
+        },
+        {
+          "passage_id": "related-03",
+          "reference": "João 6:5-9",
+          "context_reference": "João 6:5-9",
+          "verse_text": "Então Jesus, levantando os olhos e vendo que uma grande multidão vinha a ele, disse a Filipe: “Onde compraremos pão, para que estes possam comer?” Ele dizia isso para testá-lo, pois ele mesmo sabia o que estava para fazer. Filipe lhe respondeu: “Duzentos denários de pão não são suficientes para eles, para que cada um deles receba um pouco.” Um de seus discípulos, André, irmão de Simão Pedro, disse a ele: “Há um rapaz aqui que tem cinco pães de cevada e dois peixes, mas o que é isso para tantos?",
+          "source_url": "https://ebible.org/porbrbsl/JHN06.htm",
+          "role": "character_development",
+          "spoken_by": "unspecified"
+        },
+        {
+          "passage_id": "related-04",
+          "reference": "João 12:20-22",
+          "context_reference": "João 12:20-22",
+          "verse_text": "Ora, havia certos gregos entre os que subiram para adorar na festa. Portanto, estes se aproximaram de Filipe, que era de Betsaida da Galileia, e lhe pediram, dizendo: “Senhor, nós queremos ver Jesus.” Filipe foi e disse a André, e por sua vez, André foi com Filipe, e eles disseram a Jesus.",
+          "source_url": "https://ebible.org/porbrbsl/JHN12.htm",
+          "role": "character_development",
+          "spoken_by": "unspecified"
+        },
+        {
+          "passage_id": "related-05",
+          "reference": "Marcos 13:3-4",
+          "context_reference": "Marcos 13:3-4",
+          "verse_text": "Estando ele assentado no monte das Oliveiras, de frente para o templo, Pedro, Tiago, João e André lhe perguntaram em particular: “Diga-nos, quando acontecerão estas coisas? E qual será o sinal de que todas estas coisas estão prestes a se cumprir?",
+          "source_url": "https://ebible.org/porbrbsl/MRK13.htm",
+          "role": "character_development",
+          "spoken_by": "unspecified"
+        },
+        {
+          "passage_id": "related-06",
+          "reference": "Atos 1:12-14",
+          "context_reference": "Atos 1:12-14",
+          "verse_text": "Então eles voltaram para Jerusalém, do monte chamado das Oliveiras, que fica perto de Jerusalém, à distância da jornada de um sábado. Quando entraram, subiram ao cenáculo onde estavam hospedados, isto é, Pedro, João, Tiago, André, Filipe, Tomé, Bartolomeu, Mateus, Tiago, filho de Alfeu, Simão, o Zelote, e Judas, filho de Tiago. Todos estes perseveravam unânimes em oração e súplica, juntamente com as mulheres, com Maria, mãe de Jesus, e com os irmãos dele.",
+          "source_url": "https://ebible.org/porbrbsl/ACT01.htm",
+          "role": "character_outcome",
+          "spoken_by": "unspecified"
+        }
+      ],
+      "preferred_development_modes": [
+        "biblical_story",
+        "context",
+        "cross_reference"
+      ],
+      "interpretation_limits": [
+        "Não atribuir ao personagem pensamentos, emoções ou motivações que o texto não registra.",
+        "Não transformar reconstrução narrativa em citação bíblica literal.",
+        "Distinguir relato principal, passagem paralela e aplicação ao espectador."
+      ],
+      "claims_to_avoid": [
+        "Não harmonizar relatos paralelos apagando diferenças de detalhe.",
+        "Não apresentar silêncio do texto como certeza histórica.",
+        "Não usar o desfecho do personagem como promessa automática ao espectador."
+      ],
+      "visual_notes": [
+        "Manter André reconhecível e consistente ao longo das cenas.",
+        "Representar um momento, ambiente e ação por imagem, sem colagem.",
+        "Preservar figurino, idade aparente e contexto histórico entre os movimentos."
+      ],
+      "retention_archetypes": [
+        "conflict_first",
+        "counterintuitive_reveal",
+        "stair_step_progression"
+      ],
+      "human_conflict": "André segue Jesus, conduz Simão até ele e volta a aparecer aproximando pessoas e recursos do Mestre.",
+      "central_question": "O que a trajetória de André revela neste conflito?",
+      "visual_progression": [
+        "Abrir no instante de maior tensão humana do relato.",
+        "Recuar ao contexto necessário sem interromper a progressão.",
+        "Avançar pelas escolhas documentadas e suas consequências.",
+        "Encerrar no desfecho bíblico, preservando limites e perguntas abertas."
+      ],
+      "possible_reveal": "O primeiro discípulo nomeado por João ao seguir Jesus permanece entre os apóstolos até a reunião em oração em Jerusalém.",
+      "title_seed": "André, o primeiro discípulo a seguir Jesus",
+      "retention_potential_score": 0.9,
+      "selection_weight": 1.0,
+      "familiarity_score": 0.78,
+      "clarity_score": 0.9,
+      "catalog_segment": "narrative_story",
+      "recommended_formats": [
+        "short",
+        "long"
+      ],
+      "source_text_scope": "pericope_excerpt",
+      "spoken_by": "unspecified"
+    },
+    {
       "candidate_id": "bpm-narrative-judas-iscariotes",
       "source_id": "bpm-narrative-judas-iscariotes-anchor",
       "reference": "Mateus 26:14-16",
@@ -5285,16 +5420,16 @@
       "source_url": "https://ebible.org/porbrbsl/MAT09.htm",
       "accessed_at": "2026-07-20",
       "rights_note": "Domínio público, conforme declaração da edição BPM no eBible.org.",
-      "title": "Mateus deixando a coletoria",
+      "title": "Mateus, da coletoria aos doze",
       "slug": "personagem-mateus",
-      "central_theme": "Chamado, ruptura e acolhimento",
+      "central_theme": "Da coletoria à presença entre os doze",
       "practical_application": "Reconstruir a trajetória do personagem pelo texto bíblico, distinguindo fatos, contexto verificado e aplicação pastoral.",
       "audience": "pessoas que desejam compreender personagens e histórias bíblicas",
       "emotional_intent": "aproximar o espectador do conflito humano do relato sem inventar pensamentos, motivações ou diálogos",
       "narration_tone": "narrativo, cinematográfico, reverente, claro e emocionalmente contido",
       "themes": [
         "character_story",
-        "chamado-ruptura-e-acolhimento"
+        "da-coletoria-a-presenca-entre-os-doze"
       ],
       "characters": [
         "Mateus"
@@ -5308,28 +5443,37 @@
       "related_passages": [
         {
           "passage_id": "related-01",
-          "reference": "Marcos 2:13-17",
-          "context_reference": "Marcos 2:13-17",
-          "verse_text": "Ele saiu novamente para a beira-mar. Toda a multidão vinha a ele, e ele os ensinava. Ao passar, ele viu Levi, filho de Alfeu, sentado na coletoria de impostos. Ele lhe disse: “Siga-me.” E ele se levantou e o seguiu. Estando ele reclinado à mesa na casa dele, muitos publicanos e pecadores sentaram-se com Jesus e seus discípulos, pois eram muitos, e eles o seguiam. Os escribas e os fariseus, quando viram que ele estava comendo com os pecadores e publicanos, disseram aos seus discípulos: “Por que ele come e bebe com publicanos e pecadores?” Quando Jesus ouviu isso, disse-lhes: “Os sãos não precisam de médico, mas sim os doentes. Eu não vim para chamar os justos, mas os pecadores ao arrependimento.",
-          "source_url": "https://ebible.org/porbrbsl/MRK02.htm",
-          "role": "parallel_account",
-          "spoken_by": "unspecified"
-        },
-        {
-          "passage_id": "related-02",
-          "reference": "Lucas 5:27-32",
-          "context_reference": "Lucas 5:27-32",
-          "verse_text": "Depois dessas coisas, ele saiu e viu um cobrador de impostos chamado Levi, sentado na coletoria, e lhe disse: “Siga-me!” Ele deixou tudo, levantou-se e o seguiu. Levi ofereceu-lhe um grande banquete em sua casa. Havia uma grande multidão de cobradores de impostos e de outras pessoas que estavam à mesa com eles. Os escribas e os fariseus murmuravam contra os discípulos dele, dizendo: “Por que vocês comem e bebem com os cobradores de impostos e pecadores?” Jesus lhes respondeu: “Os que têm saúde não precisam de médico, mas sim os doentes. Eu não vim para chamar os justos, mas os pecadores, ao arrependimento.",
+          "reference": "Lucas 5:27-29",
+          "context_reference": "Lucas 5:27-29",
+          "verse_text": "Depois dessas coisas, ele saiu e viu um cobrador de impostos chamado Levi, sentado na coletoria, e lhe disse: “Siga-me!” Ele deixou tudo, levantou-se e o seguiu. Levi ofereceu-lhe um grande banquete em sua casa. Havia uma grande multidão de cobradores de impostos e de outras pessoas que estavam à mesa com eles.",
           "source_url": "https://ebible.org/porbrbsl/LUK05.htm",
           "role": "parallel_account",
           "spoken_by": "unspecified"
         },
         {
-          "passage_id": "related-03",
-          "reference": "Mateus 10:2-4",
-          "context_reference": "Mateus 10:2-4",
-          "verse_text": "Ora, os nomes dos doze apóstolos são estes: primeiro, Simão, chamado Pedro; André, seu irmão; Tiago, filho de Zebedeu; João, seu irmão; Filipe; Bartolomeu; Tomé; Mateus, o publicano; Tiago, filho de Alfeu; Lebeu, que também era chamado Tadeu; Simão, o Zelote; e Judas Iscariotes, que também o traiu.",
+          "passage_id": "related-02",
+          "reference": "Mateus 10:1-8",
+          "context_reference": "Mateus 10:1-8",
+          "verse_text": "Chamando a si os seus doze discípulos, deu-lhes autoridade sobre os espíritos imundos, para expulsá-los e para curar toda doença e toda enfermidade. Ora, os nomes dos doze apóstolos são estes: primeiro, Simão, chamado Pedro; André, seu irmão; Tiago, filho de Zebedeu; João, seu irmão; Filipe; Bartolomeu; Tomé; Mateus, o publicano; Tiago, filho de Alfeu; Lebeu, que também era chamado Tadeu; Simão, o Zelote; e Judas Iscariotes, que também o traiu. Jesus enviou estes doze e lhes ordenou, dizendo: “Não vão aos gentios, nem entrem em nenhuma cidade dos samaritanos. Vão, antes, às ovelhas perdidas da casa de Israel. Por onde forem, preguem, dizendo: ‘O Reino dos Céus está próximo!’ Curem os enfermos, purifiquem os leprosos, e expulsem os demônios. Vocês receberam de graça, portanto, deem de graça.",
           "source_url": "https://ebible.org/porbrbsl/MAT10.htm",
+          "role": "character_development",
+          "spoken_by": "unspecified"
+        },
+        {
+          "passage_id": "related-03",
+          "reference": "Mateus 28:16-20",
+          "context_reference": "Mateus 28:16-20",
+          "verse_text": "Mas os onze discípulos foram para a Galileia, para o monte para onde Jesus os havia enviado. Quando o viram, prostraram-se diante dele; mas alguns duvidaram. Jesus aproximou-se deles e lhes falou, dizendo: “Toda a autoridade me foi dada no céu e na terra. Vão e façam discípulos de todas as nações, batizando-os em nome do Pai e do Filho e do Espírito Santo, ensinando-os a guardar todas as coisas que eu lhes ordenei. Eis que estou com vocês sempre, até o fim dos tempos.” Amém.",
+          "source_url": "https://ebible.org/porbrbsl/MAT28.htm",
+          "role": "character_outcome",
+          "spoken_by": "unspecified"
+        },
+        {
+          "passage_id": "related-04",
+          "reference": "Atos 1:12-14",
+          "context_reference": "Atos 1:12-14",
+          "verse_text": "Então eles voltaram para Jerusalém, do monte chamado das Oliveiras, que fica perto de Jerusalém, à distância da jornada de um sábado. Quando entraram, subiram ao cenáculo onde estavam hospedados, isto é, Pedro, João, Tiago, André, Filipe, Tomé, Bartolomeu, Mateus, Tiago, filho de Alfeu, Simão, o Zelote, e Judas, filho de Tiago. Todos estes perseveravam unânimes em oração e súplica, juntamente com as mulheres, com Maria, mãe de Jesus, e com os irmãos dele.",
+          "source_url": "https://ebible.org/porbrbsl/ACT01.htm",
           "role": "character_outcome",
           "spoken_by": "unspecified"
         }
@@ -5367,8 +5511,8 @@
         "Avançar pelas escolhas documentadas e suas consequências.",
         "Encerrar no desfecho bíblico, preservando limites e perguntas abertas."
       ],
-      "possible_reveal": "Jesus não espera que Mateus conquiste aceitação antes de chamá-lo a uma nova direção.",
-      "title_seed": "Mateus deixando a coletoria",
+      "possible_reveal": "O homem chamado na coletoria volta a aparecer pelo nome entre os doze e, depois, reunido com os apóstolos em oração.",
+      "title_seed": "Mateus, da coletoria aos doze",
       "retention_potential_score": 0.9,
       "selection_weight": 1.0,
       "familiarity_score": 0.78,

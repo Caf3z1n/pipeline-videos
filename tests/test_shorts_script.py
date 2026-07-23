@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 
 import pytest
@@ -10,10 +11,8 @@ from pipeline_videos.images import build_codex_queue
 from pipeline_videos.models import (
     BiblicalReview,
     Briefing,
-    ContinuityBible,
     CreativeContract,
     ImageManifest,
-    Palette,
     ScriptDocument,
     ScriptSection,
     ShortsCinematicDevotionalDirection,
@@ -39,24 +38,20 @@ from pipeline_videos.project import (
     create_project,
     short_literal_verse_word_limit,
 )
-from pipeline_videos.scenes import _resolved_style, build_scenes
-from pipeline_videos.script import ensure_creative_contract
+from pipeline_videos.scenes import build_scenes
 from pipeline_videos.shorts_script import (
     LEGACY_SCRIPTURE_BOUNDARY_PHRASE,
     ShortsScriptPackageValidationError,
     _balanced_compact_chunks,
     _compact_opening_fallback,
-    check_reviewed_shorts_script_staging,
     check_shorts_script_package_staging,
     import_shorts_script_package,
     materialize_compact_visual_fallback,
-    prepare_shorts_biblical_review_queue,
     prepare_shorts_script_queue,
-    shorts_script_input_hash,
     spoken_biblical_reference,
 )
 from pipeline_videos.storage import read_json, read_model, write_json
-from pipeline_videos.utils import sha256_value, utc_now
+from pipeline_videos.utils import utc_now
 from pipeline_videos.verse_selection import eligible_main_candidate_ids, load_verse_catalog
 
 
@@ -67,7 +62,6 @@ def _short_project(tmp_path):
         projects_dir=tmp_path,
         target_duration_seconds=60,
         video_format="short",
-        style_id="cinematic-family-3d-animation",
         project_date=date(2026, 7, 14),
     )
     manifest = layout.load_manifest()
@@ -117,6 +111,50 @@ def _short_project(tmp_path):
         ),
     )
     return layout
+
+
+def _visual_scenes_for_sections(
+    sections: list[ScriptSection],
+    *,
+    target: int = 8,
+) -> list[ShortsVisualScene]:
+    blocks = [[section.narration] for section in sections]
+    while sum(len(section_blocks) for section_blocks in blocks) < target:
+        split_applied = False
+        for section_blocks in blocks:
+            for index, narration in enumerate(section_blocks):
+                boundary = re.search(r"(?<=[.!?;,:])\s+", narration)
+                if boundary is None:
+                    continue
+                section_blocks[index : index + 1] = [
+                    narration[: boundary.start()].strip(),
+                    narration[boundary.end() :].strip(),
+                ]
+                split_applied = True
+                break
+            if split_applied:
+                break
+        if not split_applied:
+            raise AssertionError("A fixture não possui fronteiras naturais para oito cenas.")
+
+    relations = ("literal", "contextual", "symbolic")
+    scenes: list[ShortsVisualScene] = []
+    scene_index = 0
+    for section, section_blocks in zip(sections, blocks, strict=True):
+        for narration in section_blocks:
+            scenes.append(
+                ShortsVisualScene(
+                    section_id=section.section_id,
+                    narration=narration,
+                    scene_description=(
+                        f"Cena específica {scene_index + 1}: ação visual distinta para "
+                        f"{section.section_id}."
+                    ),
+                    visual_relation=relations[scene_index % len(relations)],
+                )
+            )
+            scene_index += 1
+    return scenes
 
 
 def _package(queue: dict) -> ShortsScriptPackage:
@@ -305,6 +343,7 @@ def _package(queue: dict) -> ShortsScriptPackage:
                 target_end_seconds=48,
             ),
         ],
+        visual_scenes=_visual_scenes_for_sections(script.sections),
         source_ids=["biblia-josue-1-9"],
         section_ids=[
             "section-001",
@@ -338,7 +377,6 @@ def _retention_project(tmp_path):
         projects_dir=tmp_path,
         target_duration_seconds=50,
         video_format="short",
-        style_id="cinematic-family-3d-animation",
         project_date=date(2026, 7, 16),
     )
     manifest = layout.load_manifest()
@@ -622,6 +660,7 @@ def _retention_package(queue: dict) -> ShortsScriptPackage:
                 visual_change="Davi avança e deixa os passos ameaçadores para trás.",
             ),
         ],
+        visual_scenes=_visual_scenes_for_sections(sections),
         source_ids=["bpm-salmos-56-3"],
         section_ids=[section.section_id for section in sections],
         biblical_safeguards=["Não tratar medo como pecado automático."],
@@ -748,20 +787,20 @@ def _creative_package(queue: dict) -> ShortsScriptPackage:
             "payoff": resolution,
             "practical_value": viewer_takeaway,
             "retention_beats": beats,
+            "visual_scenes": _visual_scenes_for_sections(sections),
         }
     )
     script = legacy.script.model_copy(update={"sections": sections})
     return legacy.model_copy(update={"script": script, "strategy": creative_strategy})
 
 
-def _micro_creative_project(tmp_path, *, legacy_short_profile: bool = True):
+def _micro_creative_project(tmp_path, *, legacy_short_profile: bool = False):
     layout = create_project(
         "momento-com-jesus",
         "Jesus conhece o seu cansaço",
         projects_dir=tmp_path,
         target_duration_seconds=15,
         video_format="short",
-        style_id=("cinematic-family-3d-animation" if legacy_short_profile else None),
         project_date=date(2026, 7, 20),
     )
     manifest = layout.load_manifest()
@@ -1066,7 +1105,6 @@ def test_shorts_specialist_queue_imports_script_review_and_retention_strategy(tm
     assert any("português brasileiro" in instruction for instruction in queue["instructions"])
     assert any("voz pastoral simples" in instruction for instruction in queue["instructions"])
     assert any("um único momento" in instruction for instruction in queue["instructions"])
-    assert any("imagem-âncora" in instruction for instruction in queue["instructions"])
     assert any("curta o vídeo" in instruction for instruction in queue["instructions"])
     assert any("biblical_basis" in instruction for instruction in queue["instructions"])
     assert any("preflight.command" in instruction for instruction in queue["instructions"])
@@ -1148,6 +1186,21 @@ def test_retention_story_v2_rejects_stacked_cta(tmp_path) -> None:
 
     assert result.valid is False
     assert any("exatamente a única ação" in error for error in result.errors)
+
+
+def test_short_staging_rejects_authorial_meta_language(tmp_path) -> None:
+    layout = _short_project(tmp_path)
+    queue = prepare_shorts_script_queue(layout)
+    payload = _package(queue).model_dump(mode="json")
+    meta_narration = "O relato registra a mudança de Josué e a sequência mostra seu medo."
+    payload["script"]["sections"][2]["narration"] = meta_narration
+    payload["strategy"]["narrative_spine"]["bridge_statement"] = meta_narration
+    write_json(layout.shorts_script_package_staging, payload)
+
+    result = check_shorts_script_package_staging(layout)
+
+    assert result.valid is False
+    assert any("metalinguagem" in error for error in result.errors)
 
 
 def test_creative_retention_v3_accepts_curiosity_without_practical_application(tmp_path) -> None:
@@ -1652,79 +1705,7 @@ def test_full_short_accepts_unlisted_concrete_action_after_a_generic_gaze(tmp_pa
     assert check.valid is True, check.errors
 
 
-def test_legacy_opening_keeps_legacy_queue_hash_and_contract(tmp_path) -> None:
-    layout = _creative_project(tmp_path)
-    manifest = layout.load_manifest()
-    manifest.config.images.opening_visual_standard = "legacy_v1"
-    layout.save_manifest(manifest)
-    expected_legacy_hash = sha256_value(
-        {
-            "algorithm": "6.2",
-            "project_id": manifest.project_id,
-            "title": manifest.title,
-            "target_duration_seconds": manifest.target_duration_seconds,
-            "config": manifest.config.shorts_script,
-            "briefing": read_json(layout.briefing),
-            "sources": read_json(layout.sources),
-        }
-    )
-
-    first = prepare_shorts_script_queue(layout)
-    second = prepare_shorts_script_queue(layout)
-
-    assert first["job_id"] == second["job_id"]
-    assert first["input_hash"] == second["input_hash"]
-    assert shorts_script_input_hash(layout) == expected_legacy_hash
-    assert first["schema_version"] == "5.2"
-    assert "attention_model" not in first["retention_contract"]
-    assert "promise_progression_payoff" not in first["retention_contract"]
-
-
-def test_legacy_opening_keeps_exact_scene_hash_and_reuses_completed_stage(tmp_path) -> None:
-    layout = _creative_project(tmp_path)
-    manifest = layout.load_manifest()
-    manifest.config.images.opening_visual_standard = "legacy_v1"
-    layout.save_manifest(manifest)
-    queue = prepare_shorts_script_queue(layout)
-    write_json(layout.shorts_script_package_staging, _creative_package(queue))
-    import_shorts_script_package(layout)
-
-    scenes = build_scenes(layout, skip_approvals=True)
-    project = layout.load_manifest()
-    script = read_model(layout.script, ScriptDocument)
-    render_config = project.config.render
-    expected_legacy_hash = sha256_value(
-        {
-            "algorithm": "6.1",
-            "script": script,
-            "briefing": read_model(layout.briefing, Briefing),
-            "style": _resolved_style(layout),
-            "palette": read_model(layout.palette, Palette),
-            "continuity": read_model(layout.continuity, ContinuityBible),
-            "creative_contract": ensure_creative_contract(layout, script),
-            "scene_planning_standard": project.config.images.scene_planning_standard,
-            "composition_safety_mode": project.config.images.composition_safety_mode,
-            "spoken_reference_image_mode": project.config.images.spoken_reference_image_mode,
-            "spoken_reference_image_path": project.config.images.spoken_reference_image_path,
-            "visual_scenes": None,
-            "target_scene_seconds": None,
-            "short_verse_visual_change_seconds": (
-                project.config.shorts_script.verse_visual_change_seconds
-            ),
-            "render_canvas": [render_config.width, render_config.height],
-        }
-    )
-    first_attempts = project.stages["scenes"].attempts
-
-    reused = build_scenes(layout, skip_approvals=True)
-    reloaded = layout.load_manifest()
-
-    assert project.stages["scenes"].input_hash == expected_legacy_hash
-    assert reloaded.stages["scenes"].attempts == first_attempts
-    assert reused == scenes
-
-
-def test_3d_short_executes_persisted_scroll_stop_framing(tmp_path) -> None:
+def test_gouache_short_executes_persisted_scroll_stop_framing(tmp_path) -> None:
     layout = _creative_project(tmp_path)
     queue = prepare_shorts_script_queue(layout)
     write_json(layout.shorts_script_package_staging, _creative_package(queue))
@@ -1733,9 +1714,8 @@ def test_3d_short_executes_persisted_scroll_stop_framing(tmp_path) -> None:
     scenes = build_scenes(layout, skip_approvals=True)
 
     assert "plano médio ou close" in scenes.scenes[0].shot
-    assert "interromper o scroll com ação concreta" in scenes.scenes[0].narrative_function
-    assert "imagem-âncora e base da capa" in scenes.scenes[0].prompt.assembled_prompt
-    assert "acabamento especialmente caprichado" in scenes.scenes[0].prompt.assembled_prompt
+    assert "abrir com ação concreta alinhada ao hook" in scenes.scenes[0].narrative_function
+    assert "leitura visual em menos de um segundo" in scenes.scenes[0].prompt.assembled_prompt
     assert "Sujeito dominante: Davi e o passo interrompido" in (
         scenes.scenes[0].prompt.assembled_prompt
     )
@@ -1789,28 +1769,6 @@ def test_narration_block_short_applies_opening_transition_contract_to_first_prom
     assert "Tensão visual concreta: continuar avançando ou responder" in prompt
 
 
-def test_compact_3d_short_uses_imported_visual_blocks_even_with_legacy_scene_setting(
-    tmp_path,
-) -> None:
-    layout = _micro_creative_project(tmp_path, legacy_short_profile=True)
-    manifest = layout.load_manifest()
-    assert manifest.config.images.scene_planning_standard == "section_visual_direction_v1"
-    assert manifest.config.shorts_script.generation_mode == "deterministic_compact_visual_plan_v1"
-    prepare_shorts_script_queue(layout)
-    materialize_compact_visual_fallback(layout)
-    package = import_shorts_script_package(layout)
-
-    scenes = build_scenes(layout, skip_approvals=True)
-
-    planned_opening = package.strategy.visual_scenes[0].scene_description
-    assert len(scenes.scenes) == len(package.strategy.visual_scenes)
-    assert planned_opening in scenes.scenes[0].prompt.assembled_prompt
-    assert "Sujeito dominante:" in scenes.scenes[0].prompt.assembled_prompt
-    assert "Ação já em curso:" in scenes.scenes[0].prompt.assembled_prompt
-    assert "Tensão visual concreta:" in scenes.scenes[0].prompt.assembled_prompt
-    assert "imagem-âncora e base da capa" in scenes.scenes[0].prompt.assembled_prompt
-
-
 def test_performance_advisories_are_frozen_once_per_queue(monkeypatch, tmp_path) -> None:
     layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
     calls = 0
@@ -1841,7 +1799,9 @@ def test_scroll_stop_queue_hash_tracks_visual_contract_changes(tmp_path) -> None
     layout = _micro_creative_project(tmp_path, legacy_short_profile=False)
     first = prepare_shorts_script_queue(layout)
     manifest = layout.load_manifest()
-    manifest.config.images.visual_standard_id = "cinematic-family-3d-v1"
+    manifest.config.images.spoken_reference_image_path = (
+        "visual/reference-images/outra-referencia-guache.png"
+    )
     layout.save_manifest(manifest)
 
     second = prepare_shorts_script_queue(layout)
@@ -1886,7 +1846,7 @@ def test_painterly_short_maps_each_audio_block_to_a_specific_varied_scene(tmp_pa
         "bordas direita e inferior" not in scene.prompt.assembled_prompt for scene in scenes.scenes
     )
     assert "plano médio ou close de alto impacto" in scenes.scenes[0].shot
-    assert "interromper o scroll com ação concreta" in scenes.scenes[0].narrative_function
+    assert "abrir com ação concreta alinhada ao hook" in scenes.scenes[0].narrative_function
     assert "área vazia decorativa obrigatória" in scenes.scenes[0].prompt.assembled_prompt
     reference_scene = scenes.scenes[-1]
     assert reference_scene.section_id == "section-003"
@@ -1992,40 +1952,22 @@ def test_compact_profile_refuses_source_not_marked_as_direct_jesus_speech(tmp_pa
         prepare_shorts_script_queue(layout, force=True)
 
 
-def test_new_short_import_waits_for_one_independent_biblical_review(tmp_path) -> None:
+def test_new_short_cannot_enable_independent_biblical_reviewer(tmp_path) -> None:
     layout = _creative_project(tmp_path)
     manifest = layout.load_manifest()
     manifest.config.shorts_script.require_independent_biblical_review = True
     layout.save_manifest(manifest)
+    persisted = layout.load_manifest()
+
+    assert persisted.config.shorts_script.require_independent_biblical_review is False
+
     queue = prepare_shorts_script_queue(layout)
     package = _creative_package(queue)
     write_json(layout.shorts_script_package_staging, package)
-
-    review_queue = prepare_shorts_biblical_review_queue(layout)
-    missing = check_reviewed_shorts_script_staging(layout)
-
-    assert missing.valid is False
-    assert "Revisão bíblica independente ausente" in missing.errors[0]
-    assert review_queue["role"] == "biblical_reviewer"
-    assert review_queue["orchestration"]["context_policy"] == "compact_only"
-    review_context = read_json(layout.shorts_biblical_review_context)
-    assert review_context["target_duration_seconds"] == 50
-    assert review_context["citation_policy"]["max_literal_verse_words"] == 40
-    assert review_context["citation_policy"]["allow_contiguous_multi_verse_citations"] is True
-    assert any("citation_policy" in instruction for instruction in review_queue["instructions"])
-    assert queue["preflight"]["independent_biblical_review_required"] is True
-
-    independent = package.biblical_review.model_copy(
-        update={"reviewer": "biblical_reviewer", "summary": "Revisão independente sem bloqueios."}
-    )
-    write_json(layout.shorts_biblical_review_staging_file, independent)
-
-    reviewed = check_reviewed_shorts_script_staging(layout)
     imported = import_shorts_script_package(layout)
 
-    assert reviewed.valid is True
-    assert imported.biblical_review.reviewer == "biblical_reviewer"
-    assert read_model(layout.biblical_review, BiblicalReview).reviewer == "biblical_reviewer"
+    assert "independent_biblical_review_required" not in queue["preflight"]
+    assert imported.script.sections
 
 
 def test_new_short_preflight_rejects_opening_outside_the_six_hook_contract(tmp_path) -> None:
@@ -2202,7 +2144,6 @@ def test_shorts_prepare_requires_a_verified_literal_verse_source(tmp_path) -> No
         projects_dir=tmp_path,
         target_duration_seconds=60,
         video_format="short",
-        style_id="cinematic-family-3d-animation",
         project_date=date(2026, 7, 14),
     )
 

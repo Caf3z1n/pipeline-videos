@@ -26,7 +26,6 @@ STAGE_ORDER = (
     "captions",
     "youtube_growth",
     "metadata",
-    "thumbnail",
     "render",
     "validation",
     "publication",

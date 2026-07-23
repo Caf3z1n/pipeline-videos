@@ -72,18 +72,13 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     assert all(not field.startswith("preview_") for field in manifest.config.render.model_dump())
     assert manifest.config.production.optimization_profile == "token_optimized_v1"
     assert manifest.config.production.worker_context_policy == "compact_only"
-    assert manifest.config.youtube_growth.thumbnail_generation_mode == "theme_prompt_imagegen_v1"
-    assert manifest.config.youtube_growth.thumbnail_reference_mode == "theme_only_v1"
     assert manifest.config.youtube_growth.title_variants == 1
-    assert manifest.config.youtube_growth.thumbnail_variants == 1
     assert manifest.config.youtube_growth.title_standard == "creative_pipe_passage_v3"
     assert manifest.config.youtube_growth.description_standard == "search_first_unique_v2"
-    assert manifest.config.youtube_growth.thumbnail_standard == "biblical_cinematic_landscape_v1"
-    assert manifest.config.youtube_growth.thumbnail_typography_standard == "no_text_v1"
-    assert manifest.config.youtube_growth.title_thumbnail_pairing_standard == "complementary_v1"
     assert manifest.config.youtube_publication.allow_automated_private_review_upload is True
     assert manifest.config.youtube_publication.category_id == "27"
     assert manifest.config.editorial_policy.standard == "scripture_rich_ptbr_v1"
+    assert manifest.config.editorial_policy.authorial_narrator == "jesus_first_person_v1"
     assert manifest.config.editorial_policy.require_literal_scripture_citations is True
     assert manifest.config.editorial_policy.require_quoted_comment_response is False
     assert manifest.config.long_form_script.enabled is True
@@ -93,6 +88,9 @@ def test_new_project_is_portable_and_briefing_approval_updates_state(tmp_path) -
     assert manifest.config.long_form_script.first_scripture_citation_max_seconds == 75.0
     assert manifest.config.long_form_script.maximum_scripture_citation_gap_seconds == 105.0
     assert manifest.config.long_form_script.maximum_reengagement_gap_seconds == 120.0
+    assert manifest.config.images.visual_standard_id == "biblical-midcentury-gouache-v1"
+    assert manifest.config.images.scene_planning_standard == "narration_block_visual_v1"
+    assert manifest.config.images.composition_safety_mode == "unrestricted_scene_v1"
     assert manifest.config.captions.vertical_position == "center"
     assert manifest.config.captions.isolate_quoted_comment_response is False
     assert manifest.config.captions.comment_response_hold_seconds == 0.0
@@ -171,7 +169,7 @@ def test_missing_versioned_config_keeps_legacy_script_contracts() -> None:
     assert config.youtube_growth.title_standard == "passage_pipe_topic_v1"
 
 
-def test_new_short_project_uses_painterly_block_profile_without_custom_cover(tmp_path) -> None:
+def test_new_short_project_uses_painterly_block_profile(tmp_path) -> None:
     layout = create_project(
         "davi-golias-short",
         "Davi e Golias em 1 minuto",
@@ -203,8 +201,6 @@ def test_new_short_project_uses_painterly_block_profile_without_custom_cover(tmp
     assert manifest.config.render.background_music_true_peak_dbfs == -9.0
     assert manifest.config.render.narration_gain_db == 0.0
     assert manifest.config.render.background_music_gain_db == 0.0
-    assert manifest.config.render.short_cover_enabled is False
-    assert manifest.config.render.short_cover_duration_seconds == pytest.approx(1 / 30)
     assert manifest.config.render.background_blur_profile == "functional_caption_focus_v1"
     assert manifest.config.render.background_blur_opening_sigma == 8.0
     assert manifest.config.render.background_blur_scripture_sigma == 8.0
@@ -213,13 +209,8 @@ def test_new_short_project_uses_painterly_block_profile_without_custom_cover(tmp
     assert manifest.config.render.background_blur_closing_sigma == 8.0
     assert manifest.config.render.caption_focus_blur_extra_sigma == 0.0
     assert manifest.config.youtube_growth.title_variants == 1
-    assert manifest.config.youtube_growth.thumbnail_variants == 0
     assert manifest.config.youtube_growth.description_standard == "search_first_unique_v2"
-    assert manifest.config.youtube_growth.thumbnail_generation_mode == "youtube_auto_frame_v1"
-    assert manifest.config.youtube_growth.thumbnail_reference_mode == "none_v1"
-    assert manifest.config.youtube_growth.thumbnail_standard == "youtube_auto_frame_v1"
     assert manifest.config.youtube_growth.title_standard == "creative_pipe_passage_v3"
-    assert manifest.config.youtube_growth.thumbnail_typography_standard == "no_text_v1"
     assert manifest.config.youtube_publication.category_id == "22"
     assert manifest.config.images.height > manifest.config.images.width
     assert manifest.config.images.visual_standard_id == "biblical-midcentury-gouache-v1"
@@ -249,58 +240,17 @@ def test_new_short_project_uses_painterly_block_profile_without_custom_cover(tmp
     assert manifest.config.captions.word_arrival_animation is True
 
 
-def test_short_can_explicitly_use_the_legacy_3d_thumbnail_profile(tmp_path) -> None:
-    layout = create_project(
-        "short-3d-regressao",
-        "Short 3D",
-        projects_dir=tmp_path,
-        target_duration_seconds=60,
-        video_format="short",
-        style_id="cinematic-family-3d-animation",
-        project_date=date(2026, 7, 14),
-    )
-
-    manifest = layout.load_manifest()
-    assert manifest.config.images.visual_standard_id == "cinematic-family-3d-v1"
-    assert manifest.config.images.scene_planning_standard == "section_visual_direction_v1"
-    assert manifest.config.images.opening_visual_standard == "scroll_stop_concrete_v1"
-    assert manifest.config.images.composition_safety_mode == "caption_safe_area_v1"
-    assert manifest.config.images.spoken_reference_image_mode == "generated"
-    assert manifest.config.images.spoken_reference_image_path is None
-    assert manifest.config.render.short_cover_enabled is True
-    assert manifest.config.youtube_growth.thumbnail_variants == 1
-    assert manifest.config.youtube_growth.thumbnail_generation_mode == "integrated_imagegen_v1"
-    assert manifest.config.youtube_growth.thumbnail_reference_mode == "opening_scene_edit_v1"
-    assert manifest.config.audio.voice_id == DEFAULT_ELEVENLABS_VOICE_ID
-    assert manifest.config.audio.model_id == DEFAULT_ELEVENLABS_MODEL_ID
-    assert (layout.root / manifest.config.captions.font_file).is_file()
-    assert manifest.config.production.mode == "final_candidate_one_shot"
-    assert manifest.config.production.use_subagents is True
-    assert manifest.config.production.image_workers == 3
-    assert manifest.config.production.approval_policy == "final_only"
-    assert manifest.config.production.optimization_profile == "token_optimized_v1"
-    assert manifest.config.production.worker_context_policy == "compact_only"
-    assert manifest.config.shorts_script.enabled is True
-    assert manifest.config.shorts_script.use_specialist_subagent is True
-    assert manifest.config.shorts_script.narrative_standard == "creative_retention_v3"
-    assert manifest.config.shorts_script.require_verified_scripture is True
-    assert manifest.config.shorts_script.min_words == 105
-    assert manifest.config.shorts_script.max_words == 130
-    assert manifest.config.shorts_script.require_comment_prompt is False
-    assert manifest.config.shorts_script.require_subscribe_cta is False
-    assert manifest.config.shorts_script.cta_max_words == 12
-    assert manifest.config.shorts_script.cta_max_seconds == 4.0
-    assert manifest.config.editorial_policy.require_quoted_comment_response is False
-    assert manifest.config.captions.isolate_quoted_comment_response is False
-    assert manifest.config.captions.comment_response_hold_seconds == 0.0
-    assert manifest.config.audio.comment_response_silence_seconds == 0.0
-    assert manifest.config.shorts_script.verse_visual_change_seconds == 5.5
-    assert manifest.stages["shorts_script"].status == StageStatus.PENDING
-
-    legacy_manifest = read_json(layout.manifest)
-    legacy_manifest["config"]["captions"].pop("vertical_position")
-    write_json(layout.manifest, legacy_manifest)
-    assert layout.load_manifest().config.captions.vertical_position == "center"
+def test_removed_visual_profiles_cannot_be_selected(tmp_path) -> None:
+    with pytest.raises(ValueError, match="exclusivamente"):
+        create_project(
+            "perfil-removido",
+            "Perfil removido",
+            projects_dir=tmp_path,
+            target_duration_seconds=60,
+            video_format="short",
+            style_id="qualquer-outro-estilo",
+            project_date=date(2026, 7, 14),
+        )
 
 
 def test_fifteen_second_short_uses_compact_duration_profile(tmp_path) -> None:

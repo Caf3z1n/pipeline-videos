@@ -6,9 +6,10 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import time
+from datetime import UTC, datetime, time
 from pathlib import Path
 from typing import Annotated, Any
+from uuid import uuid4
 
 import typer
 from dotenv import load_dotenv
@@ -29,20 +30,10 @@ from pipeline_videos.models import (
     ImageManifest,
     Palette,
     StageStatus,
-    StyleProfile,
     elevenlabs_voice_id_for_variant,
     normalize_elevenlabs_voice_variant,
 )
-from pipeline_videos.project import (
-    DEFAULT_PALETTE,
-    DEFAULT_SHORT_PALETTE,
-    DEFAULT_SHORT_STYLE,
-    DEFAULT_STYLE,
-    create_project,
-    load_palette,
-    load_style,
-    next_actions,
-)
+from pipeline_videos.project import create_project, load_palette, next_actions
 from pipeline_videos.review import (
     approve_biblical_review,
     approve_briefing,
@@ -82,7 +73,7 @@ script_app = typer.Typer(help="Roteiro manual e especialista de retenção para 
 audio_app = typer.Typer(help="Configuração e geração da narração.")
 music_app = typer.Typer(help="Seleção local e aleatória da música de fundo.")
 captions_app = typer.Typer(help="Geração das legendas visuais e do arquivo para YouTube.")
-metadata_app = typer.Typer(help="Rascunhos de metadados e thumbnail.")
+metadata_app = typer.Typer(help="Rascunhos de título, descrição e descoberta.")
 youtube_app = typer.Typer(help="OAuth, upload, status e publicação segura no YouTube.")
 remote_app = typer.Typer(help="Fila remota de produção, revisão privada e agendamento.")
 analytics_app = typer.Typer(
@@ -90,6 +81,7 @@ analytics_app = typer.Typer(
 )
 catalog_app = typer.Typer(help="Capacidade e ciclos do catálogo bíblico verificado.")
 audit_app = typer.Typer(help="Auditoria local de tokens, contextos e orçamento de produção.")
+approved_app = typer.Typer(help="Roteiros de Shorts congelados para produção econômica em lote.")
 app.add_typer(images_app, name="images")
 app.add_typer(script_app, name="script")
 app.add_typer(audio_app, name="audio")
@@ -101,6 +93,536 @@ app.add_typer(remote_app, name="remote")
 app.add_typer(analytics_app, name="analytics")
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(audit_app, name="audit")
+app.add_typer(approved_app, name="approved-scripts")
+
+
+def _approved_store(jobs_dir: Path | None):
+    from pipeline_videos.approved_scripts import ApprovedScriptStore
+    from pipeline_videos.remote_jobs import RemoteJobStore
+
+    return ApprovedScriptStore(RemoteJobStore(jobs_dir).root)
+
+
+def _editorial_board(jobs_dir: Path | None):
+    from pipeline_videos.editorial_board import EditorialBoardStore
+    from pipeline_videos.remote_jobs import RemoteJobStore
+
+    return EditorialBoardStore(RemoteJobStore(jobs_dir).root)
+
+
+def _parse_cta_option(value: str):
+    from pipeline_videos.approved_scripts import ApprovedCtaOption
+
+    try:
+        option_id, mode, spoken_text = value.split("|", 2)
+        return ApprovedCtaOption(option_id=option_id, mode=mode, spoken_text=spoken_text)
+    except Exception as exc:
+        raise typer.BadParameter(
+            "CTA inválido. Use id|comment|texto, id|subscribe|texto ou id|share|texto."
+        ) from exc
+
+
+@approved_app.command("workflow-status")
+def approved_workflow_status(
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Mostra a etapa editorial atual e a única pergunta que deve ser feita."""
+
+    typer.echo(json.dumps(_editorial_board(jobs_dir).workflow_status(), ensure_ascii=False))
+
+
+@approved_app.command("hook-check")
+def approved_hook_check(
+    hooks: Annotated[
+        list[str],
+        typer.Option("--hook", help="Repita para validar vários hooks antes de exibi-los."),
+    ],
+) -> None:
+    """Valida hooks em memória; não salva nem inicia nenhuma etapa."""
+
+    from pipeline_videos.editorial_board import validate_editorial_hook
+
+    if not hooks:
+        raise typer.BadParameter("Informe ao menos um --hook.")
+    errors: list[dict[str, str | int]] = []
+    for index, hook in enumerate(hooks, start=1):
+        try:
+            validate_editorial_hook(hook)
+        except ValueError as exc:
+            errors.append({"index": index, "error": str(exc)})
+    if errors:
+        typer.echo(json.dumps({"valid": False, "errors": errors}, ensure_ascii=False))
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps({"valid": True, "count": len(hooks)}, ensure_ascii=False))
+
+
+@approved_app.command("topic-suggest")
+def approved_topic_suggest(
+    title: Annotated[str, typer.Option("--title")],
+    central_question: Annotated[str, typer.Option("--question")] = "",
+    hook_direction: Annotated[str, typer.Option("--hook-direction")] = "",
+    catalog_candidate_id: Annotated[str | None, typer.Option("--catalog-id")] = None,
+    source_passages: Annotated[list[str] | None, typer.Option("--passage")] = None,
+    answer_points: Annotated[list[str] | None, typer.Option("--answer-point")] = None,
+    uncertainty_boundaries: Annotated[
+        list[str] | None,
+        typer.Option("--uncertainty"),
+    ] = None,
+    duration_seconds: Annotated[int, typer.Option("--duration", min=1, max=180)] = 50,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Salva somente uma sugestão de tema; não cria roteiro nem projeto."""
+
+    from pipeline_videos.editorial_board import editorial_topic_summary
+
+    topic = _editorial_board(jobs_dir).suggest_topic(
+        title=title,
+        central_question=central_question,
+        hook_direction=hook_direction,
+        catalog_candidate_id=catalog_candidate_id,
+        source_passages=source_passages,
+        required_answer_points=answer_points,
+        uncertainty_boundaries=uncertainty_boundaries,
+        target_duration_seconds=duration_seconds,
+    )
+    typer.echo(json.dumps(editorial_topic_summary(topic), ensure_ascii=False))
+
+
+@approved_app.command("topic-list")
+def approved_topic_list(
+    status_filter: Annotated[str | None, typer.Option("--status")] = None,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Lista temas de forma curta, sem iniciar outra etapa."""
+
+    from pipeline_videos.editorial_board import editorial_topic_summary
+
+    allowed = ("suggested", "approved", "drafted", "withdrawn")
+    if status_filter is not None and status_filter not in allowed:
+        raise typer.BadParameter("Status de tema inválido.")
+    items = _editorial_board(jobs_dir).list_topics(status=status_filter)
+    typer.echo(
+        json.dumps(
+            {
+                "count": len(items),
+                "items": [editorial_topic_summary(item) for item in items],
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+@approved_app.command("topic-approve")
+def approved_topic_approve(
+    topic_ids: Annotated[
+        list[str],
+        typer.Option("--topic-id", help="Repita para aprovar vários temas."),
+    ],
+    approved_by: Annotated[str, typer.Option("--approved-by")] = "Pedro",
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Aprova e salva vários temas; não escreve roteiros."""
+
+    from pipeline_videos.editorial_board import editorial_topic_summary
+
+    if not topic_ids:
+        raise typer.BadParameter("Informe ao menos um --topic-id.")
+    items = _editorial_board(jobs_dir).approve_topics(
+        topic_ids,
+        approved_by=approved_by,
+    )
+    typer.echo(
+        json.dumps(
+            {
+                "approved": len(items),
+                "items": [editorial_topic_summary(item) for item in items],
+                "next_question": "Você quer gerar roteiros para quais temas aprovados?",
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+@approved_app.command("draft-batch-prepare")
+def approved_draft_batch_prepare(
+    topic_ids: Annotated[list[str] | None, typer.Option("--topic-id")] = None,
+    count: Annotated[int, typer.Option("--count", min=1, max=12)] = 3,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Prepara uma única fila econômica; não inicia agente nem produção."""
+
+    batch = _editorial_board(jobs_dir).prepare_batch(
+        topic_ids=topic_ids,
+        count=count,
+    )
+    typer.echo(
+        json.dumps(
+            {
+                "batch_id": batch.batch_id,
+                "status": batch.status,
+                "topic_count": len(batch.topic_ids),
+                "queue_path": batch.queue_path,
+                "limits": {
+                    "script_specialists": 1,
+                    "biblical_reviewers": 0,
+                    "projects": 0,
+                    "media": 0,
+                },
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+@approved_app.command("draft-batch-import")
+def approved_draft_batch_import(
+    package: Annotated[Path, typer.Option("--package")],
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Importa um lote já escrito e revisado, sem executar etapas adicionais."""
+
+    batch = _editorial_board(jobs_dir).import_batch(package)
+    typer.echo(
+        json.dumps(
+            {
+                "batch_id": batch.batch_id,
+                "status": batch.status,
+                "script_count": len(batch.script_ids),
+                "aggregate_hash": batch.aggregate_hash,
+                "next_question": "Você quer revisar, alterar ou aprovar este lote?",
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+@approved_app.command("draft-list")
+def approved_draft_list(
+    status_filter: Annotated[str | None, typer.Option("--status")] = None,
+    include_text: Annotated[bool, typer.Option("--text/--no-text")] = False,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Lista roteiros editoriais sem disparar validação ou produção."""
+
+    from pipeline_videos.editorial_board import editorial_script_summary
+
+    allowed = ("draft", "approved", "withdrawn")
+    if status_filter is not None and status_filter not in allowed:
+        raise typer.BadParameter("Status de roteiro editorial inválido.")
+    items = _editorial_board(jobs_dir).list_scripts(status=status_filter)
+    typer.echo(
+        json.dumps(
+            {
+                "count": len(items),
+                "items": [
+                    editorial_script_summary(item, include_text=include_text) for item in items
+                ],
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+@approved_app.command("draft-batch-review")
+def approved_draft_batch_review(
+    batch_id: str,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Mostra os textos e o único hash necessário para aprovação em massa."""
+
+    typer.echo(
+        json.dumps(
+            _editorial_board(jobs_dir).review_batch(batch_id),
+            ensure_ascii=False,
+        )
+    )
+
+
+@approved_app.command("draft-batch-approve")
+def approved_draft_batch_approve(
+    batch_id: str,
+    confirm_hash: Annotated[str, typer.Option("--confirm-hash")],
+    approved_by: Annotated[str, typer.Option("--approved-by")] = "Pedro",
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Aprova todos os roteiros exibidos pelo hash agregado."""
+
+    batch = _editorial_board(jobs_dir).approve_batch(
+        batch_id,
+        confirm_hash=confirm_hash,
+        approved_by=approved_by,
+    )
+    typer.echo(
+        json.dumps(
+            {
+                "batch_id": batch.batch_id,
+                "status": batch.status,
+                "approved_scripts": len(batch.script_ids),
+                "production_script_ids": batch.production_script_ids,
+                "next_question": "Você quer apenas listar os aprovados ou produzir algum?",
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+@approved_app.command("capture")
+def approved_capture(
+    project: str,
+    label: Annotated[str | None, typer.Option("--label")] = None,
+    cta_options: Annotated[list[str] | None, typer.Option("--cta")] = None,
+    selected_cta: Annotated[str | None, typer.Option("--selected-cta")] = None,
+    voice_variant: Annotated[str, typer.Option("--voice")] = "jesus_1",
+    music_track: Annotated[str, typer.Option("--music")] = "leaning",
+    max_scenes: Annotated[int, typer.Option("--max-scenes", min=3, max=10)] = 7,
+    seo_title: Annotated[str | None, typer.Option("--seo-title")] = None,
+    seo_description: Annotated[str | None, typer.Option("--seo-description")] = None,
+    seo_hashtags: Annotated[list[str] | None, typer.Option("--seo-hashtag")] = None,
+    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Congela um projeto editorial completo como candidato à aprovação."""
+
+    if voice_variant not in {"jesus_1", "jesus_2"}:
+        raise typer.BadParameter("--voice precisa ser jesus_1 ou jesus_2.")
+    if music_track not in {"leaning", "aloboi"}:
+        raise typer.BadParameter("--music precisa ser leaning ou aloboi.")
+    candidate = _approved_store(jobs_dir).capture_project(
+        resolve_project(project, projects_dir),
+        label=label,
+        cta_options=(
+            [_parse_cta_option(item) for item in cta_options] if cta_options is not None else None
+        ),
+        selected_cta_id=selected_cta,
+        voice_variant=voice_variant,
+        music_track=music_track,
+        max_scenes=max_scenes,
+        seo_title=seo_title,
+        seo_description=seo_description,
+        seo_hashtags=seo_hashtags,
+    )
+    from pipeline_videos.approved_scripts import approved_script_summary
+
+    typer.echo(
+        json.dumps(
+            approved_script_summary(candidate, include_narration=True),
+            ensure_ascii=False,
+        )
+    )
+
+
+@approved_app.command("approve")
+def approved_approve(
+    script_id: str,
+    confirm_hash: Annotated[str, typer.Option("--confirm-hash")],
+    approved_by: Annotated[str, typer.Option("--approved-by")],
+    note: Annotated[str | None, typer.Option("--note")] = None,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Aprova explicitamente o conteúdo exato mostrado pelo hash."""
+
+    from pipeline_videos.approved_scripts import approved_script_summary
+
+    approved = _approved_store(jobs_dir).approve(
+        script_id,
+        confirm_hash=confirm_hash,
+        approved_by=approved_by,
+        note=note,
+    )
+    typer.echo(json.dumps(approved_script_summary(approved), ensure_ascii=False))
+
+
+@approved_app.command("cta-select")
+def approved_cta_select(
+    script_id: str,
+    option_id: Annotated[str, typer.Option("--option")],
+    spoken_text: Annotated[str | None, typer.Option("--text")] = None,
+    mode: Annotated[str | None, typer.Option("--mode")] = None,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Escolhe uma opção ou cadastra um novo CTA antes da aprovação."""
+
+    if mode is not None and mode not in {"comment", "subscribe", "share"}:
+        raise typer.BadParameter("--mode precisa ser comment, subscribe ou share.")
+    from pipeline_videos.approved_scripts import approved_script_summary
+
+    updated = _approved_store(jobs_dir).select_cta(
+        script_id,
+        option_id=option_id,
+        spoken_text=spoken_text,
+        mode=mode,
+    )
+    typer.echo(
+        json.dumps(
+            approved_script_summary(updated, include_narration=True),
+            ensure_ascii=False,
+        )
+    )
+
+
+@approved_app.command("seo-set")
+def approved_seo_set(
+    script_id: str,
+    title: Annotated[str | None, typer.Option("--title")] = None,
+    description: Annotated[str | None, typer.Option("--description")] = None,
+    specific_hashtags: Annotated[
+        list[str] | None,
+        typer.Option("--hashtag", help="Quando usado, repita exatamente três vezes."),
+    ] = None,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Ajusta título, descrição e três hashtags específicas antes da aprovação."""
+
+    if specific_hashtags is not None and len(specific_hashtags) != 3:
+        raise typer.BadParameter("Repita --hashtag exatamente três vezes.")
+    from pipeline_videos.approved_scripts import approved_script_summary
+
+    updated = _approved_store(jobs_dir).set_seo(
+        script_id,
+        title=title,
+        description=description,
+        specific_hashtags=specific_hashtags,
+    )
+    typer.echo(
+        json.dumps(
+            approved_script_summary(updated, include_narration=True),
+            ensure_ascii=False,
+        )
+    )
+
+
+@approved_app.command("list")
+def approved_list(
+    status_filter: Annotated[str | None, typer.Option("--status")] = None,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Lista quantos e quais roteiros estão em cada estado."""
+
+    from pipeline_videos.approved_scripts import approved_script_summary
+
+    allowed = ("draft", "approved", "reserved", "produced", "withdrawn")
+    if status_filter is not None and status_filter not in allowed:
+        raise typer.BadParameter("Status de roteiro inválido.")
+    store = _approved_store(jobs_dir)
+    items = store.list(status=status_filter)
+    typer.echo(
+        json.dumps(
+            {
+                "counts": {status: len(store.list(status=status)) for status in allowed},
+                "items": [approved_script_summary(item) for item in items],
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+@approved_app.command("show")
+def approved_show(
+    script_id: str,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Mostra narração, CTA e hash exatos de um roteiro."""
+
+    from pipeline_videos.approved_scripts import approved_script_summary
+
+    script, _ = _approved_store(jobs_dir).find(script_id)
+    typer.echo(
+        json.dumps(
+            approved_script_summary(script, include_narration=True),
+            ensure_ascii=False,
+        )
+    )
+
+
+@approved_app.command("release")
+def approved_release(
+    count: Annotated[int, typer.Option("--count", min=1, max=20)] = 1,
+    script_ids: Annotated[list[str] | None, typer.Option("--script-id")] = None,
+    script_titles: Annotated[list[str] | None, typer.Option("--title")] = None,
+    authorize_external: Annotated[bool, typer.Option("--authorize-external")] = False,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Cria jobs econômicos com upload privado a partir da fila aprovada."""
+
+    if not authorize_external:
+        raise typer.BadParameter(
+            "Use --authorize-external para autorizar imagens, ElevenLabs e upload privado."
+        )
+    from pipeline_videos.approved_scripts import approved_script_summary
+    from pipeline_videos.remote_jobs import RemoteJobStore, RemoteVideoRequest, job_summary
+
+    job_store = RemoteJobStore(jobs_dir)
+    script_store = _approved_store(jobs_dir)
+    if script_ids and script_titles:
+        raise typer.BadParameter("Use --script-id ou --title, não ambos.")
+    if script_titles:
+        script_ids = [
+            script_store.find_by_label(title, status="approved").approved_script_id
+            for title in script_titles
+        ]
+    jobs = []
+    for script_id in script_ids or [None] * count:
+        now = datetime.now(UTC)
+        job_id = f"video-{now:%Y%m%d-%H%M%S}-{uuid4().hex[:8]}"
+        approved = script_store.reserve(job_id, script_id=script_id)
+        request = RemoteVideoRequest(
+            video_format="short",
+            production_profile="approved_fast_v1",
+            approved_script_id=approved.approved_script_id,
+            approved_script_hash=approved.content_hash,
+            duration_seconds=max(MIN_SHORT_DURATION_SECONDS, approved.target_duration_seconds),
+            editorial_profile=approved.editorial_profile,
+            music_track=approved.music_track,
+            voice_variant=approved.voice_variant,
+            publication_mode="private_review",
+            external_services_authorized=True,
+        )
+        try:
+            job = job_store.enqueue(request, job_id=job_id, now=now)
+        except Exception:
+            script_store.release_reservation(approved.approved_script_id, job_id=job_id)
+            raise
+        jobs.append(
+            {
+                "job": job_summary(job),
+                "script": approved_script_summary(approved),
+            }
+        )
+    typer.echo(json.dumps(jobs, ensure_ascii=False))
+
+
+@approved_app.command("schedule-create")
+def approved_schedule_create(
+    name: Annotated[str, typer.Option("--name")],
+    production_times: Annotated[list[str], typer.Option("--production-time")],
+    timezone: Annotated[str, typer.Option("--timezone")] = "America/Sao_Paulo",
+    enabled: Annotated[bool, typer.Option("--enabled/--disabled")] = True,
+    authorize_external: Annotated[bool, typer.Option("--authorize-external")] = False,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Produz diariamente roteiros aprovados e envia cada vídeo como privado."""
+
+    if len(production_times) not in {1, 2}:
+        raise typer.BadParameter("Informe um ou dois horários de produção.")
+    from pipeline_videos.remote_jobs import RemoteJobStore
+    from pipeline_videos.remote_schedules import (
+        DailyShortSlot,
+        RemoteScheduleStore,
+        schedule_summary,
+    )
+
+    job_store = RemoteJobStore(jobs_dir)
+    schedule = RemoteScheduleStore(job_store.root).create(
+        name=name,
+        slots=[DailyShortSlot(production_time=_daily_time(value)) for value in production_times],
+        timezone=timezone,
+        script_source="approved_pool",
+        publication_mode="private_review",
+        external_services_authorized=authorize_external,
+        public_scheduling_authorized=False,
+        enabled=enabled,
+    )
+    typer.echo(json.dumps(schedule_summary(schedule), ensure_ascii=False))
 
 
 @audit_app.command("tokens")
@@ -244,7 +766,16 @@ def remote_cancel(
     """Cancela um job ainda não iniciado ou aguardando agendamento."""
     from pipeline_videos.remote_jobs import RemoteJobStore, job_summary
 
-    job = RemoteJobStore(jobs_dir).cancel(job_id)
+    store = RemoteJobStore(jobs_dir)
+    job = store.cancel(job_id)
+    if (
+        job.request.production_profile == "approved_fast_v1"
+        and job.request.approved_script_id is not None
+    ):
+        _approved_store(jobs_dir).release_reservation(
+            job.request.approved_script_id,
+            job_id=job.job_id,
+        )
     typer.echo(json.dumps(job_summary(job), ensure_ascii=False))
 
 
@@ -409,6 +940,7 @@ def remote_schedule_materialize(
     jobs = materialize_daily_schedules(
         store=job_store,
         schedule_store=RemoteScheduleStore(job_store.root),
+        approved_store=_approved_store(jobs_dir),
     )
     typer.echo(json.dumps([job_summary(job) for job in jobs], ensure_ascii=False))
 
@@ -678,7 +1210,6 @@ def new_project(
             help="Exige o alvo informado; use somente quando a duração for explicitamente exata.",
         ),
     ] = False,
-    style: Annotated[str | None, typer.Option("--style")] = None,
     palette: Annotated[str | None, typer.Option("--palette")] = None,
     video_format: Annotated[
         str, typer.Option("--format", help="Formato do vídeo: landscape ou short.")
@@ -717,7 +1248,6 @@ def new_project(
         projects_dir=projects_dir,
         target_duration_seconds=duration,
         exact_duration=exact_duration,
-        style_id=style,
         palette_id=palette,
         video_format=video_format,
     )
@@ -880,10 +1410,17 @@ def new_character_video(
         ),
     ] = False,
     voice_variant: Annotated[str, typer.Option("--voice-variant")] = "jesus_1",
+    profile: Annotated[
+        str,
+        typer.Option(
+            "--profile",
+            help="Perfil editorial: storytelling (padrão) ou portrait (analítico).",
+        ),
+    ] = "storytelling",
     json_output: Annotated[bool, typer.Option("--json")] = False,
     projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
 ) -> None:
-    """Cria um retrato de personagem com um pacote narrativo bíblico verificado."""
+    """Cria uma história de personagem com um pacote narrativo bíblico verificado."""
     normalized_format = video_format.strip().casefold()
     if normalized_format not in {"short", "long"}:
         raise typer.BadParameter("--format precisa ser short ou long.")
@@ -903,18 +1440,29 @@ def new_character_video(
         variant = normalize_elevenlabs_voice_variant(voice_variant)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+    profile_aliases = {
+        "storytelling": "biblical_storytelling",
+        "biblical-storytelling": "biblical_storytelling",
+        "biblical_storytelling": "biblical_storytelling",
+        "portrait": "character_portrait",
+        "character-portrait": "character_portrait",
+        "character_portrait": "character_portrait",
+    }
+    selected_mode = profile_aliases.get(profile.strip().casefold())
+    if selected_mode is None:
+        raise typer.BadParameter("Use storytelling ou portrait em --profile.")
     layout, candidate, score = create_auto_video(
         projects_dir=projects_dir,
         target_duration_seconds=target_duration,
         exact_duration=exact_duration,
         video_format="short" if normalized_format == "short" else "landscape",
-        creative_mode_override="character_portrait",
+        creative_mode_override=selected_mode,
         requested_character=character,
     )
     if normalized_format == "short":
         _apply_short_bootstrap_settings(
             layout,
-            creative_mode="character_portrait",
+            creative_mode=selected_mode,
             hook_family=None,
             voice_variant=variant,
             music_file=None,
@@ -930,14 +1478,15 @@ def new_character_video(
         "story": candidate.title,
         "main_passage": candidate.reference,
         "related_passages": [item.reference for item in candidate.related_passages],
-        "creative_mode": "character_portrait",
+        "profile": profile.strip().casefold(),
+        "creative_mode": selected_mode,
         "score": score,
         "next_command": f'uv run pipeline-videos run "{layout.root}" --dry-run',
     }
     if json_output:
         console.print_json(json.dumps(payload, ensure_ascii=False))
         return
-    console.print(f"[green]Retrato de personagem criado:[/green] {layout.root}")
+    console.print(f"[green]Vídeo de personagem criado:[/green] {layout.root}")
     console.print(f"[bold]Personagem:[/bold] {', '.join(candidate.characters)}")
     console.print(f"[bold]História principal:[/bold] {candidate.title}")
     console.print(f"[bold]Passagem-âncora:[/bold] {candidate.reference}")
@@ -1121,8 +1670,8 @@ apenas acompanha e entrega o resultado final.
 O coordenador executa o comando declarado no job e cria somente os papéis que aparecerem nas filas,
 sempre com `fork_turns=none`: o planejador de cenas lê `script/shorts-queue.json`, até dois
 image_workers leem exclusivamente seus arquivos em `images/jobs/`, e o especialista de metadados lê
-`youtube/growth-queue.json`. Crie biblical_reviewer apenas se a própria fila exigir revisão
-independente; Shorts compactos verificados no catálogo não exigem esse modelo. Após uma única
+`youtube/growth-queue.json`. Não crie `biblical_reviewer`; a validação de fontes acontece no
+preflight incorporado. Após uma única
 correção agregada, use o fallback determinístico declarado e continue. {audio_instruction}
 {long_script_instruction}
 Não releia manifestos grandes, não importe por cena, não publique e não registre aprovação humana.
@@ -1203,42 +1752,6 @@ def shorts_script_fallback(project: str) -> None:
             ensure_ascii=False,
         )
     )
-
-
-@script_app.command("shorts-review-prepare")
-def shorts_biblical_review_prepare(
-    project: str,
-    force: Annotated[bool, typer.Option("--force")] = False,
-) -> None:
-    """Prepara a revisão bíblica independente ainda no staging."""
-
-    from pipeline_videos.shorts_script import prepare_shorts_biblical_review_queue
-
-    layout = _project(project)
-    result = prepare_shorts_biblical_review_queue(layout, force=force)
-    console.print_json(
-        json.dumps(
-            {
-                "job_id": result["job_id"],
-                "queue": str(layout.shorts_biblical_review_queue),
-                "context": result["inputs"]["compact_context"],
-                "output": result["outputs"]["review"],
-            },
-            ensure_ascii=False,
-        )
-    )
-
-
-@script_app.command("shorts-check-reviewed-staging")
-def shorts_script_check_reviewed_staging(project: str) -> None:
-    """Valida roteiro e revisão independente sem importar o projeto."""
-
-    from pipeline_videos.shorts_script import check_reviewed_shorts_script_staging
-
-    result = check_reviewed_shorts_script_staging(_project(project))
-    console.print_json(json.dumps(result.as_dict(), ensure_ascii=False))
-    if not result.valid:
-        raise typer.Exit(code=1)
 
 
 @app.command("import-review")
@@ -1620,45 +2133,6 @@ def metadata_growth_fallback(project: str) -> None:
     )
 
 
-@metadata_app.command("integrated-thumbnails-import")
-def metadata_integrated_thumbnails_import(project: str, sources: list[Path]) -> None:
-    """Importa thumbnails finais geradas com texto e símbolos incorporados."""
-
-    from pipeline_videos.growth import import_integrated_thumbnail_candidates
-
-    results = import_integrated_thumbnail_candidates(_project(project), sources)
-    console.print(f"[green]{len(results)} thumbnails integradas importadas.[/green]")
-
-
-@metadata_app.command("thumbnail")
-def thumbnail_prepare(
-    project: str,
-    fixture: Annotated[bool, typer.Option("--fixture")] = False,
-    force: Annotated[bool, typer.Option("--force")] = False,
-) -> None:
-    from pipeline_videos.metadata import generate_fixture_thumbnail, queue_thumbnail_for_codex
-
-    layout = _project(project)
-    path = (
-        generate_fixture_thumbnail(layout, force=force)
-        if fixture
-        else queue_thumbnail_for_codex(layout)
-    )
-    console.print(f"[green]Thumbnail preparada:[/green] {path}")
-
-
-@metadata_app.command("import-thumbnail")
-def thumbnail_import(
-    project: str,
-    file: Path,
-    force: Annotated[bool, typer.Option("--force")] = False,
-) -> None:
-    from pipeline_videos.metadata import import_thumbnail
-
-    path = import_thumbnail(_project(project), file, force=force)
-    console.print(f"[green]Thumbnail importada:[/green] {path}")
-
-
 @youtube_app.command("auth")
 def youtube_auth(
     client_secrets: Annotated[
@@ -1724,15 +2198,6 @@ def youtube_preflight(
         ("Mídia sintética", "sim" if plan.contains_synthetic_media else "não"),
         ("Notificar inscritos", "sim" if plan.notify_subscribers else "não"),
         ("Vídeo", str(plan.video_path)),
-        ("Thumbnail", str(plan.thumbnail_path)),
-        (
-            "Aplicação da thumbnail",
-            (
-                "selecionar o frame manualmente no app do YouTube"
-                if plan.video_format == "short"
-                else "upload automático pela API"
-            ),
-        ),
         ("Legenda", str(plan.captions_path) if plan.captions_path else "não enviar"),
         ("Hash do pacote", plan.input_hash()),
     )
@@ -1952,11 +2417,7 @@ def run_pipeline(
     validate_draft_preflight(layout)
     build_scenes(layout, force=force, skip_approvals=True)
     growth_queue = None
-    if (
-        not manifest.demo
-        and manifest.config.youtube_growth.enabled
-        and manifest.stages["images"].status == StageStatus.COMPLETED
-    ):
+    if not manifest.demo and manifest.config.youtube_growth.enabled:
         from pipeline_videos.growth import prepare_growth_queue
 
         growth_queue = prepare_growth_queue(layout, force=force)
@@ -1977,11 +2438,7 @@ def run_pipeline(
         return
     from pipeline_videos.audio import generate_audio
     from pipeline_videos.captions import generate_captions
-    from pipeline_videos.metadata import (
-        build_metadata,
-        generate_fixture_thumbnail,
-        queue_thumbnail_for_codex,
-    )
+    from pipeline_videos.metadata import build_metadata
     from pipeline_videos.music import select_music
     from pipeline_videos.render import render_review_candidate
     from pipeline_videos.validation import validate_project
@@ -2027,10 +2484,6 @@ def run_pipeline(
             refresh_growth_metadata(layout)
     else:
         build_metadata(layout, force=force)
-    if manifest.demo or manifest.config.images.provider == "fixture":
-        generate_fixture_thumbnail(layout, force=force)
-    elif not manifest.config.youtube_growth.enabled and not layout.thumbnail.exists():
-        queue_thumbnail_for_codex(layout)
     render_result = render_review_candidate(layout, force=force)
     report = validate_project(layout, require_render=True)
     console.print(f"[green]Candidato final V4:[/green] {render_result.final_video}")
@@ -2181,7 +2634,6 @@ def set_palette(project: str, palette_id: str) -> None:
             "images",
             "youtube_growth",
             "metadata",
-            "thumbnail",
             "render",
             "validation",
         ),
@@ -2189,74 +2641,6 @@ def set_palette(project: str, palette_id: str) -> None:
         note=f"Paleta alterada para {palette_id}.",
     )
     console.print(f"[green]Paleta atualizada:[/green] {palette.name}")
-
-
-@app.command("set-style")
-def set_style(project: str, style_id: str) -> None:
-    layout = _project(project)
-    style = load_style(style_id)
-    manifest = layout.load_manifest()
-    previous_config = manifest.config.model_copy(deep=True)
-    enforce_standard = style.visual_standard_id is not None
-    profile_palette = None
-    manifest.config.images.enforce_visual_standard = enforce_standard
-    if style.visual_standard_id:
-        manifest.config.images.visual_standard_id = style.visual_standard_id
-    if manifest.video_format == "short" and style_id == DEFAULT_SHORT_STYLE:
-        profile_palette = load_palette(DEFAULT_SHORT_PALETTE)
-        manifest.config.images.scene_planning_standard = "narration_block_visual_v1"
-        manifest.config.images.composition_safety_mode = "unrestricted_scene_v1"
-        manifest.config.render.short_cover_enabled = False
-        manifest.config.youtube_growth.thumbnail_variants = 0
-        manifest.config.youtube_growth.thumbnail_generation_mode = "youtube_auto_frame_v1"
-        manifest.config.youtube_growth.thumbnail_reference_mode = "none_v1"
-        manifest.config.youtube_growth.thumbnail_standard = "youtube_auto_frame_v1"
-        manifest.config.youtube_growth.thumbnail_typography_standard = "no_text_v1"
-    elif manifest.video_format == "short" and style_id == DEFAULT_STYLE:
-        profile_palette = load_palette(DEFAULT_PALETTE)
-        manifest.config.images.scene_planning_standard = "section_visual_direction_v1"
-        manifest.config.images.composition_safety_mode = "caption_safe_area_v1"
-        manifest.config.render.short_cover_enabled = True
-        manifest.config.youtube_growth.thumbnail_variants = 1
-        manifest.config.youtube_growth.thumbnail_generation_mode = "integrated_imagegen_v1"
-        manifest.config.youtube_growth.thumbnail_reference_mode = "opening_scene_edit_v1"
-        manifest.config.youtube_growth.thumbnail_standard = "direct_conflict_red_v1"
-        manifest.config.youtube_growth.thumbnail_typography_standard = "integrated_extruded_3d_v1"
-    style_is_current = (
-        layout.style_profile.exists() and read_model(layout.style_profile, StyleProfile) == style
-    )
-    palette_is_current = profile_palette is None or (
-        layout.palette.exists() and read_model(layout.palette, Palette) == profile_palette
-    )
-    if style_is_current and palette_is_current and manifest.config == previous_config:
-        console.print(f"[green]Estilo já estava ativo:[/green] {style.name}")
-        return
-    layout.save_manifest(manifest)
-    write_json(layout.style_profile, style)
-    if profile_palette is not None:
-        write_json(layout.palette, profile_palette)
-    refresh_visual_plan = (
-        previous_config.images.scene_planning_standard
-        != manifest.config.images.scene_planning_standard
-        and manifest.config.images.scene_planning_standard == "narration_block_visual_v1"
-    )
-    invalidate(
-        layout,
-        stages=(("shorts_script",) if refresh_visual_plan else ())
-        + (
-            "scenes",
-            "image_manifest",
-            "images",
-            "youtube_growth",
-            "metadata",
-            "thumbnail",
-            "render",
-            "validation",
-        ),
-        approvals=("images", "metadata", "final_render"),
-        note=f"Estilo alterado para {style_id}.",
-    )
-    console.print(f"[green]Estilo atualizado:[/green] {style.name}")
 
 
 if __name__ == "__main__":

@@ -36,10 +36,10 @@ from pipeline_videos.storage import (
 )
 from pipeline_videos.utils import slugify, utc_now
 
-DEFAULT_STYLE = "cinematic-family-3d-animation"
-DEFAULT_PALETTE = "noite-azul-dourada"
-DEFAULT_SHORT_STYLE = "biblical-midcentury-gouache"
-DEFAULT_SHORT_PALETTE = "midcentury-devotional-print"
+DEFAULT_STYLE = "biblical-midcentury-gouache"
+DEFAULT_PALETTE = "midcentury-devotional-print"
+DEFAULT_SHORT_STYLE = DEFAULT_STYLE
+DEFAULT_SHORT_PALETTE = DEFAULT_PALETTE
 DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_FILE = "biblical-midcentury-gouache-spoken-reference.png"
 DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_PATH = (
     "visual/reference-images/biblical-midcentury-gouache-spoken-reference.png"
@@ -180,7 +180,7 @@ def configure_high_stakes_question_profile(
     shorts = config.shorts_script
     target_words = duration_seconds * shorts.estimated_narration_wpm / 60
     shorts.editorial_profile = "high_stakes_biblical_question_v1"
-    shorts.require_independent_biblical_review = True
+    shorts.require_independent_biblical_review = False
     shorts.hook_min_words = 4
     shorts.hook_max_words = 18
     shorts.hook_target_seconds = 3.5
@@ -271,15 +271,14 @@ A etapa `music` sorteia uma faixa da biblioteca definida no `project.json` e pre
 registrada é reutilizada, salvo quando `--force` for deliberado.
 
 Quando `youtube/growth-queue.json` estiver pendente, o subagente `youtube_growth_specialist` escreve
-somente em staging. Apenas o agente principal importa títulos, descrição, estratégia e thumbnails.
+somente em staging. Apenas o agente principal importa título, descrição, tags e estratégia.
 Em produção remota, o coordenador permanece na sessão do job e cria o mesmo especialista de
-crescimento do fluxo local, que entrega exatamente um par título+thumbnail no staging.
+crescimento do fluxo local, que entrega somente o pacote de metadados no staging.
 
 Em Shorts compactos determinísticos, `script/shorts-queue.json` contrata somente o
 `shorts_visual_planner`; a locução e a revisão bíblica permanecem seladas pelo catálogo verificado.
-Nos demais Shorts, a fila contrata o `shorts_script_specialist` e, quando a própria fila exigir
-revisão independente, exatamente um `biblical_reviewer`. Todos escrevem somente nos stagings; o
-agente principal executa o preflight e importa uma única vez.
+Nos demais Shorts, a fila contrata somente o `shorts_script_specialist`. A conferência de fontes
+acontece no preflight incorporado, sem um agente revisor capaz de reescrever o texto aprovado.
 
 Vídeos novos usam direção criativa explícita. Shorts padrão seguem `creative_retention_v3`, sempre
 com um hook inicial honesto, e salvam `hook_contract=user_six_v1`. Shorts compactos usam
@@ -351,18 +350,21 @@ def create_project(
     layout = ProjectLayout(root)
     layout.ensure_directories()
     now = utc_now()
-    selected_style_id = style_id or (
-        DEFAULT_SHORT_STYLE if video_format == "short" else DEFAULT_STYLE
-    )
-    selected_palette_id = palette_id or (
-        DEFAULT_SHORT_PALETTE if selected_style_id == DEFAULT_SHORT_STYLE else DEFAULT_PALETTE
-    )
+    if style_id is not None and style_id != DEFAULT_STYLE:
+        raise ValueError(
+            "O pipeline usa exclusivamente o padrão visual biblical-midcentury-gouache."
+        )
+    selected_style_id = DEFAULT_STYLE
+    selected_palette_id = palette_id or DEFAULT_PALETTE
     config = ProjectConfig()
     config.youtube_publication.category_id = "22" if video_format == "short" else "27"
     config.production.mode = production_mode
     style = load_style(selected_style_id)
     if style.visual_standard_id:
         config.images.visual_standard_id = style.visual_standard_id
+    config.images.scene_planning_standard = "narration_block_visual_v1"
+    config.images.opening_visual_standard = "scroll_stop_concrete_v1"
+    config.images.composition_safety_mode = "unrestricted_scene_v1"
     if video_format == "short":
         config.render = RenderConfig(
             width=1080,
@@ -376,12 +378,8 @@ def create_project(
         config.captions.margin_bottom = 310
         config.captions.vertical_position = "center"
         config.captions.context_labels_enabled = False
-        if selected_style_id == DEFAULT_SHORT_STYLE:
-            config.images.scene_planning_standard = "narration_block_visual_v1"
-            config.images.composition_safety_mode = "unrestricted_scene_v1"
-            config.images.spoken_reference_image_path = DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_PATH
-            config.images.spoken_reference_image_mode = "fixed_profile_asset_v1"
-            config.render.short_cover_enabled = False
+        config.images.spoken_reference_image_path = DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_PATH
+        config.images.spoken_reference_image_mode = "fixed_profile_asset_v1"
     if demo:
         config.render = RenderConfig(
             width=1280,
@@ -406,6 +404,7 @@ def create_project(
         config.production.optimization_profile = "token_optimized_v1"
         config.production.worker_context_policy = "compact_only"
         config.editorial_policy.standard = "scripture_rich_ptbr_v1"
+        config.editorial_policy.authorial_narrator = "jesus_first_person_v1"
         config.editorial_policy.forbid_english_editorial_jargon = True
         config.editorial_policy.forbid_generic_text_reference = True
         config.editorial_policy.require_literal_scripture_citations = True
@@ -430,32 +429,12 @@ def create_project(
         config.render.narration_gain_db = 0.0
         config.render.background_music_gain_db = 0.0
         config.youtube_growth.title_variants = 1
-        config.youtube_growth.thumbnail_variants = 1
         config.youtube_growth.title_standard = "creative_pipe_passage_v3"
         config.youtube_growth.description_standard = "search_first_unique_v2"
-        config.youtube_growth.title_thumbnail_pairing_standard = "complementary_v1"
         if video_format == "short":
             config.shorts_script.narrative_standard = "creative_retention_v3"
-            config.shorts_script.require_independent_biblical_review = True
+            config.shorts_script.require_independent_biblical_review = False
             configure_short_duration_profile(config, target_duration_seconds)
-            if selected_style_id == DEFAULT_SHORT_STYLE:
-                config.youtube_growth.thumbnail_variants = 0
-                config.youtube_growth.thumbnail_generation_mode = "youtube_auto_frame_v1"
-                config.youtube_growth.thumbnail_reference_mode = "none_v1"
-                config.youtube_growth.thumbnail_standard = "youtube_auto_frame_v1"
-                config.youtube_growth.thumbnail_typography_standard = "no_text_v1"
-            else:
-                config.youtube_growth.generation_mode = "specialist_full_package_v1"
-                config.youtube_growth.validation_mode = "strict_v1"
-                config.youtube_growth.thumbnail_generation_mode = "integrated_imagegen_v1"
-                config.youtube_growth.thumbnail_reference_mode = "opening_scene_edit_v1"
-                config.youtube_growth.thumbnail_standard = "direct_conflict_red_v1"
-                config.youtube_growth.thumbnail_typography_standard = "integrated_extruded_3d_v1"
-        else:
-            config.youtube_growth.thumbnail_generation_mode = "theme_prompt_imagegen_v1"
-            config.youtube_growth.thumbnail_reference_mode = "theme_only_v1"
-            config.youtube_growth.thumbnail_standard = "biblical_cinematic_landscape_v1"
-            config.youtube_growth.thumbnail_typography_standard = "no_text_v1"
 
     stages = initial_stage_records()
     if video_format != "short" or demo:
@@ -491,7 +470,10 @@ def create_project(
         narration_tone=(
             "íntimo, emocional, cinematográfico e sereno, como uma fala de Jesus em um filme épico"
             if compact_short
-            else "reflexivo, acolhedor e cinematográfico"
+            else (
+                "íntimo, humano e cinematográfico, narrado por Jesus em primeira pessoa "
+                "com clareza entre dramatização autoral e citação bíblica literal"
+            )
         ),
         hook_contract=(
             "cinematic_interruption_v1"
@@ -517,7 +499,6 @@ def create_project(
     install_default_caption_assets(layout)
     if (
         video_format == "short"
-        and selected_style_id == DEFAULT_SHORT_STYLE
         and config.images.spoken_reference_image_mode == "fixed_profile_asset_v1"
     ):
         install_default_short_visual_assets(layout)

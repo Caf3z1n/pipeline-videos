@@ -186,6 +186,8 @@ class ApprovalRecord(PipelineModel):
 
 
 class RenderConfig(PipelineModel):
+    model_config = ConfigDict(extra="ignore", validate_assignment=True)
+
     width: int = 1920
     height: int = 1080
     fps: int = 30
@@ -215,9 +217,6 @@ class RenderConfig(PipelineModel):
     background_music_gain_db: float = Field(default=-12.0, ge=-60.0, le=0.0)
     background_music_fade_in_seconds: float = Field(default=2.0, ge=0.0, le=10.0)
     background_music_fade_out_seconds: float = Field(default=3.0, ge=0.0, le=10.0)
-    short_cover_enabled: bool = True
-    short_cover_duration_seconds: float = Field(default=1 / 30, ge=1 / 30, le=3.0)
-    short_cover_transition_seconds: float = Field(default=0.0, ge=0.0, le=1.0)
     background_blur_profile: Literal["none", "functional_caption_focus_v1"] = "none"
     background_blur_opening_sigma: float = Field(default=8.0, ge=0.0, le=12.0)
     background_blur_scripture_sigma: float = Field(default=8.0, ge=0.0, le=12.0)
@@ -340,26 +339,34 @@ class ImageConfig(PipelineModel):
     width: int = 1536
     height: int = 1024
     extension: str = ".png"
-    visual_standard_id: str = "cinematic-family-3d-v1"
+    visual_standard_id: Literal["biblical-midcentury-gouache-v1"] = "biblical-midcentury-gouache-v1"
     enforce_visual_standard: bool = True
     reject_panel_like_images: bool = True
-    scene_planning_standard: Literal[
-        "section_visual_direction_v1",
-        "narration_block_visual_v1",
-    ] = "section_visual_direction_v1"
-    opening_visual_standard: Literal[
-        "legacy_v1",
-        "scroll_stop_concrete_v1",
-    ] = "legacy_v1"
-    composition_safety_mode: Literal[
-        "caption_safe_area_v1",
-        "unrestricted_scene_v1",
-    ] = "caption_safe_area_v1"
+    scene_planning_standard: Literal["narration_block_visual_v1"] = "narration_block_visual_v1"
+    opening_visual_standard: Literal["scroll_stop_concrete_v1"] = "scroll_stop_concrete_v1"
+    composition_safety_mode: Literal["unrestricted_scene_v1"] = "unrestricted_scene_v1"
     spoken_reference_image_mode: Literal[
         "generated",
         "fixed_profile_asset_v1",
     ] = "generated"
     spoken_reference_image_path: str | None = None
+
+    @field_validator(
+        "visual_standard_id",
+        "scene_planning_standard",
+        "opening_visual_standard",
+        "composition_safety_mode",
+        mode="before",
+    )
+    @classmethod
+    def normalize_canonical_visual_contract(cls, value: object, info: Any) -> str:
+        canonical_values = {
+            "visual_standard_id": "biblical-midcentury-gouache-v1",
+            "scene_planning_standard": "narration_block_visual_v1",
+            "opening_visual_standard": "scroll_stop_concrete_v1",
+            "composition_safety_mode": "unrestricted_scene_v1",
+        }
+        return canonical_values[info.field_name]
 
     @model_validator(mode="after")
     def validate_spoken_reference_image(self) -> ImageConfig:
@@ -382,6 +389,8 @@ class MusicConfig(PipelineModel):
 
 
 class YouTubeGrowthConfig(PipelineModel):
+    model_config = ConfigDict(extra="ignore", validate_assignment=True)
+
     enabled: bool = True
     use_specialist_subagent: bool = True
     specialist_role: Literal["youtube_growth_specialist"] = "youtube_growth_specialist"
@@ -394,17 +403,6 @@ class YouTubeGrowthConfig(PipelineModel):
         "advisory_seo_v1",
     ] = "strict_v1"
     title_variants: int = Field(default=1, ge=1, le=3)
-    thumbnail_variants: int = Field(default=1, ge=0, le=3)
-    thumbnail_generation_mode: Literal[
-        "integrated_imagegen_v1",
-        "theme_prompt_imagegen_v1",
-        "youtube_auto_frame_v1",
-    ] = "integrated_imagegen_v1"
-    thumbnail_reference_mode: Literal[
-        "opening_scene_edit_v1",
-        "theme_only_v1",
-        "none_v1",
-    ] = "opening_scene_edit_v1"
     title_standard: Literal[
         "passage_pipe_topic_v1",
         "tension_pipe_passage_v2",
@@ -414,20 +412,11 @@ class YouTubeGrowthConfig(PipelineModel):
         "scripture_timeline_v1",
         "search_first_unique_v2",
     ] = "scripture_timeline_v1"
-    thumbnail_standard: Literal[
-        "direct_conflict_red_v1",
-        "biblical_cinematic_landscape_v1",
-        "youtube_auto_frame_v1",
-    ] = "direct_conflict_red_v1"
-    thumbnail_typography_standard: Literal[
-        "integrated_extruded_3d_v1",
-        "no_text_v1",
-    ] = "integrated_extruded_3d_v1"
-    title_thumbnail_pairing_standard: Literal["complementary_v1"] = "complementary_v1"
 
 
 class EditorialPolicyConfig(PipelineModel):
     standard: Literal["scripture_rich_ptbr_v1"] = "scripture_rich_ptbr_v1"
+    authorial_narrator: Literal["jesus_first_person_v1"] = "jesus_first_person_v1"
     forbid_english_editorial_jargon: bool = False
     forbid_generic_text_reference: bool = False
     require_literal_scripture_citations: bool = False
@@ -500,7 +489,7 @@ class ShortsScriptConfig(PipelineModel):
     enabled: bool = True
     use_specialist_subagent: bool = True
     specialist_role: Literal["shorts_script_specialist"] = "shorts_script_specialist"
-    require_independent_biblical_review: bool = False
+    require_independent_biblical_review: Literal[False] = False
     generation_mode: Literal[
         "specialist_full_package_v1",
         "deterministic_compact_visual_plan_v1",
@@ -509,6 +498,14 @@ class ShortsScriptConfig(PipelineModel):
         "independent_model_v1",
         "deterministic_verified_compact_v1",
     ] = "independent_model_v1"
+
+    @field_validator("require_independent_biblical_review", mode="before")
+    @classmethod
+    def disable_independent_biblical_reviewer(cls, _value: object) -> bool:
+        """Use source validation inside the pipeline, never a reviewer model."""
+
+        return False
+
     duration_profile: Literal["standard_45_55_v1", "adaptive_compact_v1"] = "standard_45_55_v1"
     editorial_profile: ShortsEditorialProfile = "verse_led_v1"
     compact_narrative_standard: Literal["cinematic_jesus_devotional_v1"] | None = None
@@ -641,6 +638,7 @@ class ProjectManifest(PipelineModel):
         "preferred_target_v1",
         "exact_target_v1",
         "adaptive_range_v1",
+        "approved_script_locked_v1",
     ] = "exact_target_v1"
     requested_duration_min_seconds: float | None = Field(default=None, ge=1.0)
     requested_duration_max_seconds: float | None = Field(default=None, ge=1.0)
@@ -680,6 +678,12 @@ class ProjectManifest(PipelineModel):
             assert minimum is not None and maximum is not None
             if not minimum <= self.effective_duration_seconds <= maximum:
                 raise ValueError("A duração efetiva precisa permanecer dentro da faixa solicitada")
+        if self.duration_policy == "approved_script_locked_v1" and (
+            minimum is not None or maximum is not None
+        ):
+            raise ValueError(
+                "Roteiro aprovado não aceita limites de duração; o áudio define a duração efetiva."
+            )
         return self
 
 
@@ -1068,6 +1072,21 @@ class LongFormEngagementPlan(PipelineModel):
     payoff_connection: str
 
 
+class NarrationVisualScene(PipelineModel):
+    section_id: str
+    narration: str
+    scene_description: str
+    visual_relation: Literal["literal", "contextual", "symbolic"]
+
+    @model_validator(mode="after")
+    def validate_visual_scene(self) -> NarrationVisualScene:
+        if not self.narration.strip():
+            raise ValueError("O bloco de narração da cena não pode ficar vazio")
+        if not self.scene_description.strip():
+            raise ValueError("A descrição específica da cena não pode ficar vazia")
+        return self
+
+
 class LongFormScriptStrategy(PipelineModel):
     standard: Literal[
         "retention_story_long_v1",
@@ -1089,6 +1108,7 @@ class LongFormScriptStrategy(PipelineModel):
     opening_conflict: str = ""
     opening_line: str = ""
     creative_mode: CreativeMode = "auto"
+    narrator_identity: Literal["jesus_first_person_v1"] = "jesus_first_person_v1"
     interpretive_stance: InterpretiveStance = "expository"
     hook_policy: HookPolicy = "auto"
     hook_family: HookFamily = "auto"
@@ -1102,6 +1122,7 @@ class LongFormScriptStrategy(PipelineModel):
     practical_application: str = ""
     callback: str = ""
     engagement: LongFormEngagementPlan
+    visual_scenes: list[NarrationVisualScene] = Field(min_length=1, max_length=240)
     source_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -1566,6 +1587,8 @@ class CaptionManifest(PipelineModel):
 
 
 class YouTubeMetadata(PipelineModel):
+    model_config = ConfigDict(extra="ignore", validate_assignment=True)
+
     status: Literal["draft", "approved"] = "draft"
     title: str
     alternative_titles: list[str]
@@ -1573,9 +1596,6 @@ class YouTubeMetadata(PipelineModel):
     chapters: list[str]
     topics: list[str]
     pinned_comment: str
-    thumbnail_concept: str
-    thumbnail_prompt: str
-    thumbnail_alternatives: list[str]
     publication_visibility: Literal["private", "unlisted"] = "private"
 
 
@@ -1603,6 +1623,8 @@ class ShortPublicationAnalyticsContext(PipelineModel):
 
 
 class YouTubePublicationRecord(PipelineModel):
+    model_config = ConfigDict(extra="ignore", validate_assignment=True)
+
     schema_version: Literal["1.0"] = "1.0"
     project_id: str
     video_id: str
@@ -1621,79 +1643,9 @@ class YouTubePublicationRecord(PipelineModel):
     short_analytics_context: ShortPublicationAnalyticsContext | None = None
     video: YouTubePublicationAsset
     metadata: YouTubePublicationAsset
-    thumbnail: YouTubePublicationAsset
     captions: YouTubePublicationAsset
     created_at: str
     updated_at: str
-
-
-class YouTubeThumbnailDesign(PipelineModel):
-    text: str
-    accent_word: str
-    text_lines: list[str] = Field(default_factory=list, max_length=3)
-    text_position: Literal["top", "center", "bottom"] = "top"
-    text_alignment: Literal["left", "center", "right"] = "center"
-    primary_color: Literal["white", "yellow", "red"] = "white"
-    accent_color: Literal["white", "yellow", "red"] = "yellow"
-    max_lines: int = Field(default=3, ge=1, le=3)
-    safe_margin_x_ratio: float = Field(default=0.06, ge=0.04, le=0.18)
-    safe_margin_y_ratio: float = Field(default=0.06, ge=0.04, le=0.18)
-    texture: Literal["none", "subtle_grain"] = "subtle_grain"
-    typography_treatment: Literal["integrated_extruded_3d", "none"] = "integrated_extruded_3d"
-    typography_hierarchy: Literal["dominant_keyword_scale", "none"] = "dominant_keyword_scale"
-    typography_material: Literal["scene_lit_text_material", "none"] = "scene_lit_text_material"
-    narrative_element: Literal["none", "arrow", "x", "underline", "brush"] = "none"
-    narrative_element_anchor: Literal[
-        "top_left",
-        "top_right",
-        "center_left",
-        "center_right",
-        "bottom_left",
-        "bottom_right",
-    ] = "center_right"
-    narrative_element_target: str | None = None
-    narrative_element_rationale: str | None = None
-
-    @model_validator(mode="after")
-    def validate_editorial_design(self) -> YouTubeThumbnailDesign:
-        if self.typography_treatment == "none":
-            if self.text.strip() or self.accent_word.strip() or self.text_lines:
-                raise ValueError("A thumbnail sem tipografia não pode declarar texto")
-            if self.typography_hierarchy != "none" or self.typography_material != "none":
-                raise ValueError("A thumbnail sem tipografia precisa neutralizar a hierarquia")
-            if self.texture != "none":
-                raise ValueError("A thumbnail sem tipografia não pode declarar textura de texto")
-            if self.narrative_element != "none":
-                raise ValueError("A thumbnail limpa não pode declarar marcação editorial")
-            return self
-        words = self.text.split()
-        if not 2 <= len(words) <= 5:
-            raise ValueError("O texto da thumbnail precisa ter de duas a cinco palavras")
-        accent_words = self.accent_word.split()
-        if len(accent_words) != 1:
-            raise ValueError("A thumbnail precisa de uma única palavra de destaque")
-        normalized_words = {word.strip(".,!?:;").casefold() for word in words}
-        normalized_accent = accent_words[0].strip(".,!?:;").casefold()
-        if normalized_accent not in normalized_words:
-            raise ValueError("A palavra de destaque precisa existir no texto da thumbnail")
-        if self.text_lines:
-            if len(self.text_lines) > self.max_lines:
-                raise ValueError("A hierarquia da thumbnail excede o máximo de linhas")
-            if any(not line.strip() for line in self.text_lines):
-                raise ValueError("As linhas da thumbnail não podem estar vazias")
-            flattened = " ".join(" ".join(self.text_lines).split()).casefold()
-            normalized_text = " ".join(self.text.split()).casefold()
-            if flattened != normalized_text:
-                raise ValueError("text_lines precisa preservar exatamente thumbnail text")
-        if self.narrative_element != "none":
-            if not (self.narrative_element_rationale or "").strip():
-                raise ValueError("Elemento narrativo precisa de justificativa editorial")
-            if (
-                self.narrative_element in {"arrow", "x"}
-                and not (self.narrative_element_target or "").strip()
-            ):
-                raise ValueError("Seta ou X precisa identificar o alvo narrativo")
-        return self
 
 
 class YouTubePromiseMatch(PipelineModel):
@@ -1701,7 +1653,6 @@ class YouTubePromiseMatch(PipelineModel):
     opening_line: str
     opening_scene_id: str
     title_delivery: str
-    thumbnail_delivery: str
 
 
 class YouTubeGrowthStrategy(PipelineModel):
@@ -1716,20 +1667,12 @@ class YouTubeGrowthStrategy(PipelineModel):
     description_rationale: str = ""
     tag_strategy: str = ""
     discovery_hypothesis: str = ""
-    thumbnail_rationale: str
-    title_thumbnail_complement: str
     promise_match: YouTubePromiseMatch | None = None
     source_ids: list[str] = Field(default_factory=list)
     section_ids: list[str] = Field(default_factory=list)
-    thumbnail_designs: list[YouTubeThumbnailDesign] = Field(default_factory=list, max_length=3)
-    short_cover_timestamp_seconds: float | None = Field(default=None, ge=0.0)
     experiment_plan: list[str] = Field(default_factory=list)
     compliance_checks: list[str] = Field(default_factory=list)
     official_guidelines: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def validate_short_cover(self) -> YouTubeGrowthStrategy:
-        return self
 
 
 class YouTubeGrowthPackage(PipelineModel):
@@ -2004,19 +1947,7 @@ class ShortsCinematicDevotionalDirection(PipelineModel):
         return self
 
 
-class ShortsVisualScene(PipelineModel):
-    section_id: str
-    narration: str
-    scene_description: str
-    visual_relation: Literal["literal", "contextual", "symbolic"]
-
-    @model_validator(mode="after")
-    def validate_visual_scene(self) -> ShortsVisualScene:
-        if not self.narration.strip():
-            raise ValueError("O bloco de narração da cena não pode ficar vazio")
-        if not self.scene_description.strip():
-            raise ValueError("A descrição específica da cena não pode ficar vazia")
-        return self
+ShortsVisualScene = NarrationVisualScene
 
 
 class CompactVisualConcept(PipelineModel):
@@ -2051,6 +1982,7 @@ class CompactVisualPlan(PipelineModel):
 
 
 class ShortsScriptStrategy(PipelineModel):
+    narrator_identity: Literal["jesus_first_person_v1"] = "jesus_first_person_v1"
     target_viewer: str
     viewer_need: str
     core_value: str

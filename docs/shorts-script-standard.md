@@ -10,6 +10,16 @@ direção registrada em [creative-direction.md](creative-direction.md).
 `retention_story_v2`, `human_hook_to_bible` e `verse_first` continuam válidos para projetos antigos.
 O pipeline usa o contrato salvo no `project.json` e não faz migração implícita.
 
+### Voz autoral
+
+Todos os perfis de Short usam `human_authorial_voice_v1`. A locução autoral deve entregar
+diretamente a pergunta, o fato, a ação ou a explicação; frases metalinguísticas como “o relato
+registra”, “o relato não explica”, “a sequência mostra” ou “não podemos afirmar” bloqueiam o
+staging. Listas de ausência e negações usadas apenas para enaltecer a frase seguinte também são
+recusadas, inclusive a fórmula `não A nem B, mas C`; declare `C` diretamente. O filtro não altera
+citações bíblicas literais e permite hooks negativos legítimos dos contratos, como
+`Nunca faça [X].`.
+
 ## Estrutura e tempo
 
 O perfil padrão `standard_45_55_v1`, de 45 a 55 segundos, é flexível dentro destes marcos:
@@ -27,6 +37,10 @@ O roteiro usa de 105 a 130 palavras por padrão e produz de 8 a 10 cenas no perf
 informação nova, mudança visual, função e tempo. Reformular a mesma tese não conta como
 progressão.
 
+Essa faixa orienta somente a escrita ainda não aprovada. Depois da aprovação por hash, nenhuma
+contagem de palavras ou duração estimada pode reprovar ou modificar o roteiro. O perfil
+`approved_script_locked_v1` preserva o texto integral e aceita a duração natural resultante.
+
 ### Perfil de grandes perguntas bíblicas
 
 `high_stakes_biblical_question_v1` é opt-in com `new-short --profile high-stakes` e aceita de 45 a
@@ -39,10 +53,23 @@ O contrato `high_stakes_opening_v1` não obriga o hook a ser pergunta. Ele alter
 contradição, reversão de crença, consequência primeiro, cena em andamento, citação ou pergunta
 direta. O hook curado é copiado literalmente. A citação usa `adaptive_payoff_v1`: pode entrar como
 tensão, prova da virada ou recompensa, entre 0 e 44 segundos, sem janela universal de 8–20 segundos.
-O perfil sempre exige revisão bíblica independente.
+Na criação comum de projeto e na bancada editorial, o perfil usa preflight de fontes incorporado,
+validação determinística no import e nenhum agente revisor antes ou depois da aprovação humana.
 O catálogo funciona em ciclo único. Quando todos os candidatos da rodada tiverem ao menos um uso ou
 reserva, `new-short` informa a exaustão e não cria projeto, reserva, briefing ou roteiro. Reutilização
 automática permanece proibida até a inclusão de uma nova rodada curada.
+
+Na bancada editorial em massa, esse perfil usa
+`quality_reference=published_high_stakes_last_three_v1`. O hook é avaliado antes do restante do
+roteiro, precisa abrir a narração literalmente e criar tensão imediata por contradição, consequência,
+cena, afirmação ou pergunta honesta. Jesus permanece como eu lírico desde a abertura; começar com
+“Jesus...” em terceira pessoa é bloqueante. A resolução responde ao mesmo loop e hook, clareza e
+payoff precisam atingir nota mínima 8/10. Um lote compartilha um único roteirista, recebe fontes e
+limites do tema e usa `inline_source_guard_v1`, sem abrir revisor bíblico separado. Depois que o
+usuário aprova os textos exibidos, a aprovação por hash não chama modelo nem pesquisa novamente.
+Cada texto aprovado é convertido automaticamente em snapshot `approved_fast_v1`, com cenas
+derivadas dos blocos contíguos da narração, SEO e CTA já congelados. A produção pode ser liberada
+pelo título exato e não reabre nenhuma decisão editorial.
 
 Pedidos entre 15 e 44 segundos usam `adaptive_compact_v1`. O pipeline deriva e persiste os limites
 antes de preparar a fila; o Python sela a locução e os validadores leem esses valores em vez de
@@ -64,7 +91,7 @@ fonte precisa declarar `spoken_by=jesus`; versículos narrativos ou falas de out
 bloqueados. A fonte também registra força do hook, valor da mensagem e potencial de replay; os três
 precisam superar os pisos persistidos. Hook, fonte e revisão bíblica são verificados
 deterministicamente contra o catálogo; não há uma segunda chamada de modelo para revisão. Cenas por
-bloco, legenda e validação final permanecem, e não há thumbnail separada no perfil padrão. O áudio
+bloco, legenda e validação final permanecem. O áudio
 nunca recebe silêncio artificial para alcançar o alvo.
 
 Quando o pedido especifica uma faixa, como 15 a 20 segundos, o manifesto usa
@@ -197,10 +224,9 @@ cena são mapeados depois pelos timestamps do alinhamento. Hook, citação e ref
 mesmo áudio contínuo, sem reiniciar a interpretação vocal entre as três seções.
 
 O perfil padrão aplica `biblical-midcentury-gouache-v1` depois do planejamento de conteúdo, sem
-reservar área para legendas ou bordas. Ele não gera thumbnail nem capa no frame zero; o YouTube
-seleciona um frame do vídeo. `cinematic-family-3d-animation` continua disponível explicitamente e
-preserva a edição da abertura, o texto integrado e o frame zero. O título usa
-`Enfoque concreto | Passagem` sem obrigar o enfoque a ser motivacional.
+reservar área para legendas ou bordas. Ele não gera arte de capa nem altera o frame zero; o YouTube
+seleciona um frame do vídeo. O título usa `Enfoque concreto | Passagem` sem obrigar o enfoque a ser
+motivacional.
 
 Projetos novos também persistem `opening_visual_standard=scroll_stop_concrete_v1`. O primeiro bloco
 deve mostrar sujeito ou objeto dominante, ação observável já em curso e uma tensão, escolha ou

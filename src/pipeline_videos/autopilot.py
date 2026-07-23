@@ -52,14 +52,7 @@ def _growth_outputs_ready(layout: ProjectLayout) -> bool:
         return False
     outputs = queue.get("outputs", {})
     package = outputs.get("package")
-    if not isinstance(package, str) or not _is_nonempty_file(layout.root / package):
-        return False
-    if outputs.get("external_image_generation_required"):
-        thumbnails = outputs.get("thumbnails", [])
-        return bool(thumbnails) and all(
-            isinstance(path, str) and _is_nonempty_file(layout.root / path) for path in thumbnails
-        )
-    return True
+    return isinstance(package, str) and _is_nonempty_file(layout.root / package)
 
 
 def collect_external_waits(layout: ProjectLayout) -> list[dict[str, Any]]:
@@ -213,7 +206,11 @@ def prepare_local_coordinator_job(layout: ProjectLayout) -> dict[str, Any]:
             "publication_authorized": False,
             "one_final_render": True,
             "duration_policy": project.duration_policy,
-            "duration_target_is_advisory": project.duration_policy == "preferred_target_v1",
+            "duration_target_is_advisory": project.duration_policy
+            in {"preferred_target_v1", "approved_script_locked_v1"},
+            "duration_is_defined_by_approved_script": (
+                project.duration_policy == "approved_script_locked_v1"
+            ),
             "natural_voice_speed": project.config.audio.speed,
             "forbid_duration_based_speech_rate_changes": True,
             "forbid_duration_padding_or_time_stretch": True,
@@ -283,16 +280,10 @@ def run_autopilot_once(
 
     prepare_images(layout, force=force)
     project = layout.load_manifest()
-    growth_without_images = (
-        project.video_format == "short"
-        and project.config.youtube_growth.thumbnail_generation_mode == "youtube_auto_frame_v1"
-        and project.config.youtube_growth.thumbnail_reference_mode == "none_v1"
-    )
     if (
         not project.demo
         and project.config.youtube_growth.enabled
         and project.stages["youtube_growth"].status != StageStatus.COMPLETED
-        and growth_without_images
     ):
         from pipeline_videos.growth import prepare_growth_queue
 
@@ -313,17 +304,6 @@ def run_autopilot_once(
 
     if _all_staged_images_ready(layout):
         import_staged_images(layout, force=force)
-
-    project = layout.load_manifest()
-    if (
-        not project.demo
-        and project.config.youtube_growth.enabled
-        and project.stages["youtube_growth"].status != StageStatus.COMPLETED
-        and project.stages["images"].status == StageStatus.COMPLETED
-    ):
-        from pipeline_videos.growth import prepare_growth_queue
-
-        prepare_growth_queue(layout, force=force)
 
     project = layout.load_manifest()
     if (
@@ -354,24 +334,15 @@ def run_autopilot_once(
         return result
 
     project = layout.load_manifest()
-    from pipeline_videos.metadata import (
-        build_metadata,
-        generate_fixture_thumbnail,
-        queue_thumbnail_for_codex,
-    )
+    from pipeline_videos.metadata import build_metadata
 
     if not project.demo and project.config.youtube_growth.enabled:
         if project.stages["metadata"].status != StageStatus.COMPLETED:
             from pipeline_videos.growth import refresh_growth_metadata
 
             refresh_growth_metadata(layout)
-    else:
+    elif project.stages["metadata"].status != StageStatus.COMPLETED:
         build_metadata(layout, force=force)
-
-    if project.demo or project.config.images.provider == "fixture":
-        generate_fixture_thumbnail(layout, force=force)
-    elif not project.config.youtube_growth.enabled and not layout.thumbnail.exists():
-        queue_thumbnail_for_codex(layout)
 
     from pipeline_videos.render import render_review_candidate
     from pipeline_videos.validation import validate_project

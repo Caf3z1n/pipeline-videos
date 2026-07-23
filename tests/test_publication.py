@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from PIL import Image
 
 from pipeline_videos.models import (
     ApprovalRecord,
@@ -17,7 +16,6 @@ from pipeline_videos.project import create_project
 from pipeline_videos.publication import (
     GoogleYouTubeClient,
     prepare_publication,
-    publication_status,
     publish_project,
     upload_project,
 )
@@ -26,13 +24,11 @@ from pipeline_videos.utils import sha256_file, sha256_value, utc_now
 
 
 class FakeYouTubeClient:
-    def __init__(self, *, fail_thumbnail_once: bool = False) -> None:
+    def __init__(self) -> None:
         self.upload_calls = 0
         self.update_calls = 0
-        self.thumbnail_calls = 0
         self.caption_calls = 0
         self.visibility_calls: list[dict[str, str | None]] = []
-        self.fail_thumbnail_once = fail_thumbnail_once
 
     def channel(self) -> dict[str, str]:
         return {"id": "channel-123", "title": "Canal de teste"}
@@ -54,23 +50,24 @@ class FakeYouTubeClient:
         return {"id": "video-123"}
 
     def update_video(
-        self, video_id: str, *, snippet: dict[str, Any], status: dict[str, Any]
+        self,
+        video_id: str,
+        *,
+        snippet: dict[str, Any],
+        status: dict[str, Any],
     ) -> None:
         assert video_id == "video-123"
         assert snippet["title"]
         assert "selfDeclaredMadeForKids" in status
         self.update_calls += 1
 
-    def set_thumbnail(self, video_id: str, path: Path) -> dict[str, Any]:
-        assert video_id == "video-123"
-        assert path.is_file()
-        self.thumbnail_calls += 1
-        if self.fail_thumbnail_once and self.thumbnail_calls == 1:
-            raise RuntimeError("falha transitória na thumbnail")
-        return {"items": []}
-
     def upsert_caption(
-        self, video_id: str, path: Path, *, language: str, name: str
+        self,
+        video_id: str,
+        path: Path,
+        *,
+        language: str,
+        name: str,
     ) -> dict[str, Any]:
         assert video_id == "video-123"
         assert path.suffix == ".srt"
@@ -160,23 +157,13 @@ def test_google_client_updates_snippet_and_status_separately() -> None:
     }
 
 
-def _ready_project(
-    tmp_path,
-    *,
-    video_format: str = "landscape",
-    legacy_short_profile: bool = True,
-):
+def _ready_project(tmp_path, *, video_format: str = "landscape"):
     layout = create_project(
         "video-publicavel",
         "Vídeo publicável",
         projects_dir=tmp_path,
         target_duration_seconds=60 if video_format == "short" else 540,
         video_format=video_format,
-        style_id=(
-            "cinematic-family-3d-animation"
-            if video_format == "short" and legacy_short_profile
-            else None
-        ),
         project_date=date(2026, 7, 14),
     )
     metadata = YouTubeMetadata(
@@ -186,49 +173,35 @@ def _ready_project(
         chapters=[] if video_format == "short" else ["0:00 Introdução"],
         topics=["Bíblia", "reflexão"],
         pinned_comment="O que você aprendeu?",
-        thumbnail_concept="Conflito visual simples",
-        thumbnail_prompt="Cena bíblica sem texto",
-        thumbnail_alternatives=[],
     )
     write_json(layout.metadata, metadata)
     write_text(layout.description, metadata.description + "\n\n" + "\n".join(metadata.chapters))
     layout.final_video.parent.mkdir(parents=True, exist_ok=True)
     layout.final_video.write_bytes(b"mp4 de teste")
-    youtube_auto_frame = video_format == "short" and not legacy_short_profile
-    if not youtube_auto_frame:
-        Image.new("RGB", (1280, 720), "#31485F").save(layout.thumbnail)
     write_text(layout.srt, "1\n00:00:00,000 --> 00:00:01,000\nOlá\n")
 
     manifest = layout.load_manifest()
     manifest.config.images.provider = "codex"
-    manifest.stages["thumbnail"] = manifest.stages["thumbnail"].model_copy(
-        update={
-            "status": StageStatus.COMPLETED,
-            "provider": "codex-import",
-            "updated_at": utc_now(),
-        }
-    )
     manifest.stages["validation"] = manifest.stages["validation"].model_copy(
         update={"status": StageStatus.COMPLETED, "updated_at": utc_now()}
     )
-    for key in ("metadata", "final_render"):
-        artifact_hash = (
-            sha256_file(layout.final_video)
-            if key == "final_render"
-            else sha256_value(
-                {
-                    "metadata": sha256_file(layout.metadata),
-                    "description": sha256_file(layout.description),
-                    "thumbnail": (None if youtube_auto_frame else sha256_file(layout.thumbnail)),
-                }
-            )
-        )
-        manifest.approvals[key] = ApprovalRecord(
-            status=ApprovalStatus.APPROVED,
-            decided_at=utc_now(),
-            decided_by="teste",
-            artifact_hash=artifact_hash,
-        )
+    manifest.approvals["metadata"] = ApprovalRecord(
+        status=ApprovalStatus.APPROVED,
+        decided_at=utc_now(),
+        decided_by="teste",
+        artifact_hash=sha256_value(
+            {
+                "metadata": sha256_file(layout.metadata),
+                "description": sha256_file(layout.description),
+            }
+        ),
+    )
+    manifest.approvals["final_render"] = ApprovalRecord(
+        status=ApprovalStatus.APPROVED,
+        decided_at=utc_now(),
+        decided_by="teste",
+        artifact_hash=sha256_file(layout.final_video),
+    )
     layout.save_manifest(manifest)
     return layout
 
@@ -273,7 +246,6 @@ def test_private_review_candidate_can_upload_only_as_private_without_human_appro
     )
 
     assert plan.automated_review_candidate is True
-    assert plan.privacy_status == "private"
     assert layout.load_manifest().approvals["final_render"].status == ApprovalStatus.PENDING
     with pytest.raises(RuntimeError, match="Upload automatizado bloqueado"):
         prepare_publication(
@@ -310,7 +282,7 @@ def test_private_review_upload_does_not_record_human_approval(tmp_path) -> None:
     assert current.approvals["final_render"].status == ApprovalStatus.PENDING
 
 
-def test_upload_is_idempotent_and_sends_metadata_thumbnail_and_captions(tmp_path) -> None:
+def test_upload_is_idempotent_and_sends_metadata_and_captions(tmp_path) -> None:
     layout = _ready_project(tmp_path)
     client = FakeYouTubeClient()
     project_id = layout.load_manifest().project_id
@@ -332,7 +304,6 @@ def test_upload_is_idempotent_and_sends_metadata_thumbnail_and_captions(tmp_path
 
     assert first.video_id == repeated.video_id == "video-123"
     assert client.upload_calls == 1
-    assert client.thumbnail_calls == 1
     assert client.caption_calls == 1
     assert client.update_calls == 0
     assert read_json(layout.publication)["captions"]["youtube_id"] == "caption-123"
@@ -364,7 +335,7 @@ def test_force_new_upload_archives_existing_record_even_for_same_render(tmp_path
     assert (layout.publication_archive / "video-123.json").is_file()
 
 
-def test_short_upload_skips_ineffective_custom_thumbnail_api_call(tmp_path) -> None:
+def test_short_upload_records_analytics_context(tmp_path) -> None:
     layout = _ready_project(tmp_path, video_format="short")
     client = FakeYouTubeClient()
 
@@ -376,54 +347,17 @@ def test_short_upload_skips_ineffective_custom_thumbnail_api_call(tmp_path) -> N
         verify_validation=False,
     )
 
-    assert client.thumbnail_calls == 0
-    assert record.thumbnail.status == "skipped"
-    assert record.thumbnail.source_hash == sha256_file(layout.thumbnail)
-    assert "selecione manualmente" in layout.load_manifest().stages["publication"].note
-
-
-def test_new_short_upload_needs_no_thumbnail_file_and_leaves_frame_selection_to_youtube(
-    tmp_path,
-) -> None:
-    layout = _ready_project(
-        tmp_path,
-        video_format="short",
-        legacy_short_profile=False,
-    )
-    client = FakeYouTubeClient()
-
-    plan = prepare_publication(layout, verify_validation=False)
-    record = upload_project(
-        layout,
-        client=client,
-        allow_external=True,
-        confirmation=layout.load_manifest().project_id,
-        verify_validation=False,
-    )
-
-    assert plan.thumbnail_path is None
-    assert plan.thumbnail_hash is None
-    assert not layout.thumbnail.exists()
-    assert client.thumbnail_calls == 0
-    assert record.thumbnail.status == "skipped"
-    assert record.thumbnail.source_path is None
-    assert record.thumbnail.source_hash is None
     assert record.short_analytics_context is not None
-    assert record.short_analytics_context.opening_visual_standard == ("scroll_stop_concrete_v1")
+    assert record.short_analytics_context.opening_visual_standard == "scroll_stop_concrete_v1"
     assert record.short_analytics_context.video_duration_seconds == 60.0
     assert record.short_analytics_context.video_duration_source == "manifest_fallback"
-    assert "YouTube selecionará um frame" in layout.load_manifest().stages["publication"].note
 
 
 def test_short_analytics_fingerprint_is_validated_before_external_upload(
     tmp_path,
     monkeypatch,
 ) -> None:
-    layout = _ready_project(
-        tmp_path,
-        video_format="short",
-        legacy_short_profile=False,
-    )
+    layout = _ready_project(tmp_path, video_format="short")
     client = FakeYouTubeClient()
 
     def fail_context(_layout, **_kwargs):
@@ -442,40 +376,7 @@ def test_short_analytics_fingerprint_is_validated_before_external_upload(
             confirmation=layout.load_manifest().project_id,
             verify_validation=False,
         )
-
     assert client.upload_calls == 0
-
-
-def test_retry_after_thumbnail_failure_reuses_uploaded_video(tmp_path) -> None:
-    layout = _ready_project(tmp_path)
-    client = FakeYouTubeClient(fail_thumbnail_once=True)
-    project_id = layout.load_manifest().project_id
-
-    with pytest.raises(RuntimeError, match="falha transitória"):
-        upload_project(
-            layout,
-            client=client,
-            allow_external=True,
-            confirmation=project_id,
-            verify_validation=False,
-        )
-
-    partial, _ = publication_status(layout)
-    assert partial.video.status == "uploaded"
-    assert partial.thumbnail.status == "failed"
-
-    completed = upload_project(
-        layout,
-        client=client,
-        allow_external=True,
-        confirmation=project_id,
-        verify_validation=False,
-    )
-
-    assert completed.thumbnail.status == "uploaded"
-    assert client.upload_calls == 1
-    assert client.thumbnail_calls == 2
-    assert client.caption_calls == 1
 
 
 def test_changed_render_requires_explicit_new_upload(tmp_path) -> None:
@@ -502,11 +403,10 @@ def test_changed_render_requires_explicit_new_upload(tmp_path) -> None:
             confirmation=project_id,
             verify_validation=False,
         )
-
     assert client.upload_calls == 1
 
 
-def test_publish_requires_video_id_and_supports_immediate_or_scheduled_release(tmp_path) -> None:
+def test_publish_requires_video_id_and_supports_release_modes(tmp_path) -> None:
     layout = _ready_project(tmp_path)
     client = FakeYouTubeClient()
     upload_project(
@@ -544,7 +444,3 @@ def test_publish_requires_video_id_and_supports_immediate_or_scheduled_release(t
     )
     assert published.privacy_status == "public"
     assert published.published_at is not None
-    assert client.visibility_calls[-1] == {
-        "privacy_status": "public",
-        "publish_at": None,
-    }

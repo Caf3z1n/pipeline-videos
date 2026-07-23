@@ -943,7 +943,10 @@ def _validate_compact_narration_audio(
         return
     if not words:
         raise ValueError("O áudio compacto não possui palavras alinhadas.")
-    if project.duration_policy == "adaptive_range_v1":
+    if project.duration_policy == "approved_script_locked_v1":
+        minimum_duration = None
+        maximum_duration = None
+    elif project.duration_policy == "adaptive_range_v1":
         assert project.requested_duration_min_seconds is not None
         assert project.requested_duration_max_seconds is not None
         minimum_duration = project.requested_duration_min_seconds
@@ -951,7 +954,7 @@ def _validate_compact_narration_audio(
     else:
         minimum_duration = project.target_duration_seconds * shorts.minimum_audio_duration_ratio
         maximum_duration = None
-    if duration < minimum_duration:
+    if minimum_duration is not None and duration < minimum_duration:
         raise ValueError(
             f"A narração compacta ficou em {duration:.2f}s; precisa chegar a pelo menos "
             f"{minimum_duration:.2f}s com um hook ou versículo mais longo. O pipeline não "
@@ -1705,7 +1708,11 @@ def generate_audio(
                 f"incluindo {recovered_count} recuperado(s) de tentativa interrompida."
             ),
         )
-        if project.duration_policy in {"preferred_target_v1", "adaptive_range_v1"}:
+        if project.duration_policy in {
+            "preferred_target_v1",
+            "adaptive_range_v1",
+            "approved_script_locked_v1",
+        }:
             effective_duration = round(audio_manifest.duration, 6)
             current_project = layout.load_manifest()
             if current_project.effective_duration_seconds != effective_duration:
@@ -1716,6 +1723,8 @@ def generate_audio(
                         "event": (
                             "adaptive_duration_settled"
                             if project.duration_policy == "adaptive_range_v1"
+                            else "approved_script_duration_settled"
+                            if project.duration_policy == "approved_script_locked_v1"
                             else "natural_voice_duration_settled"
                         ),
                         "duration_policy": project.duration_policy,
