@@ -4,6 +4,7 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from typer.testing import CliRunner
 
 from pipeline_videos import cli
@@ -16,6 +17,7 @@ from pipeline_videos.autopilot import (
 from pipeline_videos.models import StageStatus
 from pipeline_videos.project import create_project
 from pipeline_videos.storage import write_json
+from pipeline_videos.utils import relative_posix, sha256_file
 
 
 def _waiting_layout(tmp_path):
@@ -140,6 +142,54 @@ def test_noncompact_main_agent_short_does_not_declare_external_script_specialist
     assert "shorts_script_specialist" not in job["external_roles"]
     assert "shorts_visual_planner" not in job["external_roles"]
     assert "biblical_reviewer" not in job["external_roles"]
+
+
+def test_approved_locked_autopilot_skips_editorial_preflight(tmp_path, monkeypatch) -> None:
+    layout = create_project(
+        "aprovado-sem-revisao",
+        "Aprovado sem revisão",
+        projects_dir=tmp_path,
+        target_duration_seconds=50,
+        video_format="short",
+        project_date=date(2026, 7, 23),
+    )
+    project = layout.load_manifest()
+    project.stages["shorts_script"] = project.stages["shorts_script"].model_copy(
+        update={"status": StageStatus.COMPLETED}
+    )
+    layout.save_manifest(project)
+    write_json(
+        layout.approved_script_lock,
+        {
+            "schema_version": "1.0",
+            "approved_script_id": "approved-test-00000000",
+            "content_hash": "0" * 64,
+            "reserved_by_job_id": "video-test",
+            "artifacts": {
+                relative_posix(layout.briefing, layout.root): sha256_file(layout.briefing),
+            },
+        },
+    )
+
+    import pipeline_videos.review as review
+    import pipeline_videos.scenes as scenes
+    from pipeline_videos.autopilot import run_autopilot_once
+
+    monkeypatch.setattr(
+        review,
+        "validate_draft_preflight",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("O preflight editorial não pode executar.")
+        ),
+    )
+    monkeypatch.setattr(
+        scenes,
+        "build_scenes",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("chegou às cenas")),
+    )
+
+    with pytest.raises(RuntimeError, match="chegou às cenas"):
+        run_autopilot_once(layout)
 
 
 def test_autopilot_cli_reports_compact_external_pause(tmp_path, monkeypatch) -> None:

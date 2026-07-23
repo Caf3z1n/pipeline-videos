@@ -39,7 +39,7 @@ from pipeline_videos.utils import (
     utc_now,
 )
 
-VALIDATION_ALGORITHM_VERSION = "8"
+VALIDATION_ALGORITHM_VERSION = "9"
 
 _COMPLETION_FIRST_ADVISORY_PATTERNS = (
     "O contrato criativo",
@@ -189,7 +189,12 @@ def _validate_video(
 
 def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> ValidationReport:
     manifest = layout.load_manifest()
-    if layout.script.is_file() and layout.briefing.is_file():
+    approved_locked = layout.approved_script_lock.is_file()
+    if approved_locked:
+        from pipeline_videos.approved_scripts import verify_project_approved_script_lock
+
+        verify_project_approved_script_lock(layout)
+    elif layout.script.is_file() and layout.briefing.is_file():
         ensure_creative_contract(layout)
     report_path = layout.root / "validation" / "report.json"
     markdown_path = layout.root / "validation" / "report.md"
@@ -245,7 +250,6 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
     report = ValidationReport(project_id=manifest.project_id, generated_at=utc_now())
     try:
         script = read_model(layout.script, ScriptDocument)
-        validate_authorial_narration_style(script)
         contract = read_model(layout.creative_contract, CreativeContract)
         review = read_model(layout.biblical_review, BiblicalReview)
         scenes = read_model(layout.scenes, SceneManifest)
@@ -254,8 +258,12 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
         captions = read_model(layout.captions, CaptionManifest)
         metadata = read_model(layout.metadata, YouTubeMetadata)
 
+        if not approved_locked:
+            validate_authorial_narration_style(script)
+
         if (
-            manifest.video_format != "short"
+            not approved_locked
+            and manifest.video_format != "short"
             and manifest.config.long_form_script.enabled
             and manifest.config.long_form_script.narrative_standard
             in {"retention_story_long_v1", "creative_retention_long_v2"}
@@ -279,32 +287,37 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                 long_diagnostics["scripture_citation_timestamps"]
             )
 
-        if review.script_version != script.version:
-            report.errors.append("A revisão bíblica não corresponde à versão ativa do roteiro.")
-        if review.has_open_blockers:
-            report.errors.append("A revisão bíblica ainda possui bloqueios abertos.")
-        if not review.approved:
-            report.warnings.append("A revisão bíblica existe, mas ainda não está aprovada.")
+        if approved_locked:
+            report.checks["editorial_validation"] = "skipped_user_approved_snapshot_v1"
+            report.checks["approved_script_lock"] = "verified"
+        else:
+            if review.script_version != script.version:
+                report.errors.append("A revisão bíblica não corresponde à versão ativa do roteiro.")
+            if review.has_open_blockers:
+                report.errors.append("A revisão bíblica ainda possui bloqueios abertos.")
+            if not review.approved:
+                report.warnings.append("A revisão bíblica existe, mas ainda não está aprovada.")
 
         section_ids = [section.section_id for section in script.sections]
         beat_section_ids = [beat.section_id for beat in contract.beats]
         report.checks["creative_contract_profile"] = contract.pacing.profile_id
         report.checks["creative_critical_components"] = len(contract.critical_component_ids)
-        if contract.section_ids != section_ids or beat_section_ids != section_ids:
-            report.errors.append(
-                "O contrato criativo não cobre exatamente as seções ativas do roteiro."
-            )
         functions = {function for beat in contract.beats for function in beat.functions}
-        if contract.algorithm == "creative-contract-v2":
-            if "resolution" not in functions:
-                report.errors.append("O contrato criativo precisa declarar resolução.")
-            if contract.hook_used and "hook" not in functions:
-                report.errors.append("O contrato criativo marcou hook sem beat correspondente.")
-        elif "hook" not in functions or "payoff" not in functions:
-            report.errors.append("O contrato criativo precisa declarar gancho e payoff.")
+        if not approved_locked:
+            if contract.section_ids != section_ids or beat_section_ids != section_ids:
+                report.errors.append(
+                    "O contrato criativo não cobre exatamente as seções ativas do roteiro."
+                )
+            if contract.algorithm == "creative-contract-v2":
+                if "resolution" not in functions:
+                    report.errors.append("O contrato criativo precisa declarar resolução.")
+                if contract.hook_used and "hook" not in functions:
+                    report.errors.append("O contrato criativo marcou hook sem beat correspondente.")
+            elif "hook" not in functions or "payoff" not in functions:
+                report.errors.append("O contrato criativo precisa declarar gancho e payoff.")
         reengagements = sum("reengagement" in beat.functions for beat in contract.beats)
         report.checks["creative_reengagements"] = reengagements
-        if contract.format == "long_form" and len(contract.beats) >= 5:
+        if not approved_locked and contract.format == "long_form" and len(contract.beats) >= 5:
             required_reengagements = (
                 minimum_long_form_reengagements(
                     manifest.target_duration_seconds,

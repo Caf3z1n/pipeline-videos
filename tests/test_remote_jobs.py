@@ -18,6 +18,7 @@ from pipeline_videos.models import (
     SourceLibrary,
 )
 from pipeline_videos.remote_jobs import (
+    MAX_AUTOMATIC_RECOVERIES,
     REMOTE_MUSIC_TRACK_PATHS,
     CodexPhaseSpec,
     RemoteCodexRun,
@@ -37,6 +38,7 @@ from pipeline_videos.remote_jobs import (
     _long_script_phase_spec,
     _normalize_shorts_script_payload,
     _recover_generated_image_outputs,
+    _schedule_automatic_recovery,
     _shorts_script_correction_checkpoint,
     _shorts_script_correction_is_available,
     _shorts_script_phase_spec,
@@ -45,9 +47,10 @@ from pipeline_videos.remote_jobs import (
     job_is_due,
     job_summary,
     prepare_job_project,
+    wait_for_terminal_job,
     work_once,
 )
-from pipeline_videos.storage import read_model, write_json
+from pipeline_videos.storage import read_json, read_model, write_json
 
 
 def _request(**updates):
@@ -127,12 +130,33 @@ def test_store_supports_enqueue_cancel_retry_and_due_window(tmp_path) -> None:
 
     cancelled = store.cancel(queued.job_id)
     assert cancelled.status == "cancelled"
+    assert read_json(store.terminal_event_path(queued.job_id))["status"] == "cancelled"
 
     second = store.enqueue(_request())
     failed = store.transition(second, "failed", error="falha de teste")
+    assert read_json(store.terminal_event_path(second.job_id))["agent_attention_required"] is True
     retried = store.retry(failed.job_id)
     assert retried.status == "queued"
     assert retried.error is None
+    assert not store.terminal_event_path(second.job_id).exists()
+
+
+def test_wait_for_terminal_job_returns_persisted_terminal_event_without_model(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    queued = store.enqueue(_request())
+    completed = store.transition(
+        queued,
+        "completed",
+        youtube_url="https://youtu.be/video-123",
+    )
+
+    waited = wait_for_terminal_job(store, completed.job_id, timeout_seconds=0)
+
+    assert waited.status == "completed"
+    event = read_json(store.terminal_event_path(completed.job_id))
+    assert event["terminal"] is True
+    assert event["youtube_url"] == "https://youtu.be/video-123"
+    assert event["agent_attention_required"] is False
 
 
 def test_overnight_job_recovery_can_resume_after_window(tmp_path) -> None:
@@ -751,6 +775,28 @@ def test_automatic_recovery_backoff_starts_fast_and_is_capped() -> None:
     assert _automatic_recovery_delay_seconds(1) == 60
     assert _automatic_recovery_delay_seconds(2) == 120
     assert _automatic_recovery_delay_seconds(20) == 21_600
+
+
+def test_automatic_recovery_stops_and_emits_attention_event_at_limit(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    queued = store.enqueue(_request())
+    nearly_exhausted = store.transition(
+        queued,
+        "running",
+        automatic_recovery_count=MAX_AUTOMATIC_RECOVERIES - 1,
+    )
+
+    failed = _schedule_automatic_recovery(
+        store,
+        nearly_exhausted,
+        RuntimeError("falha permanente"),
+        status="queued",
+    )
+
+    assert failed.status == "failed"
+    assert failed.next_retry_at is None
+    assert failed.automatic_recovery_count == MAX_AUTOMATIC_RECOVERIES
+    assert read_json(store.terminal_event_path(failed.job_id))["agent_attention_required"] is True
 
 
 def test_remote_image_phase_delegates_two_compact_workers_in_parallel(tmp_path) -> None:

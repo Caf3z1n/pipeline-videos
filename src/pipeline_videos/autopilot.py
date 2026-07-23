@@ -149,13 +149,17 @@ def prepare_local_coordinator_job(layout: ProjectLayout) -> dict[str, Any]:
             "maximum_parallel": min(2, project.config.production.image_workers),
             "reasoning_effort": "low",
         },
-        "youtube_growth_specialist": {
+    }
+    if project.config.youtube_growth.enabled:
+        external_roles["youtube_growth_specialist"] = {
             "queue": relative_posix(layout.growth_queue, layout.root),
             "reasoning_effort": "medium",
             "when_present": True,
-        },
-    }
-    if project.video_format == "short":
+        }
+    if (
+        project.video_format == "short"
+        and project.stages["shorts_script"].status != StageStatus.COMPLETED
+    ):
         visual_plan_only = (
             project.config.shorts_script.generation_mode == "deterministic_compact_visual_plan_v1"
         )
@@ -267,10 +271,16 @@ def run_autopilot_once(
             _write_state(layout, result)
             return result
 
-    from pipeline_videos.review import validate_draft_preflight
     from pipeline_videos.scenes import build_scenes
 
-    validate_draft_preflight(layout)
+    if layout.approved_script_lock.is_file():
+        from pipeline_videos.approved_scripts import verify_project_approved_script_lock
+
+        verify_project_approved_script_lock(layout)
+    else:
+        from pipeline_videos.review import validate_draft_preflight
+
+        validate_draft_preflight(layout)
     build_scenes(layout, force=force, skip_approvals=True)
 
     from pipeline_videos.audio import generate_audio

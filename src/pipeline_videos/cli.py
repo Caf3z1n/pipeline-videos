@@ -742,6 +742,36 @@ def remote_status(
     typer.echo(json.dumps(job_summary(job), ensure_ascii=False))
 
 
+@remote_app.command("wait")
+def remote_wait(
+    job_id: str,
+    timeout_seconds: Annotated[
+        float,
+        typer.Option("--timeout", min=0, max=28_800),
+    ] = 21_600,
+    poll_interval_seconds: Annotated[
+        float,
+        typer.Option("--poll-interval", min=0.25, max=60),
+    ] = 2.0,
+    jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
+) -> None:
+    """Aguarda o evento terminal no servidor sem envolver um agente."""
+    from pipeline_videos.remote_jobs import (
+        RemoteJobStore,
+        job_summary,
+        wait_for_terminal_job,
+    )
+
+    store = RemoteJobStore(jobs_dir)
+    job = wait_for_terminal_job(
+        store,
+        job_id,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+    typer.echo(json.dumps(job_summary(job), ensure_ascii=False))
+
+
 @remote_app.command("list")
 def remote_list(
     status_filter: Annotated[str | None, typer.Option("--status")] = None,

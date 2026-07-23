@@ -91,11 +91,11 @@ em qualidade V4 e não registra aprovação humana automaticamente.
 ## Render
 
 1. O áudio define a timeline real.
-2. Cada cena vira um segmento CFR com `scale`, `crop`, `zoompan` e fades discretos; até dois
-   segmentos independentes podem ser processados em paralelo.
-3. Os segmentos formam `render/work/review-candidate-base.mp4`, sem legenda e reutilizável.
-4. O ASS é aplicado à base junto da narração.
-5. O candidato final usa H.264/yuv420p, AAC, faststart, CRF 12, preset `slow` e supersampling 3.
+2. Cada imagem recebe `scale`, `crop`, `zoompan`, blur e duração CFR dentro do mesmo filtergraph.
+3. As cenas são conectadas por `xfade` ou `concat`, sem segmentos H.264 intermediários.
+4. O ASS, a narração e a música entram no mesmo comando FFmpeg.
+5. O candidato final usa uma única codificação H.264/yuv420p, AAC, faststart, CRF 12, preset
+   `slow` e supersampling 3.
 6. FFprobe valida proporção, codecs, faixas, frame rate e duração do único MP4.
 
 O ASS emite um evento por intervalo de palavra, mas mantém o bloco inteiro no mesmo lugar; só a cor

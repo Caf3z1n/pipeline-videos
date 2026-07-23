@@ -310,6 +310,39 @@ def test_upload_is_idempotent_and_sends_metadata_and_captions(tmp_path) -> None:
     assert layout.load_manifest().stages["publication"].status == StageStatus.COMPLETED
 
 
+def test_indeterminate_upload_is_not_repeated_automatically(tmp_path) -> None:
+    layout = _ready_project(tmp_path)
+
+    class IndeterminateClient(FakeYouTubeClient):
+        def upload_video(self, **_kwargs) -> dict[str, Any]:
+            self.upload_calls += 1
+            raise TimeoutError("conexão caiu após iniciar o upload")
+
+    client = IndeterminateClient()
+    project_id = layout.load_manifest().project_id
+
+    with pytest.raises(TimeoutError, match="conexão caiu"):
+        upload_project(
+            layout,
+            client=client,
+            allow_external=True,
+            confirmation=project_id,
+            verify_validation=False,
+        )
+    with pytest.raises(RuntimeError, match="estado indeterminado"):
+        upload_project(
+            layout,
+            client=client,
+            allow_external=True,
+            confirmation=project_id,
+            verify_validation=False,
+        )
+
+    assert client.upload_calls == 1
+    assert read_json(layout.upload_intent)["state"] == "indeterminate"
+    assert not layout.publication.exists()
+
+
 def test_force_new_upload_archives_existing_record_even_for_same_render(tmp_path) -> None:
     layout = _ready_project(tmp_path)
     client = FakeYouTubeClient()

@@ -69,11 +69,13 @@ from pipeline_videos.validation import validate_project
 from pipeline_videos.verse_selection import create_auto_video
 
 REMOTE_JOB_SCHEMA_VERSION = "1.1"
-REMOTE_JOB_STATE_SCHEMA_VERSION = "1.4"
+REMOTE_JOB_STATE_SCHEMA_VERSION = "1.5"
 DEFAULT_REMOTE_JOBS_DIR = REPO_ROOT / "remote-jobs"
 REMOTE_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 DEFAULT_REMOTE_CODEX_MODEL = "gpt-5.6-sol"
 DEFAULT_REMOTE_REASONING_EFFORT = "medium"
+MAX_AUTOMATIC_RECOVERIES = 7
+TERMINAL_JOB_STATUSES = frozenset({"completed", "failed", "cancelled"})
 JOB_ID_PATTERN = re.compile(r"^video-[0-9]{8}-[0-9]{6}-[a-f0-9]{8}$")
 CODEX_THREAD_ID_PATTERN = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -263,7 +265,9 @@ class RemoteVideoRequest(PipelineModel):
 
 
 class RemoteVideoJob(PipelineModel):
-    schema_version: Literal["1.0", "1.1", "1.2", "1.3", "1.4"] = REMOTE_JOB_STATE_SCHEMA_VERSION
+    schema_version: Literal["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"] = (
+        REMOTE_JOB_STATE_SCHEMA_VERSION
+    )
     job_id: str
     status: RemoteJobStatus
     request: RemoteVideoRequest
@@ -308,6 +312,8 @@ class RemoteJobStore:
         for status in self.statuses:
             (self.root / status).mkdir(parents=True, exist_ok=True)
         (self.root / "logs").mkdir(parents=True, exist_ok=True)
+        (self.root / "events").mkdir(parents=True, exist_ok=True)
+        (self.root / "terminal").mkdir(parents=True, exist_ok=True)
 
     def path(self, job_id: str, status: RemoteJobStatus) -> Path:
         if not JOB_ID_PATTERN.fullmatch(job_id):
@@ -318,6 +324,36 @@ class RemoteJobStore:
         if not JOB_ID_PATTERN.fullmatch(job_id):
             raise ValueError("ID de job inválido.")
         return self.root / "logs" / f"{job_id}.log"
+
+    def event_path(self, job_id: str) -> Path:
+        if not JOB_ID_PATTERN.fullmatch(job_id):
+            raise ValueError("ID de job inválido.")
+        return self.root / "events" / f"{job_id}.json"
+
+    def terminal_event_path(self, job_id: str) -> Path:
+        if not JOB_ID_PATTERN.fullmatch(job_id):
+            raise ValueError("ID de job inválido.")
+        return self.root / "terminal" / f"{job_id}.json"
+
+    def _record_status_event(self, job: RemoteVideoJob) -> None:
+        terminal = job.status in TERMINAL_JOB_STATUSES
+        payload = {
+            "schema_version": "1.0",
+            "job_id": job.job_id,
+            "status": job.status,
+            "terminal": terminal,
+            "agent_attention_required": job.status == "failed",
+            "youtube_url": job.youtube_url,
+            "publish_at": job.publish_at,
+            "error": job.error,
+            "updated_at": job.updated_at,
+        }
+        write_json(self.event_path(job.job_id), payload)
+        terminal_path = self.terminal_event_path(job.job_id)
+        if terminal:
+            write_json(terminal_path, payload)
+        else:
+            terminal_path.unlink(missing_ok=True)
 
     def find(self, job_id: str) -> tuple[RemoteVideoJob, Path]:
         for status in self.statuses:
@@ -369,6 +405,7 @@ class RemoteJobStore:
             schedule_occurrence_id=schedule_occurrence_id,
         )
         self.save(job)
+        self._record_status_event(job)
         return job
 
     def transition(
@@ -385,6 +422,7 @@ class RemoteJobStore:
             new_path.chmod(0o600)
         if old_path != new_path:
             old_path.unlink(missing_ok=True)
+        self._record_status_event(updated)
         return updated
 
     def list(self, *, status: RemoteJobStatus | None = None) -> list[RemoteVideoJob]:
@@ -431,6 +469,28 @@ def job_is_due(job: RemoteVideoJob, now: datetime | None = None) -> bool:
         local = current.astimezone(REMOTE_TIMEZONE)
         return 1 <= local.hour < 5
     return True
+
+
+def wait_for_terminal_job(
+    store: RemoteJobStore,
+    job_id: str,
+    *,
+    timeout_seconds: float = 21_600,
+    poll_interval_seconds: float = 2.0,
+) -> RemoteVideoJob:
+    if timeout_seconds < 0:
+        raise ValueError("timeout_seconds não pode ser negativo.")
+    if poll_interval_seconds <= 0:
+        raise ValueError("poll_interval_seconds precisa ser positivo.")
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        job, _ = store.find(job_id)
+        if job.status in TERMINAL_JOB_STATUSES:
+            return job
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return job
+        time.sleep(min(poll_interval_seconds, remaining))
 
 
 def _assert_project_path(path: Path, projects_root: Path) -> Path:
@@ -2793,8 +2853,12 @@ def _produce_remote_candidate(
 ) -> RemoteVideoJob:
     from pipeline_videos.autopilot import run_autopilot_once
 
-    _run_pipeline_diagnostics(job, layout, store, repo_root=repo_root)
-    if job.request.production_profile != "approved_fast_v1":
+    if job.request.production_profile == "approved_fast_v1":
+        from pipeline_videos.approved_scripts import verify_project_approved_script_lock
+
+        verify_project_approved_script_lock(layout)
+    else:
+        _run_pipeline_diagnostics(job, layout, store, repo_root=repo_root)
         job = _ensure_editorial_context(
             job,
             layout,
@@ -2859,6 +2923,11 @@ def _produce_remote_candidate(
             if wait.get("ready"):
                 continue
             kind = wait.get("kind")
+            if job.request.production_profile == "approved_fast_v1" and kind != "images":
+                raise RuntimeError(
+                    "A produção pré-aprovada recusou uma etapa externa diferente de imagens: "
+                    f"{kind}."
+                )
             if kind == "shorts_script":
                 job = _execute_agent_checkpoint(
                     job,
@@ -3063,9 +3132,24 @@ def _schedule_automatic_recovery(
 ) -> RemoteVideoJob:
     latest, _ = store.find(job.job_id)
     recovery_count = latest.automatic_recovery_count + 1
+    error = _failure_with_codex_context(latest, store, exc)
+    if recovery_count >= MAX_AUTOMATIC_RECOVERIES:
+        failed = store.transition(
+            latest,
+            "failed",
+            current_phase=None,
+            automatic_recovery_count=recovery_count,
+            next_retry_at=None,
+            error=error,
+        )
+        with store.log_path(job.job_id).open("a", encoding="utf-8") as log:
+            log.write(
+                f"[{utc_now()}] automatic_recovery_exhausted "
+                f"count={recovery_count} error={error[:500]!r}\n"
+            )
+        return failed
     delay_seconds = _automatic_recovery_delay_seconds(recovery_count)
     next_retry_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
-    error = _failure_with_codex_context(latest, store, exc)
     recovered = store.transition(
         latest,
         status,
@@ -3124,6 +3208,9 @@ def job_summary(job: RemoteVideoJob) -> dict[str, Any]:
         "codex_run_count": len(job.codex_runs),
         "codex_usage": codex_usage_summary(job),
         "automatic_recovery_count": job.automatic_recovery_count,
+        "terminal": job.status in TERMINAL_JOB_STATUSES,
+        "agent_attention_required": job.status == "failed",
+        "execution_owner": "deterministic_remote_executor",
         "next_retry_at": (
             job.next_retry_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
             if job.next_retry_at

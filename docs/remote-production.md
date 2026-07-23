@@ -45,6 +45,11 @@ Workers:
 Áudio, música, legendas, imports, render, validação, upload e agendamento são determinísticos e não
 devem ser delegados ao modelo.
 
+Ao concluir os ativos criativos, o modelo sai do fluxo. O executor remoto continua até o upload,
+grava `events/<job-id>.json` a cada transição e materializa `terminal/<job-id>.json` somente em
+`completed`, `failed` ou `cancelled`. `remote wait` aguarda esse arquivo no próprio servidor, sem
+polling por um agente.
+
 ## Roteiro e cenas
 
 Toda locução autoral usa `jesus_first_person_v1`. Jesus fala em primeira pessoa, e citações literais
@@ -75,6 +80,9 @@ consultar progresso.
 
 Falhas recuperáveis preservam o projeto, os arquivos produzidos e a sessão raiz. O retry retoma do
 último checkpoint válido.
+
+Depois de sete recuperações automáticas sem sucesso, o job termina em `failed` e emite um evento com
+`agent_attention_required=true`; ele não permanece em repetição infinita.
 
 ## Lane econômica de roteiros aprovados
 
@@ -113,3 +121,8 @@ Agendamento automático só é permitido se a requisição original trouxer:
 - fuso horário.
 
 O executor nunca compra créditos, habilita cobrança ou altera faturamento.
+
+Antes do primeiro byte enviado, o projeto persiste `youtube/upload-intent.json`. Se a conexão cair
+num ponto em que não seja possível confirmar se o YouTube criou o vídeo, o estado fica
+`indeterminate` e o executor bloqueia novo envio automático. Quando `publication.json` existe, a
+retomada reutiliza o mesmo `video_id`.

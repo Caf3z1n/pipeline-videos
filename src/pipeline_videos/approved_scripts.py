@@ -960,6 +960,7 @@ def materialize_approved_project(
             approved.script.model_copy(deep=True),
             provider="approved-script-lock-v1",
             creative_strategy=approved.strategy,
+            trusted_approved_snapshot=True,
         )
     review = approved.biblical_review.model_copy(update={"script_version": saved_script.version})
     save_biblical_review(layout, review, provider="approved-script-lock-v1")

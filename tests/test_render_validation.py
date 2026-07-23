@@ -535,6 +535,66 @@ def _render_plans(tmp_path, count: int = 3) -> list[render.SceneRenderPlan]:
     return plans
 
 
+def test_single_pass_render_uses_one_ffmpeg_encode_for_visuals_captions_and_audio(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    layout = ProjectLayout(tmp_path / "project")
+    layout.ensure_directories()
+    plans = _render_plans(layout.root, count=3)
+    narration = layout.narration_audio
+    narration.write_bytes(b"wav")
+    layout.ass.write_text("[Script Info]\n", encoding="utf-8")
+    audio = AudioManifest(
+        generated_at=utc_now(),
+        provider="mock",
+        sample_rate=48_000,
+        narration_path="audio/narration.wav",
+        duration=3.0,
+        segments=[],
+        words=[],
+    )
+    config = RenderConfig(
+        width=320,
+        height=180,
+        fps=30,
+        transition_style="cinematic_mix",
+        transition_seconds=0.3,
+        final_preset="ultrafast",
+    )
+    commands = []
+
+    def fake_run_process(args, *, cwd, timeout):
+        commands.append((args, cwd, timeout))
+        output = cwd / args[-1]
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"single-pass")
+
+    monkeypatch.setattr(render, "run_process", fake_run_process)
+
+    render._render_single_pass(
+        layout,
+        plans,
+        narration,
+        layout.ass,
+        audio,
+        config,
+    )
+
+    assert len(commands) == 1
+    args, cwd, timeout = commands[0]
+    graph = args[args.index("-filter_complex") + 1]
+    assert cwd == layout.root
+    assert timeout == 7_200
+    assert args.count("-c:v") == 1
+    assert args.count("-i") == 4
+    assert "xfade=transition=fadeslow" in graph
+    assert "ass=filename=" in graph
+    assert "[3:a]" in graph
+    assert not (layout.render_work / "review-candidate-base.mp4").exists()
+    assert layout.final_video.read_bytes() == b"single-pass"
+
+
 def test_visual_base_limits_parallel_segment_jobs_and_preserves_order(
     monkeypatch,
     tmp_path,
@@ -657,7 +717,7 @@ def _scene(scene_id: str, order: int, image_id: str, narration: str) -> Scene:
     shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
     reason="FFmpeg/FFprobe não estão disponíveis",
 )
-def test_short_end_to_end_render_reuses_visual_base_when_only_caption_style_changes(
+def test_short_end_to_end_render_uses_one_final_encode_when_caption_style_changes(
     tmp_path,
 ) -> None:
     layout = ProjectLayout(tmp_path / "project")
@@ -801,7 +861,7 @@ def test_short_end_to_end_render_reuses_visual_base_when_only_caption_style_chan
     approve_image(layout, "scene-001", decided_by="teste")
     approve_image(layout, "scene-002", decided_by="teste")
     first = render.render_review_candidate(layout)
-    base_mtime = first.base_video.stat().st_mtime_ns
+    first_final_mtime = first.final_video.stat().st_mtime_ns
 
     manifest = layout.load_manifest()
     manifest.config.captions.highlight_color = "#70D6FF"
@@ -810,5 +870,10 @@ def test_short_end_to_end_render_reuses_visual_base_when_only_caption_style_chan
     second = render.render_review_candidate(layout)
 
     assert first.final_validation["valid"] is True
-    assert second.reused_base is True
-    assert second.base_video.stat().st_mtime_ns == base_mtime
+    assert first.base_video is None
+    assert first.encode_passes == 1
+    assert second.final_validation["valid"] is True
+    assert second.base_video is None
+    assert second.reused_base is False
+    assert second.encode_passes == 1
+    assert second.final_video.stat().st_mtime_ns > first_final_mtime

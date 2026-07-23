@@ -45,6 +45,10 @@ roteiro e revisão
 
 Áudio, música, legendas, imports, render e validação são determinísticos.
 
+Depois que os workers entregam as imagens, nenhuma etapa de modelo acompanha o FFmpeg. O executor
+remoto continua sozinho, persiste eventos de estado e conclui validação e upload. Um consumidor pode
+aguardar o evento terminal com `pipeline-videos remote wait <job-id>` sem abrir turnos de modelo.
+
 ## Roteiro
 
 Toda locução autoral usa `jesus_first_person_v1`, em Shorts e vídeos longos. Jesus fala em primeira
@@ -157,8 +161,8 @@ uv run pipeline-videos approved-scripts release `
 ```
 
 Ela reserva o snapshot, cria um único job `approved_fast_v1` com upload privado e encerra. O
-executor não abre roteiro, revisão, SEO nem plano visual; somente imagens, áudio, legendas, render,
-validação e upload permanecem.
+executor não abre roteiro, revisão, SEO, plano visual nem preflight editorial; somente imagens,
+áudio, legendas, música, render, validação técnica da mídia e upload permanecem.
 
 Não existe preflight de contagem de palavras ou janela de duração para um roteiro aprovado. O valor
 de duração salvo é uma estimativa para organização; `approved_script_locked_v1` aceita a duração
@@ -172,8 +176,9 @@ roteiro, revisão ou crescimento. O único trabalho de modelo restante é a gera
 até dois lotes paralelos e com contexto compacto. Título, descrição e cinco hashtags já pertencem
 ao snapshot: três específicas do tema, `#biblia` e `#jesus`.
 
-Essa lane não possui correção criativa automática: se o plano aprovado não passar pelo preflight,
-o job preserva o pacote e falha para revisão, em vez de reescrever a narração aprovada.
+Essa lane não possui correção criativa nem reavaliação editorial. O hash do snapshot é a única
+checagem do conteúdo aprovado. Falhas técnicas de mídia preservam o pacote e o mesmo job para
+retomada; nunca abrem correção, pesquisa, revisão ou reescrita do roteiro.
 
 ## Metadados
 
@@ -207,6 +212,10 @@ O único render é o candidato final:
 - movimento `smooth_pendulum`;
 - transições `cinematic_mix` de 0,38 s;
 - blur sigma 8.
+
+O render usa `single_pass_filtergraph_v1`: imagens, movimento, blur, transições, legenda ASS,
+narração e música são processados no mesmo comando FFmpeg. Há uma única codificação H.264, já com
+CRF 12 e preset `slow`; segmentos e base visual H.264 intermediários não são produzidos.
 
 ## Validação
 

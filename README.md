@@ -272,6 +272,16 @@ Cada job remoto tem uma sessão persistente do coordenador e checkpoints retomá
 legendas, imports, render, validação e upload são executados deterministicamente. O coordenador e
 especialistas usam `gpt-5.6-sol`; até dois workers de imagem podem atuar em paralelo.
 
+Quando as imagens ficam prontas, o modelo sai do fluxo. O servidor renderiza em um único encode
+H.264, valida e envia o candidato privado ao YouTube. Para aguardar sem polling de modelo:
+
+```powershell
+uv run pipeline-videos remote wait <job-id> --timeout 21600
+```
+
+O job grava um evento terminal em `completed`, `failed` ou `cancelled`. Upload interrompido em
+estado indeterminado é bloqueado para impedir duplicata silenciosa.
+
 ### Roteiros pré-aprovados
 
 Antes de existir um projeto de vídeo, temas e roteiros passam pela bancada editorial. O agente
@@ -330,7 +340,9 @@ uv run pipeline-videos approved-scripts release `
 
 O comando reserva somente esse pacote e cria um job remoto `approved_fast_v1`, com voz `jesus_1`,
 música `leaning` e upload privado. Roteiro, CTA, SEO, fontes e plano visual já estão congelados; não
-há roteirista, revisor bíblico ou especialista de crescimento nessa liberação.
+há roteirista, revisor bíblico, especialista de crescimento nem novo preflight editorial nessa
+liberação. O executor confere somente o hash imutável antes da mídia; conteúdo e decisões aprovadas
+não são reinterpretados, pontuados ou validados novamente.
 
 A duração informada na bancada é somente uma estimativa. Depois da aprovação por hash, o roteiro
 usa `approved_script_locked_v1`: nenhuma contagem de palavras ou diferença em relação a 50 segundos
@@ -376,7 +388,9 @@ YouTube, sem `#`; elas não precisam aparecer na revisão do roteiro.
 
 Depois da aprovação, a finalização não chama roteirista, revisor bíblico nem especialista de SEO.
 Ela gera apenas as imagens pendentes, executa áudio, legendas, música, render, validação e upload
-privado. O texto é verificado pelo lock antes da síntese e novamente antes do upload:
+privado. A validação dessa lane é exclusivamente técnica: integridade dos arquivos, correspondência
+literal entre roteiro, cenas e áudio, imagens, legendas, mixagem e vídeo final. O texto é conferido
+somente pelo lock antes da síntese e novamente antes do upload:
 
 ```powershell
 uv run pipeline-videos approved-scripts list --status approved

@@ -35,7 +35,7 @@ from pipeline_videos.utils import (
     sha256_value,
 )
 
-RENDER_ALGORITHM_VERSION = "7"
+RENDER_ALGORITHM_VERSION = "8"
 MAX_SEGMENT_RENDER_WORKERS = 2
 OUTPUT_PIXEL_FORMAT = "yuv420p"
 OUTPUT_AUDIO_CODEC = "aac"
@@ -61,10 +61,11 @@ class SceneRenderPlan:
 
 @dataclass(frozen=True)
 class RenderResult:
-    base_video: Path
+    base_video: Path | None
     final_video: Path
     reused_base: bool
     final_validation: dict[str, Any]
+    encode_passes: int = 1
 
 
 def _project_file(root: Path, value: str | Path, *, label: str) -> Path:
@@ -217,7 +218,12 @@ def _blur_sigma(plan: SceneRenderPlan, config: RenderConfig) -> float:
     }.get(plan.blur_role, config.background_blur_closing_sigma)
 
 
-def _functional_blur_filter(plan: SceneRenderPlan, config: RenderConfig) -> str | None:
+def _functional_blur_filter(
+    plan: SceneRenderPlan,
+    config: RenderConfig,
+    *,
+    label_namespace: str = "",
+) -> str | None:
     if config.background_blur_profile != "functional_caption_focus_v1":
         return None
     scale = min(config.width, config.height) / 1080
@@ -230,12 +236,17 @@ def _functional_blur_filter(plan: SceneRenderPlan, config: RenderConfig) -> str 
     if config.caption_focus_blur_extra_sigma <= 0:
         return background_filter
     focus_filter = f"gblur=sigma={focus_sigma:.3f}:steps=1"
+    prefix = f"{label_namespace}_" if label_namespace else ""
+    background = f"{prefix}blur_background"
+    focus = f"{prefix}caption_focus"
+    blurred_background = f"{prefix}blurred_background"
+    blurred_focus = f"{prefix}blurred_caption_focus"
     return (
-        "split=2[blur_background][caption_focus];"
-        f"[blur_background]{background_filter}[blurred_background];"
-        f"[caption_focus]crop={config.width}:{height}:0:{top},"
-        f"{focus_filter}[blurred_caption_focus];"
-        f"[blurred_background][blurred_caption_focus]overlay=0:{top}"
+        f"split=2[{background}][{focus}];"
+        f"[{background}]{background_filter}[{blurred_background}];"
+        f"[{focus}]crop={config.width}:{height}:0:{top},"
+        f"{focus_filter}[{blurred_focus}];"
+        f"[{blurred_background}][{blurred_focus}]overlay=0:{top}"
     )
 
 
@@ -246,7 +257,12 @@ def _codec_args(codec: str, *, preset: str, crf: int) -> list[str]:
     return args
 
 
-def _visual_filter(plan: SceneRenderPlan, config: RenderConfig) -> str:
+def _visual_filter(
+    plan: SceneRenderPlan,
+    config: RenderConfig,
+    *,
+    label_namespace: str = "",
+) -> str:
     duration = plan.frame_count / config.fps
     fade = min(config.transition_seconds, duration / 4)
     fade_out_start = max(0.0, duration - fade)
@@ -304,7 +320,11 @@ def _visual_filter(plan: SceneRenderPlan, config: RenderConfig) -> str:
             ]
         )
     finish_filters.append("format=yuv420p")
-    functional_blur = _functional_blur_filter(plan, config)
+    functional_blur = _functional_blur_filter(
+        plan,
+        config,
+        label_namespace=label_namespace,
+    )
     if functional_blur is None:
         return ",".join([*filters, *finish_filters])
     return ",".join(filters) + "," + functional_blur + "," + ",".join(finish_filters)
@@ -670,11 +690,17 @@ def _voice_filters(config: RenderConfig) -> list[str]:
     return filters
 
 
-def _narration_filter(config: RenderConfig) -> str:
-    return f"[1:a]{','.join(_voice_filters(config))}[voice_audio]"
+def _narration_filter(config: RenderConfig, *, input_index: int = 1) -> str:
+    return f"[{input_index}:a]{','.join(_voice_filters(config))}[voice_audio]"
 
 
-def _background_music_filter(audio: AudioManifest, config: RenderConfig) -> str:
+def _background_music_filter(
+    audio: AudioManifest,
+    config: RenderConfig,
+    *,
+    voice_input_index: int = 1,
+    music_input_index: int = 2,
+) -> str:
     music_filters = [
         f"atrim=duration={audio.duration:.6f}",
         "aresample=48000",
@@ -700,11 +726,33 @@ def _background_music_filter(audio: AudioManifest, config: RenderConfig) -> str:
             f"afade=t=out:st={fade_out_start:.6f}:d={config.background_music_fade_out_seconds:.6f}"
         )
     return (
-        f"[1:a]{','.join(_voice_filters(config))}[voice];"
-        f"[2:a]{','.join(music_filters)}[music];"
+        f"[{voice_input_index}:a]{','.join(_voice_filters(config))}[voice];"
+        f"[{music_input_index}:a]{','.join(music_filters)}[music];"
         "[voice][music]amix=inputs=2:duration=first:dropout_transition=0:"
         "normalize=0[mixed_audio]"
     )
+
+
+def _ass_filter(
+    layout: ProjectLayout,
+    ass_file: Path,
+    config: RenderConfig,
+    *,
+    caption_canvas: tuple[int, int] | None = None,
+    caption_font_file: Path | None = None,
+) -> str:
+    ass_relative = relative_posix(ass_file, layout.root)
+    caption_width, caption_height = caption_canvas or (config.width, config.height)
+    if caption_width <= 0 or caption_height <= 0:
+        raise ValueError("As dimensões da legenda devem ser positivas.")
+    value = (
+        f"ass=filename='{_escape_filter_path(ass_relative)}':"
+        f"original_size={caption_width}x{caption_height}"
+    )
+    if caption_font_file is not None:
+        fonts_dir = relative_posix(caption_font_file.parent, layout.root)
+        value += f":fontsdir='{_escape_filter_path(fonts_dir)}'"
+    return value
 
 
 def _render_final(
@@ -813,6 +861,179 @@ def _render_final(
     )
     run_process(args, cwd=layout.root, timeout=7_200)
     _require_nonempty_file(temp, label="Render temporÃ¡rio")
+    _replace_output(temp, destination)
+
+
+def _single_pass_visual_graph(
+    plans: Sequence[SceneRenderPlan],
+    config: RenderConfig,
+) -> tuple[list[str], str]:
+    if not plans:
+        raise ValueError("Não há planos de cena para renderizar.")
+    cinematic = (
+        config.transition_style == "cinematic_mix"
+        and config.transition_seconds > 0
+        and len(plans) > 1
+    )
+    transition_frames = max(1, round(config.transition_seconds * config.fps))
+    filters: list[str] = []
+    for index, plan in enumerate(plans):
+        render_frames = plan.frame_count
+        if cinematic and index < len(plans) - 1:
+            render_frames += transition_frames
+        render_plan = SceneRenderPlan(
+            scene_id=plan.scene_id,
+            order=plan.order,
+            image_path=plan.image_path,
+            frame_count=render_frames,
+            blur_role=plan.blur_role,
+        )
+        visual_filter = _visual_filter(
+            render_plan,
+            config,
+            label_namespace=f"scene_{index}",
+        )
+        filters.append(
+            f"[{index}:v]{visual_filter},trim=end_frame={render_frames},"
+            f"settb=AVTB,setpts=PTS-STARTPTS[v{index}]"
+        )
+
+    if len(plans) == 1:
+        return filters, "v0"
+    if not cinematic:
+        inputs = "".join(f"[v{index}]" for index in range(len(plans)))
+        filters.append(f"{inputs}concat=n={len(plans)}:v=1:a=0[visual]")
+        return filters, "visual"
+
+    transition_duration = transition_frames / config.fps
+    current = "v0"
+    offset_frames = 0
+    for boundary, plan in enumerate(plans[:-1]):
+        offset_frames += plan.frame_count
+        output = f"x{boundary + 1}"
+        transition = _CINEMATIC_TRANSITIONS[boundary % len(_CINEMATIC_TRANSITIONS)]
+        filters.append(
+            f"[{current}][v{boundary + 1}]xfade=transition={transition}:"
+            f"duration={transition_duration:.6f}:"
+            f"offset={offset_frames / config.fps:.6f}[{output}]"
+        )
+        current = output
+    return filters, current
+
+
+def _render_single_pass(
+    layout: ProjectLayout,
+    plans: Sequence[SceneRenderPlan],
+    narration: Path,
+    ass_file: Path,
+    audio: AudioManifest,
+    config: RenderConfig,
+    *,
+    caption_font_file: Path | None = None,
+    background_music: Path | None = None,
+) -> None:
+    _validate_visual_inputs(plans, config)
+    _require_nonempty_file(narration, label="Narração consolidada")
+    _require_nonempty_file(ass_file, label="Legenda ASS")
+    if caption_font_file is not None:
+        _require_nonempty_file(caption_font_file, label="Fonte da legenda")
+    if background_music is not None:
+        _require_nonempty_file(background_music, label="Música de fundo")
+    if audio.duration <= 0 or audio.sample_rate <= 0:
+        raise ValueError("Duração e sample rate da narração devem ser positivos.")
+
+    destination = layout.final_video
+    temp = destination.with_name(destination.stem + ".part.mp4")
+    temp.unlink(missing_ok=True)
+    args = [
+        executable("ffmpeg"),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+    ]
+    for plan in plans:
+        args.extend(
+            [
+                "-loop",
+                "1",
+                "-framerate",
+                str(config.fps),
+                "-i",
+                relative_posix(plan.image_path, layout.root),
+            ]
+        )
+    narration_input_index = len(plans)
+    args.extend(["-i", relative_posix(narration, layout.root)])
+    music_input_index = narration_input_index + 1
+    if background_music is not None:
+        args.extend(
+            [
+                "-stream_loop",
+                "-1",
+                "-i",
+                relative_posix(background_music, layout.root),
+            ]
+        )
+
+    filters, visual_label = _single_pass_visual_graph(plans, config)
+    filters.append(
+        f"[{visual_label}]"
+        f"{_ass_filter(layout, ass_file, config, caption_font_file=caption_font_file)}"
+        "[final_video]"
+    )
+    if background_music is not None:
+        filters.append(
+            _background_music_filter(
+                audio,
+                config,
+                voice_input_index=narration_input_index,
+                music_input_index=music_input_index,
+            )
+        )
+        audio_label = "mixed_audio"
+    else:
+        filters.append(_narration_filter(config, input_index=narration_input_index))
+        audio_label = "voice_audio"
+
+    total_frames = sum(plan.frame_count for plan in plans)
+    args.extend(
+        [
+            "-filter_complex",
+            ";".join(filters),
+            "-map",
+            "[final_video]",
+            "-map",
+            f"[{audio_label}]",
+            "-frames:v",
+            str(total_frames),
+            "-r",
+            str(config.fps),
+            "-fps_mode",
+            "cfr",
+            *_codec_args(
+                config.video_codec,
+                preset=config.final_preset,
+                crf=config.final_crf,
+            ),
+            "-pix_fmt",
+            OUTPUT_PIXEL_FORMAT,
+            "-c:a",
+            OUTPUT_AUDIO_CODEC,
+            "-ar",
+            str(audio.sample_rate),
+            "-ac",
+            str(OUTPUT_AUDIO_CHANNELS),
+            "-b:a",
+            config.audio_bitrate,
+            "-movflags",
+            "+faststart",
+            "-shortest",
+            relative_posix(temp, layout.root),
+        ]
+    )
+    run_process(args, cwd=layout.root, timeout=7_200)
+    _require_nonempty_file(temp, label="Render temporário")
     _replace_output(temp, destination)
 
 
@@ -973,8 +1194,6 @@ def _render_project_output(
             "audio_duration": audio.duration,
         }
     )
-    base_video = layout.render_work / "review-candidate-base.mp4"
-
     if stage_is_current(layout, "render", input_hash, force=force):
         final_report = validate_render_output(
             layout.final_video,
@@ -985,10 +1204,11 @@ def _render_project_output(
         )
         if final_report["valid"]:
             return RenderResult(
-                base_video=base_video,
+                base_video=None,
                 final_video=layout.final_video,
-                reused_base=True,
+                reused_base=False,
                 final_validation=final_report,
+                encode_passes=1,
             )
 
     invalidate(
@@ -999,26 +1219,9 @@ def _render_project_output(
     )
     start_stage(layout, "render", input_hash, provider="ffmpeg-review-candidate")
     try:
-        base_video, reused_base = _build_visual_base(
+        _render_single_pass(
             layout,
             plans,
-            config,
-            base_hash,
-            force=force,
-            namespace="review-candidate",
-        )
-        expected_base_duration = sum(plan.frame_count for plan in plans) / config.fps
-        validate_media_output(
-            base_video,
-            width=config.width,
-            height=config.height,
-            fps=config.fps,
-            expected_duration=expected_base_duration,
-            require_audio=False,
-        )
-        _render_final(
-            layout,
-            base_video,
             narration,
             ass_file,
             audio,
@@ -1032,10 +1235,7 @@ def _render_project_output(
             audio.duration,
             expected_sample_rate=audio.sample_rate,
         )
-        artifacts = [
-            relative_posix(base_video, layout.root),
-            relative_posix(layout.final_video, layout.root),
-        ]
+        artifacts = [relative_posix(layout.final_video, layout.root)]
         complete_stage(
             layout,
             "render",
@@ -1045,14 +1245,17 @@ def _render_project_output(
             usage={
                 "scenes": len(plans),
                 "frames": sum(plan.frame_count for plan in plans),
-                "base_reused": int(reused_base),
+                "base_reused": 0,
+                "encode_passes": 1,
+                "render_strategy": "single_pass_filtergraph_v1",
             },
         )
         return RenderResult(
-            base_video=base_video,
+            base_video=None,
             final_video=layout.final_video,
-            reused_base=reused_base,
+            reused_base=False,
             final_validation=final_report,
+            encode_passes=1,
         )
     except Exception as exc:
         fail_stage(layout, "render", exc)

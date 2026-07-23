@@ -148,6 +148,11 @@
   cria somente um job `approved_fast_v1`, usa upload privado e não reabre roteiro, revisão bíblica,
   SEO ou planejamento visual. Repetição do pedido deve reutilizar o estado persistido ou informar
   que o pacote já está reservado/produzido; nunca crie duplicata silenciosa.
+- Em `approved_fast_v1`, não execute preflight, pontuação, conferência bíblica, revisão criativa ou
+  validação de SEO depois da aprovação humana. Confira somente o hash imutável do snapshot. A
+  validação final é estritamente técnica: integridade dos arquivos, correspondência literal entre
+  roteiro, cenas e áudio, imagens, legendas, música, mixagem e vídeo final. Se surgir qualquer
+  espera externa diferente de imagens, falhe sem chamar modelo e preserve o mesmo job para retomada.
 - A revisão bíblica e qualquer correção da bancada acontecem antes de mostrar a versão final ao
   usuário. Depois que o usuário disser que aprovou os textos exibidos, não crie agente, não pesquise
   fontes e não reabra revisão: apenas confira o hash e mude o estado para `approved`. Citação
@@ -353,6 +358,11 @@
 - Áudio, música, legendas, imports, render, validação, upload e agendamento são determinísticos e
   não devem ser entregues ao Codex. Hooks remotos apenas medem eventos/tamanhos e não escrevem em
   `stdout`.
+- Depois que os ativos de imagem forem materializados, o coordenador de modelo encerra sua
+  participação. O executor remoto conclui render, validação e upload sem polling de agente, grava
+  um evento terminal persistido e só solicita atenção humana quando o job termina em `failed`.
+- O upload remoto é idempotente por projeto e hash. Uma tentativa cujo resultado no YouTube fique
+  indeterminado nunca é repetida automaticamente, evitando duplicata silenciosa.
 - Coordenador e especialistas usam obrigatoriamente `gpt-5.6-sol`. O coordenador usa raciocínio
   médio; no compacto, o planejador visual e `youtube_growth_specialist` usam médio, sem roteirista
   nem revisor bíblico de modelo; cada `image_worker` usa baixo. Fora do compacto,
@@ -391,6 +401,9 @@
 - Uma imagem mostra um momento, um ambiente e uma ação; sem colagem ou painéis.
 - O único render é o candidato final V4: resolução completa, H.264, CRF 12, preset `slow`,
   supersampling 3. Não gere `draft-preview.mp4` nem `preview.mp4`.
+- O candidato final usa `single_pass_filtergraph_v1`: movimento, blur, transições, legendas e
+  mixagem entram em um único filtergraph, com exatamente uma codificação H.264 final. Não produza
+  segmentos H.264 nem uma base H.264 intermediária.
 - Movimento: `smooth_pendulum`, zoom 1,02×–1,105×, pan 0,32.
 - Transições: `cinematic_mix`, 0,38 s.
 - Blur de fundo padrão: sigma 8 uniforme em todas as cenas.

@@ -264,6 +264,10 @@ class ProjectLayout:
         return self.root / "youtube" / "publication.json"
 
     @property
+    def upload_intent(self) -> Path:
+        return self.root / "youtube" / "upload-intent.json"
+
+    @property
     def publication_archive(self) -> Path:
         return self.root / "youtube" / "publications"
 

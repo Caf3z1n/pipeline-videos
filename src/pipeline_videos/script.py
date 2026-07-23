@@ -563,24 +563,26 @@ def save_script(
     *,
     provider: str,
     creative_strategy: ShortsScriptStrategy | None = None,
+    trusted_approved_snapshot: bool = False,
 ) -> ScriptDocument:
     project = layout.load_manifest()
     sources = read_model(layout.sources, SourceLibrary) if layout.sources.is_file() else None
-    validate_script_editorial_policy(
-        document,
-        duration_seconds=project.target_duration_seconds,
-        policy=project.config.editorial_policy,
-        sources=sources,
-    )
-    briefing = read_model(layout.briefing, Briefing)
-    if project.video_format != "short":
-        validate_long_form_retention_script(
+    if not trusted_approved_snapshot:
+        validate_script_editorial_policy(
             document,
-            target_duration_seconds=project.target_duration_seconds,
-            config=project.config.long_form_script,
+            duration_seconds=project.target_duration_seconds,
+            policy=project.config.editorial_policy,
             sources=sources,
-            briefing=briefing,
         )
+        briefing = read_model(layout.briefing, Briefing)
+        if project.video_format != "short":
+            validate_long_form_retention_script(
+                document,
+                target_duration_seconds=project.target_duration_seconds,
+                config=project.config.long_form_script,
+                sources=sources,
+                briefing=briefing,
+            )
     invalidate(
         layout,
         stages=(

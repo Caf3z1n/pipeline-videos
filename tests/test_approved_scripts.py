@@ -198,7 +198,19 @@ def test_seo_is_frozen_with_three_specific_and_two_standard_hashtags(tmp_path) -
     assert len(updated.metadata.description.split("#")) == 6
 
 
-def test_approved_script_materialization_uses_script_locked_duration(tmp_path) -> None:
+def test_approved_script_materialization_uses_script_locked_duration(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    import pipeline_videos.script as script_module
+
+    monkeypatch.setattr(
+        script_module,
+        "validate_script_editorial_policy",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("A produção pré-aprovada não pode revalidar o roteiro.")
+        ),
+    )
     draft = _approved_script()
     narration_parts = [
         "Eu sabia que Judas me trairia e ainda assim o mantive entre os doze.",
@@ -301,6 +313,17 @@ def test_approved_script_materialization_uses_script_locked_duration(tmp_path) -
     assert manifest.requested_duration_min_seconds is None
     assert manifest.requested_duration_max_seconds is None
     assert manifest.config.shorts_script.minimum_audio_duration_ratio == 0
+
+    from pipeline_videos.metadata import build_metadata
+
+    locked_metadata = layout.metadata.read_bytes()
+    build_metadata(layout)
+    assert layout.metadata.read_bytes() == locked_metadata
+
+    from pipeline_videos.autopilot import prepare_local_coordinator_job
+
+    coordinator = prepare_local_coordinator_job(layout)
+    assert set(coordinator["external_roles"]) == {"image_workers"}
 
 
 def test_private_daily_schedule_consumes_only_approved_pool_idempotently(tmp_path) -> None:

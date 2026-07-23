@@ -453,6 +453,47 @@ def _save_record(layout: ProjectLayout, record: YouTubePublicationRecord) -> Non
     write_json(layout.publication, record)
 
 
+def _write_upload_intent(
+    layout: ProjectLayout,
+    plan: PublicationPlan,
+    *,
+    state: Literal["uploading", "indeterminate", "recorded"],
+    error: str | None = None,
+) -> None:
+    previous = read_json(layout.upload_intent) if layout.upload_intent.is_file() else {}
+    write_json(
+        layout.upload_intent,
+        {
+            "schema_version": "1.0",
+            "project_id": plan.project_id,
+            "input_hash": plan.input_hash(),
+            "video_hash": plan.video_hash,
+            "metadata_hash": plan.metadata_hash,
+            "privacy_status": plan.privacy_status,
+            "state": state,
+            "created_at": previous.get("created_at") or utc_now(),
+            "updated_at": utc_now(),
+            "error": error,
+        },
+    )
+
+
+def _guard_upload_intent(layout: ProjectLayout, plan: PublicationPlan) -> None:
+    if not layout.upload_intent.is_file() or layout.publication.is_file():
+        return
+    intent = read_json(layout.upload_intent)
+    if intent.get("input_hash") != plan.input_hash():
+        raise RuntimeError(
+            "Existe uma tentativa de upload sem confirmação para outro candidato. "
+            "Reconcilie o upload antes de enviar um novo render."
+        )
+    if intent.get("state") in {"uploading", "indeterminate"}:
+        raise RuntimeError(
+            "O upload anterior ficou em estado indeterminado e não será repetido "
+            "automaticamente para evitar vídeo duplicado no YouTube."
+        )
+
+
 def _snippet(plan: PublicationPlan) -> dict[str, Any]:
     return {
         "title": plan.title,
@@ -514,6 +555,7 @@ def upload_project(
     if existing and force_new_upload:
         layout.publication_archive.mkdir(parents=True, exist_ok=True)
         shutil.copy2(layout.publication, layout.publication_archive / f"{existing.video_id}.json")
+        layout.upload_intent.unlink(missing_ok=True)
         existing = None
     elif existing and existing.video.source_hash != plan.video_hash:
         raise RuntimeError(
@@ -525,12 +567,23 @@ def upload_project(
     try:
         channel = client.channel()
         if existing is None:
-            response = client.upload_video(
-                video_path=plan.video_path,
-                body={"snippet": _snippet(plan), "status": _status(plan)},
-                notify_subscribers=plan.notify_subscribers,
-                progress=progress,
-            )
+            _guard_upload_intent(layout, plan)
+            _write_upload_intent(layout, plan, state="uploading")
+            try:
+                response = client.upload_video(
+                    video_path=plan.video_path,
+                    body={"snippet": _snippet(plan), "status": _status(plan)},
+                    notify_subscribers=plan.notify_subscribers,
+                    progress=progress,
+                )
+            except Exception as exc:
+                _write_upload_intent(
+                    layout,
+                    plan,
+                    state="indeterminate",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                raise
             video_id = str(response["id"])
             now = utc_now()
             record = YouTubePublicationRecord(
@@ -567,6 +620,7 @@ def upload_project(
             if not plan.upload_captions:
                 record.captions.status = "skipped"
             _save_record(layout, record)
+            _write_upload_intent(layout, plan, state="recorded")
         else:
             record = existing
             client.video(record.video_id)
