@@ -135,6 +135,8 @@ def test_manifest_and_codex_queue_are_idempotent_and_can_target_one_scene(
     assert worker_job["context_policy"] == "compact_only"
     assert worker_job["fork_turns"] == "none"
     assert worker_job["generation_retry_policy"] == retry_policy
+    assert worker_job["prompt_hash_algorithm"] == "sha256_canonical_json_utf8_v1"
+    assert any("serializacao JSON canonica" in item for item in worker_job["instructions"])
     assert any("exatamente o mesmo prompt" in item for item in worker_job["instructions"])
     assert [job["scene_id"] for job in worker_job["jobs"]] == ["scene-002"]
     assert layout.load_manifest().stages["images"].status == StageStatus.WAITING_EXTERNAL

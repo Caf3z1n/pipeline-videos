@@ -468,15 +468,21 @@ def _write_worker_job_files(layout: ProjectLayout, queue: dict[str, Any]) -> lis
                 "recommended_model": "gpt-5.6-sol",
                 "reasoning_effort": "low",
                 "generation_retry_policy": imagegen_retry_policy(),
+                "prompt_hash_algorithm": "sha256_canonical_json_utf8_v1",
                 "instructions": [
                     "Leia somente este arquivo; não leia o histórico da conversa ou manifestos.",
                     (
                         "Quando common_prompt_prefix existir, reconstrua cada prompt exatamente "
                         "como "
-                        "common_prompt_prefix + jobs[].prompt_delta e confira prompt_hash antes da "
-                        "chamada de imagegen."
+                        "common_prompt_prefix + jobs[].prompt_delta."
                         if common_prompt_prefix is not None
                         else "Use jobs[].prompt integralmente, sem resumir ou reescrever."
+                    ),
+                    (
+                        "Confira prompt_hash com SHA-256 dos bytes UTF-8 da serializacao JSON "
+                        "canonica do prompt completo: ensure_ascii=false, sem espacos e incluindo "
+                        "as aspas externas da string JSON. Nao calcule o hash diretamente sobre "
+                        "os bytes do texto."
                     ),
                     *imagegen_retry_instructions(asset_label="job de imagem"),
                     "Salve cada PNG somente no staging_path declarado.",
