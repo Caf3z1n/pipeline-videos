@@ -904,6 +904,15 @@ def remote_work_once(
     typer.echo(json.dumps(payload, ensure_ascii=False))
 
 
+@remote_app.command("account-usage")
+def remote_account_usage() -> None:
+    """Lê os limites atuais da conta Codex autenticada sem iniciar um turno."""
+    from pipeline_videos.codex_rate_limits import read_codex_rate_limit_snapshot
+
+    snapshot = read_codex_rate_limit_snapshot()
+    typer.echo(json.dumps(snapshot.model_dump(mode="json"), ensure_ascii=False))
+
+
 def _daily_time(value: str) -> time:
     try:
         parsed = time.fromisoformat(value)

@@ -84,6 +84,23 @@ Falhas recuperáveis preservam o projeto, os arquivos produzidos e a sessão rai
 Depois de sete recuperações automáticas sem sucesso, o job termina em `failed` e emite um evento com
 `agent_attention_required=true`; ele não permanece em repetição infinita.
 
+## Medição de uso do Codex
+
+Jobs materializados por agendas diárias formam um lote pela data local da ocorrência. O executor
+consulta `account/rateLimits/read` no `codex app-server` autenticado da VPS:
+
+- imediatamente antes de o primeiro job devido do lote mudar para `running`;
+- imediatamente depois de todos os jobs do lote atingirem `completed`, `failed` ou `cancelled`.
+
+A medição não inicia turnos de modelo. Ela persiste nos próprios jobs somente as janelas de limite,
+percentuais usado/restante, horário de reset e o delta da janela semanal. Tokens e credenciais de
+autenticação nunca são gravados. Falha nessa telemetria fica registrada em
+`codex_account_usage.error`, mas não bloqueia produção, render, upload ou agendamento.
+
+O campo `codex_account_usage.weekly_usage_delta_percent` só é calculado quando as duas leituras
+pertencem à mesma janela semanal. Se houver reset entre elas, as leituras brutas permanecem
+disponíveis e o delta fica vazio.
+
 ## Lane econômica de roteiros aprovados
 
 `approved_fast_v1` recebe um snapshot editorial imutável. O pacote contém briefing, fontes,

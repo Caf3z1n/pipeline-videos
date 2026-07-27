@@ -16,6 +16,10 @@ from zoneinfo import ZoneInfo
 
 from pydantic import Field, model_validator
 
+from pipeline_videos.codex_rate_limits import (
+    CodexRateLimitSnapshot,
+    read_codex_rate_limit_snapshot,
+)
 from pipeline_videos.creative_direction import (
     CREATIVE_MODE_SPECS,
     HOOK_TEMPLATE_EXAMPLES,
@@ -69,7 +73,7 @@ from pipeline_videos.validation import validate_project
 from pipeline_videos.verse_selection import create_auto_video
 
 REMOTE_JOB_SCHEMA_VERSION = "1.1"
-REMOTE_JOB_STATE_SCHEMA_VERSION = "1.5"
+REMOTE_JOB_STATE_SCHEMA_VERSION = "1.6"
 DEFAULT_REMOTE_JOBS_DIR = REPO_ROOT / "remote-jobs"
 REMOTE_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 DEFAULT_REMOTE_CODEX_MODEL = "gpt-5.6-sol"
@@ -265,7 +269,7 @@ class RemoteVideoRequest(PipelineModel):
 
 
 class RemoteVideoJob(PipelineModel):
-    schema_version: Literal["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"] = (
+    schema_version: Literal["1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6"] = (
         REMOTE_JOB_STATE_SCHEMA_VERSION
     )
     job_id: str
@@ -285,6 +289,13 @@ class RemoteVideoJob(PipelineModel):
     automatic_recovery_count: int = 0
     next_retry_at: datetime | None = None
     schedule_occurrence_id: str | None = None
+    codex_account_usage_batch_id: str | None = None
+    codex_account_usage_before_attempted_at: str | None = None
+    codex_account_usage_after_attempted_at: str | None = None
+    codex_account_usage_before: CodexRateLimitSnapshot | None = None
+    codex_account_usage_after: CodexRateLimitSnapshot | None = None
+    codex_weekly_usage_delta_percent: float | None = None
+    codex_account_usage_measurement_error: str | None = None
     error: str | None = None
 
 
@@ -3017,6 +3028,214 @@ def _try_schedule(job: RemoteVideoJob, layout: ProjectLayout) -> bool:
     return True
 
 
+def _schedule_occurrence_local_date(job: RemoteVideoJob) -> str | None:
+    occurrence_id = job.schedule_occurrence_id
+    if not occurrence_id:
+        return None
+    parts = occurrence_id.rsplit(":", 2)
+    if len(parts) != 3 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[1]):
+        return None
+    try:
+        datetime.strptime(parts[1], "%Y-%m-%d")
+    except ValueError:
+        return None
+    return parts[1]
+
+
+def _scheduled_usage_batch_jobs(
+    store: RemoteJobStore,
+    local_date: str,
+) -> list[RemoteVideoJob]:
+    return [job for job in store.list() if _schedule_occurrence_local_date(job) == local_date]
+
+
+def _usage_measurement_error(stage: str, exc: Exception) -> str:
+    message = " ".join(str(exc).split())[:300]
+    return f"{stage}: {type(exc).__name__}: {message}"
+
+
+def _capture_codex_rate_limits() -> CodexRateLimitSnapshot:
+    last_error: Exception | None = None
+    for _ in range(2):
+        try:
+            return read_codex_rate_limit_snapshot()
+        except Exception as exc:
+            last_error = exc
+    assert last_error is not None
+    raise last_error
+
+
+def _save_usage_fields(
+    store: RemoteJobStore,
+    jobs: list[RemoteVideoJob],
+    **updates: Any,
+) -> None:
+    for job in jobs:
+        latest, _ = store.find(job.job_id)
+        store.save(latest.model_copy(update=updates))
+
+
+def _ensure_scheduled_usage_before(
+    store: RemoteJobStore,
+    job: RemoteVideoJob,
+) -> RemoteVideoJob:
+    local_date = _schedule_occurrence_local_date(job)
+    if local_date is None:
+        return job
+    batch_jobs = _scheduled_usage_batch_jobs(store, local_date)
+    batch_id = f"scheduled-daily:{local_date}"
+    existing = next(
+        (item for item in batch_jobs if item.codex_account_usage_before is not None),
+        None,
+    )
+    if existing is not None:
+        missing = [
+            item
+            for item in batch_jobs
+            if item.codex_account_usage_before is None
+            or item.codex_account_usage_batch_id != batch_id
+        ]
+        if missing:
+            _save_usage_fields(
+                store,
+                missing,
+                codex_account_usage_batch_id=batch_id,
+                codex_account_usage_before_attempted_at=(
+                    existing.codex_account_usage_before_attempted_at
+                    or existing.codex_account_usage_before.captured_at
+                ),
+                codex_account_usage_before=existing.codex_account_usage_before,
+                codex_account_usage_measurement_error=None,
+            )
+        return store.find(job.job_id)[0]
+    if any(item.codex_account_usage_before_attempted_at for item in batch_jobs):
+        return job
+    attempted_at = utc_now()
+    try:
+        snapshot = _capture_codex_rate_limits()
+    except Exception as exc:
+        error = _usage_measurement_error("before", exc)
+        _save_usage_fields(
+            store,
+            batch_jobs,
+            codex_account_usage_batch_id=batch_id,
+            codex_account_usage_before_attempted_at=attempted_at,
+            codex_account_usage_measurement_error=error,
+        )
+    else:
+        _save_usage_fields(
+            store,
+            batch_jobs,
+            codex_account_usage_batch_id=batch_id,
+            codex_account_usage_before_attempted_at=snapshot.captured_at,
+            codex_account_usage_before=snapshot,
+            codex_account_usage_measurement_error=None,
+        )
+    return store.find(job.job_id)[0]
+
+
+def _weekly_usage_delta(
+    before: CodexRateLimitSnapshot | None,
+    after: CodexRateLimitSnapshot,
+) -> float | None:
+    if before is None or before.weekly is None or after.weekly is None:
+        return None
+    if before.weekly.resets_at != after.weekly.resets_at:
+        return None
+    delta = after.weekly.used_percent - before.weekly.used_percent
+    if delta < 0:
+        return None
+    return round(delta, 4)
+
+
+def _finalize_scheduled_usage_if_ready(
+    store: RemoteJobStore,
+    job: RemoteVideoJob,
+) -> RemoteVideoJob:
+    local_date = _schedule_occurrence_local_date(job)
+    if local_date is None:
+        return job
+    batch_jobs = _scheduled_usage_batch_jobs(store, local_date)
+    if not batch_jobs or not all(item.status in TERMINAL_JOB_STATUSES for item in batch_jobs):
+        return job
+    batch_id = f"scheduled-daily:{local_date}"
+    existing = next(
+        (item for item in batch_jobs if item.codex_account_usage_after is not None),
+        None,
+    )
+    if existing is not None:
+        missing = [
+            item
+            for item in batch_jobs
+            if item.codex_account_usage_after is None
+            or item.codex_account_usage_batch_id != batch_id
+        ]
+        if missing:
+            _save_usage_fields(
+                store,
+                missing,
+                codex_account_usage_batch_id=batch_id,
+                codex_account_usage_after_attempted_at=(
+                    existing.codex_account_usage_after_attempted_at
+                    or existing.codex_account_usage_after.captured_at
+                ),
+                codex_account_usage_after=existing.codex_account_usage_after,
+                codex_weekly_usage_delta_percent=(existing.codex_weekly_usage_delta_percent),
+                codex_account_usage_measurement_error=None,
+            )
+        return store.find(job.job_id)[0]
+    if any(item.codex_account_usage_after_attempted_at for item in batch_jobs):
+        return store.find(job.job_id)[0]
+    baseline = next(
+        (
+            item.codex_account_usage_before
+            for item in batch_jobs
+            if item.codex_account_usage_before is not None
+        ),
+        None,
+    )
+    before_attempted = any(item.codex_account_usage_before_attempted_at for item in batch_jobs)
+    if not before_attempted:
+        return job
+    attempted_at = utc_now()
+    try:
+        snapshot = _capture_codex_rate_limits()
+    except Exception as exc:
+        error = _usage_measurement_error("after", exc)
+        _save_usage_fields(
+            store,
+            batch_jobs,
+            codex_account_usage_batch_id=batch_id,
+            codex_account_usage_after_attempted_at=attempted_at,
+            codex_account_usage_measurement_error=error,
+        )
+    else:
+        _save_usage_fields(
+            store,
+            batch_jobs,
+            codex_account_usage_batch_id=batch_id,
+            codex_account_usage_after_attempted_at=snapshot.captured_at,
+            codex_account_usage_after=snapshot,
+            codex_weekly_usage_delta_percent=_weekly_usage_delta(baseline, snapshot),
+            codex_account_usage_measurement_error=None,
+        )
+    return store.find(job.job_id)[0]
+
+
+def _finalize_ready_scheduled_usage_batches(store: RemoteJobStore) -> None:
+    jobs = store.list()
+    local_dates = {
+        local_date
+        for job in jobs
+        if (local_date := _schedule_occurrence_local_date(job)) is not None
+        and job.codex_account_usage_before_attempted_at
+    }
+    for local_date in local_dates:
+        batch_jobs = _scheduled_usage_batch_jobs(store, local_date)
+        if batch_jobs:
+            _finalize_scheduled_usage_if_ready(store, batch_jobs[0])
+
+
 def work_once(
     *,
     store: RemoteJobStore,
@@ -3036,6 +3255,7 @@ def work_once(
             schedule_store=RemoteScheduleStore(store.root),
             approved_store=ApprovedScriptStore(store.root),
         )
+        _finalize_ready_scheduled_usage_batches(store)
     waiting = [job for job in reversed(store.list(status="waiting_youtube")) if job_is_due(job)]
     if waiting:
         job = waiting[0]
@@ -3048,7 +3268,7 @@ def work_once(
         try:
             if not _try_schedule(job, layout):
                 return job
-            return store.transition(
+            completed = store.transition(
                 job,
                 "completed",
                 publish_at=job.request.publish_at.astimezone(UTC)
@@ -3057,6 +3277,7 @@ def work_once(
                 error=None,
                 next_retry_at=None,
             )
+            return _finalize_scheduled_usage_if_ready(store, completed)
         except Exception as exc:
             return _schedule_automatic_recovery(
                 store,
@@ -3071,6 +3292,7 @@ def work_once(
     job = due[0]
     if dry_run:
         return job
+    job = _ensure_scheduled_usage_before(store, job)
     job = store.transition(
         job,
         "running",
@@ -3109,7 +3331,7 @@ def work_once(
         if job.request.publication_mode == "scheduled":
             return store.transition(job, "waiting_youtube", **updates)
         completed = store.transition(job, "completed", **updates)
-        return completed
+        return _finalize_scheduled_usage_if_ready(store, completed)
     except Exception as exc:
         latest, _ = store.find(job.job_id)
         return _schedule_automatic_recovery(
@@ -3149,7 +3371,7 @@ def _schedule_automatic_recovery(
                 f"[{utc_now()}] automatic_recovery_exhausted "
                 f"count={recovery_count} error={error[:500]!r}\n"
             )
-        return failed
+        return _finalize_scheduled_usage_if_ready(store, failed)
     delay_seconds = _automatic_recovery_delay_seconds(recovery_count)
     next_retry_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
     recovered = store.transition(
@@ -3186,6 +3408,23 @@ def codex_usage_summary(job: RemoteVideoJob) -> dict[str, int]:
 
 
 def job_summary(job: RemoteVideoJob) -> dict[str, Any]:
+    account_usage = {
+        "batch_id": job.codex_account_usage_batch_id,
+        "before_attempted_at": job.codex_account_usage_before_attempted_at,
+        "after_attempted_at": job.codex_account_usage_after_attempted_at,
+        "before": (
+            job.codex_account_usage_before.model_dump(mode="json")
+            if job.codex_account_usage_before
+            else None
+        ),
+        "after": (
+            job.codex_account_usage_after.model_dump(mode="json")
+            if job.codex_account_usage_after
+            else None
+        ),
+        "weekly_usage_delta_percent": job.codex_weekly_usage_delta_percent,
+        "error": job.codex_account_usage_measurement_error,
+    }
     return {
         "job_id": job.job_id,
         "status": job.status,
@@ -3209,6 +3448,7 @@ def job_summary(job: RemoteVideoJob) -> dict[str, Any]:
         "schedule_occurrence_id": job.schedule_occurrence_id,
         "codex_run_count": len(job.codex_runs),
         "codex_usage": codex_usage_summary(job),
+        "codex_account_usage": account_usage,
         "automatic_recovery_count": job.automatic_recovery_count,
         "terminal": job.status in TERMINAL_JOB_STATUSES,
         "agent_attention_required": job.status == "failed",

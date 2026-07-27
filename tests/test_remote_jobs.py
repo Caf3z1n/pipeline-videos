@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from pipeline_videos.cli import app
+from pipeline_videos.codex_rate_limits import CodexRateLimitSnapshot, CodexRateLimitWindow
 from pipeline_videos.models import (
     DEFAULT_ELEVENLABS_MODEL_ID,
     DEFAULT_ELEVENLABS_VOICE_ID,
@@ -28,8 +29,10 @@ from pipeline_videos.remote_jobs import (
     _biblical_review_phase_spec,
     _codex_agent_command,
     _editorial_sources_phase_spec,
+    _ensure_scheduled_usage_before,
     _execute_agent_checkpoint,
     _failure_with_codex_context,
+    _finalize_scheduled_usage_if_ready,
     _growth_correction_checkpoint,
     _growth_correction_is_available,
     _growth_phase_spec,
@@ -60,6 +63,20 @@ def _request(**updates):
     }
     payload.update(updates)
     return RemoteVideoRequest.model_validate(payload)
+
+
+def _rate_limit_snapshot(used_percent: float) -> CodexRateLimitSnapshot:
+    window = CodexRateLimitWindow(
+        used_percent=used_percent,
+        remaining_percent=100 - used_percent,
+        window_duration_minutes=10080,
+        resets_at="2026-08-03T17:31:00Z",
+    )
+    return CodexRateLimitSnapshot(
+        captured_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        secondary=window,
+        weekly=window,
+    )
 
 
 def test_remote_request_applies_safe_defaults_and_requires_explicit_external_authorization(
@@ -1087,6 +1104,71 @@ def test_work_once_requeues_failure_for_automatic_recovery(tmp_path, monkeypatch
     assert recovered.automatic_recovery_count == 1
     assert recovered.next_retry_at is not None
     assert "falha recuperavel de teste" in (recovered.error or "")
+
+
+def test_scheduled_jobs_measure_weekly_usage_before_first_and_after_last(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    local_date = "2026-07-28"
+    first = store.enqueue(
+        _request(),
+        job_id="video-20260728-040000-11111111",
+        schedule_occurrence_id=f"shorts-compacto-12345678:{local_date}:1",
+    )
+    second = store.enqueue(
+        _request(),
+        job_id="video-20260728-060000-22222222",
+        schedule_occurrence_id=f"shorts-depth-12345678:{local_date}:1",
+    )
+    snapshots = iter([_rate_limit_snapshot(10.0), _rate_limit_snapshot(12.5)])
+    monkeypatch.setattr(
+        "pipeline_videos.remote_jobs._capture_codex_rate_limits",
+        lambda: next(snapshots),
+    )
+
+    first = _ensure_scheduled_usage_before(store, first)
+
+    assert first.codex_account_usage_before is not None
+    persisted_second, _ = store.find(second.job_id)
+    assert persisted_second.codex_account_usage_before is not None
+    assert persisted_second.codex_account_usage_after is None
+
+    first = store.transition(first, "completed")
+    _finalize_scheduled_usage_if_ready(store, first)
+    first, _ = store.find(first.job_id)
+    assert first.codex_account_usage_after is None
+
+    second, _ = store.find(second.job_id)
+    second = store.transition(second, "completed")
+    second = _finalize_scheduled_usage_if_ready(store, second)
+
+    assert second.codex_account_usage_after is not None
+    assert second.codex_weekly_usage_delta_percent == 2.5
+    first, _ = store.find(first.job_id)
+    assert first.codex_weekly_usage_delta_percent == 2.5
+    assert job_summary(first)["codex_account_usage"]["weekly_usage_delta_percent"] == 2.5
+
+
+def test_usage_measurement_failure_does_not_block_scheduled_job(tmp_path, monkeypatch) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(
+        _request(),
+        job_id="video-20260728-040000-33333333",
+        schedule_occurrence_id="shorts-compacto-12345678:2026-07-28:1",
+    )
+    monkeypatch.setattr(
+        "pipeline_videos.remote_jobs._capture_codex_rate_limits",
+        lambda: (_ for _ in ()).throw(RuntimeError("telemetria indisponível")),
+    )
+
+    measured = _ensure_scheduled_usage_before(store, job)
+
+    assert measured.status == "queued"
+    assert measured.codex_account_usage_before is None
+    assert measured.codex_account_usage_before_attempted_at is not None
+    assert "telemetria indisponível" in (measured.codex_account_usage_measurement_error or "")
 
 
 def test_remote_cli_accepts_utf8_base64_payload(tmp_path) -> None:
