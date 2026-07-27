@@ -21,11 +21,7 @@ from pipeline_videos.verse_selection import (
 )
 
 QUESTION_BANK = REPO_ROOT / "config" / "bible" / "high-stakes-question-bank-v1.json"
-JUDAS_OFFICIAL_HOOK = (
-    "Eu sabia que Judas me trairia e, mesmo assim, permiti que ele permanecesse entre os doze. "
-    "Ele ouviu meus ensinamentos, participou das viagens e sentou-se à mesa comigo. "
-    "Então por que eu não o afastei antes?"
-)
+JUDAS_OFFICIAL_HOOK = "Eu sabia que Judas me trairia, mas ainda assim o escolhi."
 
 
 def test_high_stakes_question_bank_is_verified_and_complete() -> None:
@@ -49,6 +45,7 @@ def test_high_stakes_question_bank_is_verified_and_complete() -> None:
         assert all(
             hook_matches_family(hook, family) for family, hook in candidate.opening_hooks.items()
         )
+        assert all(len(hook.split()) <= 14 for hook in candidate.opening_hooks.values())
 
 
 def test_judas_question_uses_the_user_approved_official_hook() -> None:
@@ -60,7 +57,7 @@ def test_judas_question_uses_the_user_approved_official_hook() -> None:
     assert candidate.opening_hooks == {"contradiction": JUDAS_OFFICIAL_HOOK}
 
 
-def test_curated_high_stakes_hook_may_exceed_generic_word_limit() -> None:
+def test_curated_high_stakes_hook_only_bypasses_limit_outside_performance_profile() -> None:
     briefing = Briefing.model_construct(
         hook_contract="high_stakes_opening_v1",
         opening_hook=JUDAS_OFFICIAL_HOOK,
@@ -68,13 +65,15 @@ def test_curated_high_stakes_hook_may_exceed_generic_word_limit() -> None:
 
     assert not _hook_exceeds_configured_limit(
         hook=JUDAS_OFFICIAL_HOOK,
-        hook_max_words=18,
+        hook_max_words=8,
         briefing=briefing,
+        allow_curated_override=True,
     )
     assert _hook_exceeds_configured_limit(
-        hook=f"{JUDAS_OFFICIAL_HOOK} Palavra extra.",
-        hook_max_words=18,
+        hook=JUDAS_OFFICIAL_HOOK,
+        hook_max_words=8,
         briefing=briefing,
+        allow_curated_override=False,
     )
 
 
@@ -99,6 +98,16 @@ def test_high_stakes_short_is_question_first_with_adaptive_scripture(
     assert manifest.config.shorts_script.scripture_citation_min_start_seconds == 0
     assert manifest.config.shorts_script.scripture_citation_max_end_seconds == 44
     assert manifest.config.shorts_script.require_independent_biblical_review is False
+    assert manifest.config.shorts_script.performance_profile == "feed_depth_45_60_v1"
+    assert (
+        manifest.config.shorts_script.hook_min_words,
+        manifest.config.shorts_script.hook_max_words,
+    ) == (4, 14)
+    assert (
+        manifest.config.shorts_script.target_scene_min,
+        manifest.config.shorts_script.target_scene_max,
+    ) == (6, 8)
+    assert manifest.config.shorts_script.maximum_progression_beats == 5
     assert briefing.question_id == candidate.candidate_id
     assert briefing.central_question == candidate.central_question
     assert briefing.hook_contract == "high_stakes_opening_v1"
@@ -114,6 +123,7 @@ def test_high_stakes_short_is_question_first_with_adaptive_scripture(
     assert queue["editorial_profile_contract"]["question_id"] == candidate.candidate_id
     assert queue["editorial_profile_contract"]["scripture_timing_policy"] == ("adaptive_payoff_v1")
     assert queue["retention_contract"]["timeline_seconds"]["scripture_adaptive"] == [0, 44]
+    assert queue["performance_profile_contract"]["profile"] == "feed_depth_45_60_v1"
     assert "independent_biblical_review_required" not in queue["preflight"]
     assert any("Não existe posição fixa de 8–20" in item for item in queue["instructions"])
 

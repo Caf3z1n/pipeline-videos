@@ -466,8 +466,8 @@ def approved_cta_select(
 ) -> None:
     """Escolhe uma opção ou cadastra um novo CTA antes da aprovação."""
 
-    if mode is not None and mode not in {"comment", "subscribe", "share"}:
-        raise typer.BadParameter("--mode precisa ser comment, subscribe ou share.")
+    if mode is not None and mode not in {"comment", "subscribe", "share", "like"}:
+        raise typer.BadParameter("--mode precisa ser comment, subscribe, share ou like.")
     from pipeline_videos.approved_scripts import approved_script_summary
 
     updated = _approved_store(jobs_dir).select_cta(
@@ -1104,6 +1104,76 @@ def analytics_diagnose(project: str) -> None:
     console.print_json(json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
 
 
+@analytics_app.command("auth")
+def analytics_auth(
+    client_secrets: Annotated[
+        Path | None,
+        typer.Option("--client-secrets", help="JSON OAuth Desktop baixado do Google Cloud."),
+    ] = None,
+    token: Annotated[Path | None, typer.Option("--token-file")] = None,
+    allow_external: Annotated[bool, typer.Option("--allow-external")] = False,
+) -> None:
+    """Autoriza somente leitura da YouTube Analytics API em token separado."""
+    if not allow_external:
+        raise typer.BadParameter("Use --allow-external para iniciar o OAuth no navegador.")
+    from pipeline_videos.youtube_analytics import (
+        analytics_client_secrets_file,
+        authorize_analytics,
+    )
+
+    destination = authorize_analytics(
+        analytics_client_secrets_file(client_secrets), destination=token
+    )
+    console.print(f"[green]Analytics autorizada.[/green] Token local: {destination}")
+
+
+@analytics_app.command("fetch")
+def analytics_fetch(
+    start_date: Annotated[str, typer.Option("--start-date", help="Data inicial YYYY-MM-DD.")],
+    end_date: Annotated[str, typer.Option("--end-date", help="Data final YYYY-MM-DD.")],
+    output: Annotated[Path, typer.Option("--output", help="JSON de saída.")],
+    projects_dir: Annotated[Path, typer.Option("--projects-dir")] = DEFAULT_PROJECTS_DIR,
+    video_id: Annotated[str | None, typer.Option("--video-id")] = None,
+    token: Annotated[Path | None, typer.Option("--token-file")] = None,
+    include_unique_viewers: Annotated[
+        bool, typer.Option("--include-unique-viewers", help="Tenta a métrica opcional da conta.")
+    ] = False,
+) -> None:
+    """Consulta a Analytics API e cruza cada linha com publicações locais."""
+    from pipeline_videos.youtube_analytics import (
+        authenticated_analytics_service,
+        fetch_and_join,
+        write_result,
+    )
+
+    metrics = None
+    if include_unique_viewers:
+        from pipeline_videos.youtube_analytics import DEFAULT_METRICS
+
+        metrics = [*DEFAULT_METRICS.split(","), "uniques"]
+    result = fetch_and_join(
+        authenticated_analytics_service(source=token),
+        start_date=start_date,
+        end_date=end_date,
+        projects_dir=projects_dir,
+        video_id=video_id,
+        metrics=metrics or None,
+    )
+    write_result(result, output)
+    console.print_json(
+        json.dumps(
+            {
+                "output": str(output.expanduser().resolve()),
+                "video_rows": len(result.rows),
+                "daily_rows": len(result.daily_rows),
+                "unavailable_metrics": result.unavailable_metrics,
+                "local_videos": len(result.local_videos),
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
 def _save_provider(
     layout: ProjectLayout, *, audio: str | None = None, images: str | None = None
 ) -> None:
@@ -1446,6 +1516,9 @@ def new_short(
                     "project_path": str(layout.root),
                     "passage": candidate.reference,
                     "editorial_profile": editorial_profile,
+                    "performance_profile": (
+                        layout.load_manifest().config.shorts_script.performance_profile
+                    ),
                     "question_id": (
                         candidate.candidate_id
                         if editorial_profile == "high_stakes_biblical_question_v1"
@@ -1472,6 +1545,9 @@ def new_short(
         )
         return
     console.print(f"[green]Short criado:[/green] {layout.root}")
+    performance_profile = layout.load_manifest().config.shorts_script.performance_profile
+    if performance_profile:
+        console.print(f"[bold]Perfil de desempenho:[/bold] {performance_profile}")
     if editorial_profile == "high_stakes_biblical_question_v1":
         console.print(f"[bold]Grande pergunta reservada:[/bold] {candidate.central_question}")
         console.print(
@@ -1984,6 +2060,23 @@ def images_import_batch(
     console.print(f"[green]Importação em lote concluída:[/green] {imported} cena(s) ativas.")
 
 
+@images_app.command("stage-generated")
+def images_stage_generated(
+    project: str,
+    job_id: Annotated[str, typer.Option("--job-id")],
+    source: Annotated[Path, typer.Option("--source")],
+) -> None:
+    """Copia com segurança o savedPath do Imagegen para o staging declarado."""
+    from pipeline_videos.images import stage_generated_image
+
+    destination = stage_generated_image(
+        _project(project),
+        job_id=job_id,
+        source_path=source,
+    )
+    console.print(f"[green]PNG materializado no staging:[/green] {destination}")
+
+
 @images_app.command("approve")
 def images_approve(
     project: str,
@@ -2345,7 +2438,7 @@ def youtube_upload(
         allow_external=True,
         confirmation=confirm_upload,
         force_new_upload=force_new_upload,
-        progress=show_progress,
+        progress=show_progress if console.is_terminal else None,
         privacy_status=privacy,
         category_id=category_id,
         default_language=language,

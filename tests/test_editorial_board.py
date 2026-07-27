@@ -8,7 +8,11 @@ from typer.testing import CliRunner
 
 from pipeline_videos import cli
 from pipeline_videos.approved_scripts import ApprovedScriptStore, materialize_approved_project
-from pipeline_videos.editorial_board import EditorialBoardStore, validate_editorial_hook
+from pipeline_videos.editorial_board import (
+    EditorialBoardStore,
+    infer_editorial_cta_mode,
+    validate_editorial_hook,
+)
 from pipeline_videos.storage import read_json, write_json
 
 
@@ -16,18 +20,37 @@ def _raw_script(topic_id: str, *, index: int, passed: bool = True) -> dict:
     hook = (
         "Eu poderia ter impedido tudo, mas permiti que aquela decisão continuasse. Então por quê?"
     )
-    body = (
-        " Eu conhecia o que estava acontecendo e mantive a pergunta diante dos meus discípulos. "
+    orientation = (
+        "Eu conhecia o que estava acontecendo e mantive a pergunta diante dos meus discípulos."
+    )
+    evidence = (
         "Em João, capítulo 6, versículos 70 a 71, lemos: “Jesus lhes respondeu: "
         "‘Não escolhi eu a vocês, os doze, e um de vocês é um diabo?’ Ora, ele falava de "
-        "Judas, filho de Simão Iscariotes, pois era ele quem o trairia, sendo um dos doze.” "
+        "Judas, filho de Simão Iscariotes, pois era ele quem o trairia, sendo um dos doze.”"
+    )
+    reversal = "Meu conhecimento não tomou a decisão no lugar dele."
+    payoff = (
+        "Essa tensão é a resposta central: conhecer uma escolha não significa obrigar alguém "
+        "a fazê-la."
+    )
+    takeaway = "Você também continua responsável pelas decisões que toma diante do que já conhece."
+    body = (
+        f" {orientation} "
+        f"{evidence} "
         "Mais tarde, ele procurou os sacerdotes e negociou minha entrega. "
         "Na mesa, ouviu o aviso e saiu para cumprir a própria decisão. Meu conhecimento não tomou "
         "a decisão no lugar dele. Lucas mantém lado a lado o cumprimento do plano e a "
-        "responsabilidade daquele que me traiu. Essa tensão é a resposta central: conhecer uma "
-        "escolha não significa obrigar alguém a fazê-la. "
+        f"responsabilidade daquele que me traiu. {payoff} {takeaway} "
     )
-    cta = "Compartilhe com quem também faria essa pergunta."
+    cta = (
+        "Compartilhe com quem também faria essa pergunta."
+        if index % 4 == 0
+        else "Inscreva-se para acompanhar outras perguntas bíblicas respondidas com clareza."
+        if index % 4 == 1
+        else "Curta se esta resposta mudou sua forma de enxergar a história."
+        if index % 4 == 2
+        else "Comente qual grande pergunta bíblica devemos investigar depois."
+    )
     return {
         "topic_id": topic_id,
         "hook": hook,
@@ -57,6 +80,39 @@ def _raw_script(topic_id: str, *, index: int, passed: bool = True) -> dict:
         "hook_strength_score": 9,
         "clarity_score": 9,
         "payoff_score": 9,
+        "quality_plan": {
+            "hook_promise_excerpt": "permiti que aquela decisão continuasse",
+            "progression_beats": [
+                {
+                    "excerpt": orientation,
+                    "function": "orientation",
+                    "new_information": "Jesus conhecia a situação antes da escolha de Judas.",
+                },
+                {
+                    "excerpt": evidence,
+                    "function": "evidence",
+                    "new_information": (
+                        "A citação identifica Judas e preserva sua posição entre os doze."
+                    ),
+                },
+                {
+                    "excerpt": reversal,
+                    "function": "reversal",
+                    "new_information": "Conhecimento prévio não equivale a causar uma decisão.",
+                },
+            ],
+            "payoff_excerpt": payoff,
+            "viewer_takeaway_excerpt": takeaway,
+            "cta_mode": (
+                "share"
+                if index % 4 == 0
+                else "subscribe"
+                if index % 4 == 1
+                else "like"
+                if index % 4 == 2
+                else "comment"
+            ),
+        },
         "index": index,
     }
 
@@ -93,6 +149,19 @@ def test_editorial_hook_accepts_jesus_first_person_with_immediate_tension() -> N
     )
 
 
+@pytest.mark.parametrize(
+    ("cta", "expected"),
+    [
+        ("Comente qual pergunta devemos investigar.", "comment"),
+        ("Inscreva-se para acompanhar outras histórias.", "subscribe"),
+        ("Compartilhe com alguém que precisa desta verdade.", "share"),
+        ("Curta se esta resposta mudou sua compreensão.", "like"),
+    ],
+)
+def test_editorial_cta_mode_preserves_four_distinct_actions(cta: str, expected: str) -> None:
+    assert infer_editorial_cta_mode(cta) == expected
+
+
 def test_themes_are_approved_before_any_script_batch(tmp_path) -> None:
     store = EditorialBoardStore(tmp_path / "jobs")
     first = store.suggest_topic(
@@ -125,7 +194,10 @@ def test_themes_are_approved_before_any_script_batch(tmp_path) -> None:
     assert queue["interaction_contract"]["maximum_biblical_reviewers"] == 0
     assert queue["interaction_contract"]["post_user_approval_model_calls"] is False
     assert queue["quality_contract"]["narrator_identity"] == "jesus_first_person_v1"
-    assert queue["quality_contract"]["quality_reference"].endswith("last_three_v1")
+    assert queue["quality_contract"]["quality_reference"] == "approved_magnetic_curiosity_six_v2"
+    assert queue["quality_contract"]["writing_standard"] == "magnetic_curiosity_payoff_v2"
+    assert len(queue["quality_contract"]["benchmark_hooks"]) == 6
+    assert queue["quality_contract"]["quality_plan_required"]["progression_beats"]
     assert queue["quality_contract"]["biblical_validation"] == "inline_source_guard_v1"
     assert queue["quality_contract"]["approval_transition"] == "hash_only_no_model_v1"
 
@@ -148,6 +220,7 @@ def test_batch_import_and_single_hash_mass_approval(tmp_path) -> None:
         package_path,
         {
             "batch_id": batch.batch_id,
+            "writing_standard": batch.writing_standard,
             "scripts": [
                 _raw_script(topic.topic_id, index=index) for index, topic in enumerate(topics)
             ],
@@ -232,6 +305,66 @@ def test_batch_import_and_single_hash_mass_approval(tmp_path) -> None:
     assert repeated.production_script_ids == approved.production_script_ids
 
 
+def test_magnetic_batch_rejects_missing_quality_plan_without_partial_import(tmp_path) -> None:
+    store = EditorialBoardStore(tmp_path / "jobs")
+    topic = store.suggest_topic(
+        title="Tema sem plano magnético",
+        central_question="Por que isso aconteceu?",
+        source_passages=["João 6:70-71"],
+    )
+    store.approve_topics([topic.topic_id], approved_by="Pedro")
+    batch = store.prepare_batch(topic_ids=[topic.topic_id])
+    raw = _raw_script(topic.topic_id, index=0)
+    raw.pop("quality_plan")
+    package_path = tmp_path / "missing-quality-plan.json"
+    write_json(
+        package_path,
+        {
+            "batch_id": batch.batch_id,
+            "writing_standard": batch.writing_standard,
+            "scripts": [raw],
+        },
+    )
+
+    with pytest.raises(ValueError, match="quality_plan"):
+        store.import_batch(package_path)
+
+    assert store.list_scripts(status="draft") == []
+    assert store.find_batch(batch.batch_id).status == "prepared"
+
+
+def test_magnetic_batch_requires_cta_variety_without_partial_import(tmp_path) -> None:
+    store = EditorialBoardStore(tmp_path / "jobs")
+    topics = [
+        store.suggest_topic(
+            title=f"Tema com CTA {index}",
+            central_question=f"Por que isso aconteceu {index}?",
+            source_passages=["João 6:70-71"],
+        )
+        for index in range(2)
+    ]
+    store.approve_topics([item.topic_id for item in topics], approved_by="Pedro")
+    batch = store.prepare_batch(topic_ids=[item.topic_id for item in topics])
+    package_path = tmp_path / "repeated-cta.json"
+    write_json(
+        package_path,
+        {
+            "batch_id": batch.batch_id,
+            "writing_standard": batch.writing_standard,
+            "scripts": [
+                _raw_script(topics[0].topic_id, index=0),
+                _raw_script(topics[1].topic_id, index=4),
+            ],
+        },
+    )
+
+    with pytest.raises(ValueError, match="CTA distintos"):
+        store.import_batch(package_path)
+
+    assert store.list_scripts(status="draft") == []
+    assert store.find_batch(batch.batch_id).status == "prepared"
+
+
 @pytest.mark.parametrize("repetitions", [1, 24])
 def test_approved_editorial_draft_has_no_word_count_duration_gate(
     tmp_path,
@@ -252,8 +385,45 @@ def test_approved_editorial_draft_has_no_word_count_duration_gate(
         for _ in range(repetitions)
     )
     raw["narration"] = f"{raw['hook']} {body} {raw['cta']}"
+    raw["quality_plan"] = {
+        "hook_promise_excerpt": "permiti que aquela decisão continuasse",
+        "progression_beats": [
+            {
+                "excerpt": "Eu apresentei uma primeira evidência concreta.",
+                "function": "orientation",
+                "new_information": "A primeira evidência inicia o desenvolvimento.",
+            },
+            {
+                "excerpt": "Eu acrescentei uma segunda evidência bíblica.",
+                "function": "evidence",
+                "new_information": "A segunda evidência sustenta a explicação.",
+            },
+            {
+                "excerpt": "Eu revelei uma consequência que mudava a pergunta.",
+                "function": "reversal",
+                "new_information": "A consequência transforma a compreensão inicial.",
+            },
+        ],
+        "payoff_excerpt": "Eu entreguei a resposta prometida pela abertura.",
+        "viewer_takeaway_excerpt": "Você recebeu um significado claro para levar consigo.",
+        "cta_mode": "share",
+    }
+    raw["narration"] = (
+        f"{raw['hook']} Eu apresentei uma primeira evidência concreta. "
+        "Eu acrescentei uma segunda evidência bíblica. "
+        "Eu revelei uma consequência que mudava a pergunta. "
+        f"{body} Eu entreguei a resposta prometida pela abertura. "
+        f"Você recebeu um significado claro para levar consigo. {raw['cta']}"
+    )
     package_path = tmp_path / f"duration-free-{repetitions}.json"
-    write_json(package_path, {"batch_id": batch.batch_id, "scripts": [raw]})
+    write_json(
+        package_path,
+        {
+            "batch_id": batch.batch_id,
+            "writing_standard": batch.writing_standard,
+            "scripts": [raw],
+        },
+    )
 
     imported = store.import_batch(package_path)
 
@@ -274,7 +444,14 @@ def test_batch_rejects_third_person_hook_and_unreviewed_script(tmp_path) -> None
     raw["hook"] = "Jesus sabia o que aconteceria, mas permitiu que a decisão continuasse."
     raw["narration"] = raw["hook"] + raw["narration"].split("Então por quê?", 1)[1]
     package_path = tmp_path / "invalid-package.json"
-    write_json(package_path, {"batch_id": batch.batch_id, "scripts": [raw]})
+    write_json(
+        package_path,
+        {
+            "batch_id": batch.batch_id,
+            "writing_standard": batch.writing_standard,
+            "scripts": [raw],
+        },
+    )
 
     with pytest.raises(ValueError, match="eu lírico"):
         store.import_batch(package_path)
@@ -296,7 +473,14 @@ def test_batch_preserves_user_wording_without_biblical_reviewer(tmp_path) -> Non
     raw = _raw_script(topic.topic_id, index=0)
     raw["source_passages"] = ["João 9:1-7"]
     package_path = tmp_path / "unbounded-package.json"
-    write_json(package_path, {"batch_id": batch.batch_id, "scripts": [raw]})
+    write_json(
+        package_path,
+        {
+            "batch_id": batch.batch_id,
+            "writing_standard": batch.writing_standard,
+            "scripts": [raw],
+        },
+    )
 
     imported = store.import_batch(package_path)
 
@@ -321,8 +505,20 @@ def test_batch_does_not_partially_approve_without_literal_citation(tmp_path) -> 
         ),
         "João 6:70-71 identifica Judas entre os doze. ",
     )
+    raw["quality_plan"]["progression_beats"][1] = {
+        "excerpt": "João 6:70-71 identifica Judas entre os doze.",
+        "function": "evidence",
+        "new_information": "A referência identifica Judas sem incluir uma citação literal.",
+    }
     package_path = tmp_path / "missing-citation-package.json"
-    write_json(package_path, {"batch_id": batch.batch_id, "scripts": [raw]})
+    write_json(
+        package_path,
+        {
+            "batch_id": batch.batch_id,
+            "writing_standard": batch.writing_standard,
+            "scripts": [raw],
+        },
+    )
     imported = store.import_batch(package_path)
     review = store.review_batch(batch.batch_id)
 

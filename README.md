@@ -136,6 +136,17 @@ uv run pipeline-videos new-short `
   --duration 50
 ```
 
+Projetos novos recebem também um perfil de desempenho automático por duração:
+
+- `feed_compact_15_20_v1`, entre 15 e 20 segundos: um hook/cena de ação legível, fala direta de
+  Jesus, referência final e nenhum CTA;
+- `feed_depth_45_60_v1`, entre 45 e 60 segundos: hook de até 14 palavras, um loop central, três a
+  cinco avanços, seis a oito cenas, payoff antes de um CTA curto.
+
+Esses perfis congelam hipóteses para a próxima coorte. A promoção de um padrão continua exigindo
+ao menos 48 horas, 200 exposições no feed para apelo e 200 `engaged_views` para engajamento.
+Projetos existentes não são migrados.
+
 O catálogo high-stakes é de ciclo único. Quando todos os temas estiverem usados ou reservados, o
 pipeline bloqueia uma nova criação até que outra rodada curada seja adicionada.
 
@@ -203,7 +214,9 @@ O plano de imagens fica em `images/codex-queue.json`.
 - em `moderation_blocked`, repita o prompt uma vez;
 - após um segundo bloqueio, tente uma alternativa que preserve identidade, figurino, proporções,
   estilo, paleta, ambiente e sentido;
-- copie cada resultado para o staging declarado;
+- copie cada resultado para o staging declarado com `images stage-generated`, usando somente o
+  `savedPath` retornado pelo Imagegen;
+- se a materialização falhar, preserve `job_id + savedPath` e recupere o mesmo PNG, sem regenerar;
 - importe o lote uma única vez.
 
 ## Áudio e música
@@ -331,8 +344,16 @@ confirmada, o contrato permite no máximo um roteirista e nenhum revisor bíblic
 pontos obrigatórios e limites de incerteza entram na fila; o mesmo roteirista faz a conferência de
 fonte e o importador aplica `inline_source_guard_v1`. Cada roteiro precisa começar com um hook
 high-stakes forte, manter Jesus como eu lírico, fechar o payoff prometido e atingir nota mínima 8
-em hook, clareza e payoff. A referência de qualidade é
+em hook, clareza e payoff. A referência histórica é
 `published_high_stakes_last_three_v1`.
+
+Lotes novos usam a referência `approved_magnetic_curiosity_six_v2` e o padrão
+`magnetic_curiosity_payoff_v2`. A fila entrega os seis hooks aprovados como referência concreta e
+exige progressão auditável: promessa literal no hook, três a seis avanços com informação nova,
+evidência bíblica usada como parte da resposta, payoff factual, valor humano posterior e CTA
+coerente. O pacote declara os trechos exatos dessas etapas em `quality_plan`; o importador confere
+sua ordem na narração e rejeita repetição disfarçada de progressão. Em lotes com mais de um roteiro,
+os CTAs precisam variar entre comentar, inscrever-se, compartilhar e curtir.
 
 Quando o usuário aprova os textos já exibidos, a transição é
 `hash_only_no_model_v1`: nenhuma pesquisa, revisão ou chamada de modelo é aberta depois da

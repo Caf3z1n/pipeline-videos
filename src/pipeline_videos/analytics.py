@@ -52,12 +52,12 @@ NONNEGATIVE_METRICS = {
 @dataclass(frozen=True)
 class ShortsDiagnosticPolicy:
     version: str = "appeal_engagement_satisfaction_v1"
-    diagnostic_algorithm_revision: int = 3
-    appeal_baseline_provenance: str = "channel_snapshot_2026-06-23_to_2026-07-20"
+    diagnostic_algorithm_revision: int = 4
+    appeal_baseline_provenance: str = "channel_snapshot_2026-06-27_to_2026-07-24"
     minimum_sample_size: int = 200
     confirmation_hours: float = 48.0
     appeal_critical_below_percent: float = 22.0
-    appeal_baseline_percent: float = 30.5
+    appeal_baseline_percent: float = 32.4
     appeal_healthy_percent: float = 35.0
     appeal_reference_percent: float = 38.0
     engagement_weak_below_percent: float = 75.0
@@ -617,6 +617,7 @@ def diagnose_short_snapshot(
         video_duration_seconds=snapshot.video_duration_seconds,
         duration_cohort=_duration_cohort(snapshot.video_duration_seconds),
         duration_profile=snapshot.duration_profile,
+        performance_profile=snapshot.performance_profile,
         hook_contract=snapshot.hook_contract,
         visual_standard_id=snapshot.visual_standard_id,
         hook_text=snapshot.hook_text,
@@ -802,6 +803,7 @@ def _enrich_short_snapshot(
     authoritative = {
         "video_duration_seconds": context.video_duration_seconds,
         "duration_profile": context.duration_profile,
+        "performance_profile": context.performance_profile,
         "visual_standard_id": context.visual_standard_id,
         "opening_visual_standard": context.opening_visual_standard,
         "first_frame_pattern": context.first_frame_pattern,
@@ -867,6 +869,7 @@ def import_short_metric_file(
                     field_name
                     in {
                         "duration_profile",
+                        "performance_profile",
                         "visual_standard_id",
                         "opening_visual_standard",
                         "first_frame_pattern",
@@ -948,6 +951,7 @@ def compact_short_performance_advisories(
     if target.video_format != "short":
         return []
     target_profile = target.config.shorts_script.duration_profile
+    target_performance_profile = target.config.shorts_script.performance_profile
     target_duration_cohort = _duration_cohort(float(target.target_duration_seconds))
     target_visual = target.config.images.visual_standard_id
     target_opening = target.config.images.opening_visual_standard
@@ -977,6 +981,8 @@ def compact_short_performance_advisories(
             for key, actionable in grouped.items():
                 diagnostic = diagnostic_by_key[key]
                 if diagnostic.duration_profile != target_profile:
+                    continue
+                if diagnostic.performance_profile != target_performance_profile:
                     continue
                 if diagnostic.duration_cohort != target_duration_cohort:
                     continue

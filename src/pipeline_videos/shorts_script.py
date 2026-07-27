@@ -132,10 +132,74 @@ _BIBLICAL_REFERENCE_PATTERN = re.compile(
 _RAW_NUMERIC_REFERENCE_PATTERN = re.compile(r"\b\d+\s*:\s*\d+\b")
 
 
+def _short_performance_profile_contract(
+    config: ShortsScriptConfig,
+) -> dict[str, Any] | None:
+    if config.performance_profile is None:
+        return None
+    profile_rules = (
+        {
+            "opening": (
+                "hook concreto de 10 a 12 palavras e um único foco visual com ação já em curso"
+            ),
+            "progression": "hook, fala direta de Jesus e referência; nenhum CTA",
+            "first_frame_avoid": [
+                "acolhimento genérico sem conflito legível",
+                "multidão, fundo carregado ou plano geral que esconda a ação",
+                "imagem escura sem contraste local no sujeito dominante",
+            ],
+        }
+        if config.performance_profile == "feed_compact_15_20_v1"
+        else {
+            "opening": ("uma pergunta, contradição ou consequência concreta em até 14 palavras"),
+            "progression": (
+                "um loop central, de três a cinco avanços com informação nova, "
+                "e payoff antes do CTA"
+            ),
+            "first_frame_avoid": [
+                "contexto abstrato antes da pergunta central",
+                "multidão ou cenário detalhado competindo com o sujeito",
+                "primeiro quadro contemplativo sem conflito observável",
+            ],
+        }
+    )
+    return {
+        "profile": config.performance_profile,
+        "evidence_policy": config.performance_evidence_policy,
+        "learning_is_advisory": True,
+        "minimum_observation_hours": config.minimum_performance_observation_hours,
+        "minimum_feed_exposures": config.minimum_feed_exposures_for_learning,
+        "minimum_engaged_views": config.minimum_engaged_views_for_learning,
+        "candidate_reference_metrics": {
+            "stayed_to_watch_percent": (config.candidate_reference_stayed_to_watch_percent),
+            "average_percentage_viewed": (config.candidate_reference_average_percentage_viewed),
+        },
+        "opening_performance_standard": config.opening_performance_standard,
+        "maximum_progression_beats": config.maximum_progression_beats,
+        **profile_rules,
+    }
+
+
 def _short_timeline_seconds(
     duration_seconds: int,
     config: ShortsScriptConfig,
 ) -> dict[str, list[float | int] | None]:
+    if config.performance_profile == "feed_depth_45_60_v1":
+        cta_start = max(
+            config.hook_target_seconds + 12.0,
+            duration_seconds - config.cta_max_seconds,
+        )
+        return {
+            "hook": [0, config.hook_target_seconds],
+            "question_or_conflict": [config.hook_target_seconds, 8],
+            "three_to_five_advances": [8, round(duration_seconds * 0.62, 1)],
+            "scripture_adaptive": [
+                config.scripture_citation_min_start_seconds,
+                config.scripture_citation_max_end_seconds,
+            ],
+            "payoff_before_cta": [round(duration_seconds * 0.58, 1), cta_start],
+            "single_action_cta": [cta_start, duration_seconds],
+        }
     if config.scripture_citation_timing_policy == "adaptive_payoff_v1":
         cta_start = max(config.hook_target_seconds + 8.0, duration_seconds - config.cta_max_seconds)
         return {
@@ -270,6 +334,19 @@ def _retention_timeline_seconds(
     duration_seconds: int,
     config: ShortsScriptConfig,
 ) -> dict[str, list[float | int]]:
+    if config.performance_profile == "feed_depth_45_60_v1":
+        cta_start = round(duration_seconds - config.cta_max_seconds, 1)
+        return {
+            "cold_open": [0, config.hook_target_seconds],
+            "conflict_or_action": [config.hook_target_seconds, 8],
+            "scripture": [
+                config.scripture_citation_min_start_seconds,
+                config.scripture_citation_max_end_seconds,
+            ],
+            "progression_and_reengagement": [20, round(duration_seconds * 0.58, 1)],
+            "payoff_and_application": [round(duration_seconds * 0.58, 1), cta_start],
+            "single_action_cta": [cta_start, duration_seconds],
+        }
     if config.duration_profile == "standard_45_55_v1":
         return {
             "cold_open": [0, 2],
@@ -1227,6 +1304,9 @@ def _compact_visual_context_payload(
             "emotional_intent": briefing.emotional_intent,
             "visual_notes": briefing.visual_notes,
         },
+        "performance_profile_contract": _short_performance_profile_contract(
+            project.config.shorts_script
+        ),
         "visual_standard_id": project.config.images.visual_standard_id,
         "allowed_relations": ["literal", "contextual", "symbolic"],
         "blocks": [
@@ -1269,12 +1349,15 @@ def _compact_visual_context_payload(
                 "emoção legível em menos de um segundo",
                 "plano médio, close ou objeto específico dominante",
                 "imagem e hook abrem a mesma pergunta que a fala de Jesus resolve",
+                "um único foco legível em tela de celular, sem multidão ou fundo carregado",
+                "contraste local suficiente para separar imediatamente sujeito e ação",
             ],
             "avoid": [
                 "retrato contemplativo genérico",
                 "Jesus apenas posando ou acolhendo sem conflito visível",
                 "plano geral cujo ambiente domina o sujeito",
                 "estímulo aleatório sem ligação com a passagem",
+                "primeiro quadro escuro ou visualmente congestionado",
             ],
         }
     if _uses_scroll_stop_contract(layout) and performance_advisories:
@@ -1360,6 +1443,7 @@ def _compact_visual_plan_queue(
             "blocks": blocks,
             "biblical_review_mode": config.biblical_review_mode,
             "opening_visual_standard": project.config.images.opening_visual_standard,
+            "performance_profile": _short_performance_profile_contract(config),
         },
         "instructions": [
             "Leia somente inputs.compact_context.",
@@ -1619,6 +1703,7 @@ def prepare_shorts_script_queue(
             "opening_example": f"Em {main_passage_spoken}, lemos: “texto do versículo.”",
         },
         "citation_policy": _shorts_citation_policy(config),
+        "performance_profile_contract": _short_performance_profile_contract(config),
         "editorial_profile_contract": (
             {
                 "profile": briefing.editorial_profile,
@@ -1675,6 +1760,8 @@ def prepare_shorts_script_queue(
                                 "sujeito dominante e ação observável no primeiro quadro",
                                 "imagem e fala abrem a mesma pergunta",
                                 "promessa honesta que a resolução cumpre",
+                                "um único foco legível em tela de celular",
+                                "sem multidão, fundo carregado ou escuridão que esconda a ação",
                             ],
                             "forbidden_tactics": [
                                 "erro deliberado para provocar correção",
@@ -1763,6 +1850,18 @@ def prepare_shorts_script_queue(
                 "legítimos, como 'Nunca faça X', continuam permitidos; a proibição é contra "
                 "andaimes retóricos artificiais. Também não use a fórmula 'não A nem B, mas C'; "
                 "declare C diretamente. Citações bíblicas literais permanecem intactas."
+            ),
+            *(
+                [
+                    (
+                        "Aplique performance_profile_contract: abra uma única pergunta, "
+                        "contradição ou consequência concreta em até 14 palavras; avance de três "
+                        "a cinco vezes com informação realmente nova; entregue o payoff antes de "
+                        "um CTA curto de uma só ação. Não gaste a abertura contextualizando."
+                    )
+                ]
+                if config.performance_profile == "feed_depth_45_60_v1"
+                else []
             ),
             (
                 (
@@ -3707,6 +3806,15 @@ def _collect_creative_direction_errors(
     development_beats = [beat for beat in beats if beat.purpose in development_purposes]
     if len(development_beats) < config.minimum_progression_beats:
         _add_validation_error(errors, "O roteiro possui poucos movimentos de desenvolvimento.")
+    if (
+        config.performance_profile == "feed_depth_45_60_v1"
+        and len(development_beats) > config.maximum_progression_beats
+    ):
+        _add_validation_error(
+            errors,
+            "O perfil de 45 a 60 segundos aceita no máximo "
+            f"{config.maximum_progression_beats} avanços antes do payoff.",
+        )
     reengagement_beats = [
         beat
         for beat in beats
@@ -3808,9 +3916,12 @@ def _hook_exceeds_configured_limit(
     hook: str,
     hook_max_words: int,
     briefing: Briefing,
+    allow_curated_override: bool,
 ) -> bool:
-    if briefing.hook_contract == "high_stakes_opening_v1" and _normalized(hook) == _normalized(
-        briefing.opening_hook
+    if (
+        allow_curated_override
+        and briefing.hook_contract == "high_stakes_opening_v1"
+        and _normalized(hook) == _normalized(briefing.opening_hook)
     ):
         return False
     return len(tokenize_words(hook)) > hook_max_words
@@ -3892,6 +4003,7 @@ def _collect_package_validation_errors(
         hook=strategy.hook,
         hook_max_words=config.hook_max_words,
         briefing=briefing,
+        allow_curated_override=config.performance_profile != "feed_depth_45_60_v1",
     ):
         _add_validation_error(errors, "O gancho ultrapassa o limite de palavras configurado.")
     if strategy.hook_target_end_seconds > config.hook_target_seconds + 0.5:

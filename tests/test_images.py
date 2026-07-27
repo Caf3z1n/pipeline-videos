@@ -11,6 +11,7 @@ from pipeline_videos.images import (
     generate_fixture_images,
     import_external_image,
     import_staged_images,
+    stage_generated_image,
 )
 from pipeline_videos.models import (
     ApprovalStatus,
@@ -106,7 +107,7 @@ def test_manifest_and_codex_queue_are_idempotent_and_can_target_one_scene(
     assert queue["items"][0]["expected_path"] == "images/assets/scene-002/v001.png"
     assert queue["items"][0]["staging_path"] == "images/staging/scene-002-v001.png"
     assert queue["items"][0]["worker_id"] == "image-worker-1"
-    assert queue["schema_version"] == "1.7"
+    assert queue["schema_version"] == "1.8"
     retry_policy = queue["generation_retry_policy"]
     assert retry_policy["max_attempts_per_item"] == 3
     assert retry_policy["same_prompt_attempts"] == 2
@@ -138,6 +139,14 @@ def test_manifest_and_codex_queue_are_idempotent_and_can_target_one_scene(
     assert worker_job["prompt_hash_algorithm"] == "sha256_canonical_json_utf8_v1"
     assert any("serializacao JSON canonica" in item for item in worker_job["instructions"])
     assert any("exatamente o mesmo prompt" in item for item in worker_job["instructions"])
+    assert worker_job["imagegen_result_contract"] == {
+        "source_field": "savedPath",
+        "forbidden_path_fields": ["result", "revisedPrompt", "output_hint"],
+        "materialization_mode": "stage_generated_cli_v1",
+    }
+    assert any("savedPath" in item for item in worker_job["instructions"])
+    assert any("materialize_command" in item for item in worker_job["instructions"])
+    assert "<IMAGEGEN_SAVED_PATH>" in worker_job["jobs"][0]["materialize_command"]
     assert [job["scene_id"] for job in worker_job["jobs"]] == ["scene-002"]
     assert layout.load_manifest().stages["images"].status == StageStatus.WAITING_EXTERNAL
 
@@ -151,6 +160,68 @@ def test_manifest_and_codex_queue_are_idempotent_and_can_target_one_scene(
     saved_scenes = read_model(layout.scenes, SceneManifest)
     assert saved_scenes.scenes[0].generation_status == StageStatus.PENDING
     assert saved_scenes.scenes[1].generation_status == StageStatus.WAITING_EXTERNAL
+
+
+def test_stage_generated_image_uses_saved_path_and_is_idempotent(tmp_path: Path) -> None:
+    layout = _create_layout(tmp_path, scene_count=1)
+    queue = build_codex_queue(layout)
+    job = queue["items"][0]
+    codex_home = tmp_path / ".codex"
+    generated = codex_home / "generated_images" / "thread-001" / "exec-image.png"
+    generated.parent.mkdir(parents=True)
+    Image.new("RGB", (96, 144), "#405867").save(generated)
+
+    destination = stage_generated_image(
+        layout,
+        job_id=job["job_id"],
+        source_path=generated.resolve(),
+        codex_home=codex_home,
+    )
+
+    assert destination == (layout.root / job["staging_path"]).resolve()
+    assert destination.read_bytes() == generated.read_bytes()
+    assert (
+        stage_generated_image(
+            layout,
+            job_id=job["job_id"],
+            source_path=generated.resolve(),
+            codex_home=codex_home,
+        )
+        == destination
+    )
+
+
+def test_stage_generated_image_rejects_paths_outside_codex_cache(tmp_path: Path) -> None:
+    layout = _create_layout(tmp_path, scene_count=1)
+    queue = build_codex_queue(layout)
+    generated = tmp_path / "outside" / "exec-image.png"
+    generated.parent.mkdir()
+    Image.new("RGB", (96, 144), "#405867").save(generated)
+
+    with pytest.raises(ValueError, match="cache do Codex"):
+        stage_generated_image(
+            layout,
+            job_id=queue["items"][0]["job_id"],
+            source_path=generated.resolve(),
+            codex_home=tmp_path / ".codex",
+        )
+
+
+def test_stage_generated_image_rejects_non_png_cache_artifact(tmp_path: Path) -> None:
+    layout = _create_layout(tmp_path, scene_count=1)
+    queue = build_codex_queue(layout)
+    codex_home = tmp_path / ".codex"
+    generated = codex_home / "generated_images" / "thread-001" / "exec-image.png"
+    generated.parent.mkdir(parents=True)
+    generated.write_text("not a png", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="PNG íntegro"):
+        stage_generated_image(
+            layout,
+            job_id=queue["items"][0]["job_id"],
+            source_path=generated.resolve(),
+            codex_home=codex_home,
+        )
 
 
 def test_worker_jobs_deduplicate_common_prompt_without_changing_reconstructed_text(

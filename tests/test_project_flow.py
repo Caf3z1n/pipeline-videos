@@ -268,6 +268,11 @@ def test_fifteen_second_short_uses_compact_duration_profile(tmp_path) -> None:
 
     assert manifest.target_duration_seconds == 15
     assert config.duration_profile == "adaptive_compact_v1"
+    assert config.performance_profile == "feed_compact_15_20_v1"
+    assert config.performance_evidence_policy == "cohort_48h_200_v1"
+    assert config.candidate_reference_stayed_to_watch_percent == 38
+    assert config.candidate_reference_average_percentage_viewed == 100
+    assert config.opening_performance_standard == "single_focal_action_v1"
     assert config.compact_narrative_standard == "cinematic_jesus_devotional_v1"
     assert config.require_direct_jesus_speech is True
     assert config.require_emotional_interruption_hook is True
@@ -292,6 +297,7 @@ def test_fifteen_second_short_uses_compact_duration_profile(tmp_path) -> None:
     assert config.allow_contiguous_multi_verse_citations is True
     assert config.multi_verse_citation_policy == "when_necessary_or_beneficial_for_continuity"
     assert (config.minimum_sections, config.minimum_retention_beats) == (3, 3)
+    assert (config.minimum_progression_beats, config.maximum_progression_beats) == (1, 1)
     assert (config.target_scene_min, config.target_scene_max) == (5, 6)
     assert manifest.config.music.library_profile == "adaptive_compact_devotional_v1"
     assert manifest.config.production.image_workers == 2
@@ -318,6 +324,32 @@ def test_fifteen_second_short_uses_compact_duration_profile(tmp_path) -> None:
             target_duration_seconds=15,
             video_format="landscape",
         )
+
+
+def test_sixty_second_short_uses_depth_performance_profile(tmp_path) -> None:
+    layout = create_project(
+        "short-de-profundidade",
+        "Short de sessenta segundos",
+        projects_dir=tmp_path,
+        target_duration_seconds=60,
+        video_format="short",
+        project_date=date(2026, 7, 27),
+    )
+
+    config = layout.load_manifest().config.shorts_script
+    assert config.duration_profile == "standard_45_55_v1"
+    assert config.performance_profile == "feed_depth_45_60_v1"
+    assert config.performance_evidence_policy == "cohort_48h_200_v1"
+    assert config.candidate_reference_stayed_to_watch_percent == 38
+    assert config.candidate_reference_average_percentage_viewed == 90
+    assert config.opening_performance_standard == "question_conflict_first_v1"
+    assert (config.hook_min_words, config.hook_max_words) == (4, 14)
+    assert config.hook_target_seconds == 3
+    assert (config.min_words, config.max_words) == (128, 153)
+    assert (config.minimum_progression_beats, config.maximum_progression_beats) == (3, 5)
+    assert (config.target_scene_min, config.target_scene_max) == (6, 8)
+    assert (config.retention_target_min_seconds, config.retention_target_max_seconds) == (51, 60)
+    assert (config.cta_max_words, config.cta_max_seconds) == (9, 3.2)
 
 
 def test_twenty_second_short_scales_literal_quote_limit_without_padding(tmp_path) -> None:

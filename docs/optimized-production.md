@@ -95,7 +95,12 @@ Para cada item:
 2. faça uma chamada de geração;
 3. em `moderation_blocked`, repita o mesmo prompt uma vez;
 4. após novo bloqueio, tente uma alternativa equivalente;
-5. copie o arquivo ao `staging_path`.
+5. leia somente o `savedPath` retornado pelo Imagegen;
+6. execute o `materialize_command` do job para validar e copiar o PNG ao `staging_path`.
+
+Nunca passe `result`/base64, `revisedPrompt` ou `output_hint` como caminho. Se a materialização
+falhar, reporte `job_id + savedPath` ao coordenador e não regenere a imagem; o mesmo arquivo pode ser
+recuperado com `images stage-generated`.
 
 A alternativa preserva identidade, idade aparente, rosto, cabelo, figurino, proporções, silhueta,
 estilo, paleta, ambiente e sentido.

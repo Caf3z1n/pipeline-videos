@@ -50,6 +50,9 @@ Workers:
 
 - recebem contexto compacto;
 - escrevem somente no staging declarado;
+- materializam cada resultado com `images stage-generated`, usando somente o `savedPath` absoluto
+  retornado pelo Imagegen;
+- nunca tratam `result`/base64, `revisedPrompt` ou `output_hint` como caminho de arquivo;
 - não alteram `project.json`;
 - não importam nem aprovam ativos;
 - usam no máximo duas execuções paralelas.
@@ -68,5 +71,15 @@ sentido.
 
 ## Importação
 
-Copie cada arquivo para o `staging_path` declarado. O coordenador importa o lote uma única vez com
-hashes e preserva versões anteriores. Imagens aprovadas nunca são sobrescritas ou regeneradas.
+Copie cada arquivo para o `staging_path` declarado com o comando congelado no próprio job:
+
+```powershell
+uv run pipeline-videos images stage-generated <projeto> `
+  --job-id <scene-NNN-vNNN> `
+  --source "<savedPath absoluto retornado pelo Imagegen>"
+```
+
+O comando aceita somente PNG íntegro dentro de `.codex/generated_images`, deriva o destino da fila
+e faz uma cópia atômica. Se ele falhar, preserve e reporte o `savedPath`; não regenere a imagem para
+corrigir uma falha de cópia. O coordenador importa o lote uma única vez com hashes e preserva
+versões anteriores. Imagens aprovadas nunca são sobrescritas ou regeneradas.

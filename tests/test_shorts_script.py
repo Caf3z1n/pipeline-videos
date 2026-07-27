@@ -441,7 +441,7 @@ def _retention_package(queue: dict) -> ShortsScriptPackage:
         "Hoje, diga a Deus exatamente o que assusta você, escolha a próxima atitude "
         "responsável e faça apenas esse passo."
     )
-    cta = "Inscreva-se: os passos do medo não decidem o seu caminho."
+    cta = "Inscreva-se: o medo não decide o seu caminho."
     sections = [
         ScriptSection(
             section_id="section-001",
@@ -569,13 +569,13 @@ def _retention_package(queue: dict) -> ShortsScriptPackage:
                 spoken_text=cta,
                 objective="Convidar a acompanhar novas mensagens com o mesmo rigor.",
                 fit_reason="O callback transforma os passos ameaçadores em caminho escolhido.",
-                target_start_seconds=46.0,
+                target_start_seconds=47.0,
                 target_end_seconds=50.0,
             ),
             replay_bridge=ShortsReplayBridge(
                 mode="verbal_and_visual",
                 opening_element="passos",
-                closing_callback="os passos do medo não decidem o seu caminho",
+                closing_callback="o medo não decide o seu caminho",
                 added_meaning="Os passos deixam de representar ameaça e passam a representar ação.",
             ),
             source_ids=["bpm-salmos-56-3"],
@@ -644,7 +644,7 @@ def _retention_package(queue: dict) -> ShortsScriptPackage:
                 viewer_question="Como agir hoje?",
                 viewer_value="Receber uma resposta prática e limitada.",
                 target_start_seconds=32,
-                target_end_seconds=46,
+                target_end_seconds=47,
                 resolves_loop=central_question,
                 new_information="Coragem permite agir sem esconder o medo.",
                 visual_change="Uma atitude concreta é anotada e iniciada.",
@@ -654,7 +654,7 @@ def _retention_package(queue: dict) -> ShortsScriptPackage:
                 purpose="cta",
                 viewer_question="Como continuar lembrando disso?",
                 viewer_value="Acompanhar novas mensagens bíblicas.",
-                target_start_seconds=46,
+                target_start_seconds=47,
                 target_end_seconds=50,
                 new_information="Os passos agora representam o caminho escolhido.",
                 visual_change="Davi avança e deixa os passos ameaçadores para trás.",
@@ -1131,7 +1131,7 @@ def test_shorts_specialist_queue_imports_script_review_and_retention_strategy(tm
     assert manifest.approvals["script"].status.value == "pending"
 
 
-def test_retention_story_v2_imports_and_builds_eight_to_ten_scenes(tmp_path) -> None:
+def test_retention_story_v2_imports_with_depth_performance_contract(tmp_path) -> None:
     layout = _retention_project(tmp_path)
     queue = prepare_shorts_script_queue(layout)
 
@@ -1144,20 +1144,20 @@ def test_retention_story_v2_imports_and_builds_eight_to_ten_scenes(tmp_path) -> 
             "stair_step_progression",
         ],
         "timeline_seconds": {
-            "cold_open": [0, 2],
-            "conflict_or_action": [2, 8],
+            "cold_open": [0, 3.0],
+            "conflict_or_action": [3.0, 8],
             "scripture": [8, 20],
-            "progression_and_reengagement": [20, 32],
-            "payoff_and_application": [32, 45],
-            "single_action_cta": [45, 55],
+            "progression_and_reengagement": [20, 29.0],
+            "payoff_and_application": [29.0, 46.8],
+            "single_action_cta": [46.8, 50],
         },
-        "cta_max_words": 12,
-        "cta_max_seconds": 4.0,
-        "target_scene_count": [8, 10],
+        "cta_max_words": 9,
+        "cta_max_seconds": 3.2,
+        "target_scene_count": [6, 8],
     }
     assert any("retention_story_v2" in item for item in queue["instructions"])
     assert any("exatamente uma ação" in item for item in queue["instructions"])
-    assert any("oito a dez cenas" in item for item in queue["instructions"])
+    assert any("6 a 8 cenas" in item for item in queue["instructions"])
 
     write_json(layout.shorts_script_package_staging, _retention_package(queue))
     imported = import_shorts_script_package(layout)
@@ -1167,7 +1167,7 @@ def test_retention_story_v2_imports_and_builds_eight_to_ten_scenes(tmp_path) -> 
     assert imported.strategy.narrative_spine is None
     assert imported.strategy.verse_opening.target_start_seconds == 8.0
     assert imported.strategy.retention_story.engagement.mode == "subscribe"
-    assert 8 <= len(scenes.scenes) <= 10
+    assert 6 <= len(scenes.scenes) <= 8
     contract = read_model(layout.creative_contract, CreativeContract)
     assert contract.pacing.profile_id == "short_retention_v2"
     assert sum("reengagement" in beat.functions for beat in contract.beats) == 1
@@ -1177,7 +1177,7 @@ def test_retention_story_v2_rejects_stacked_cta(tmp_path) -> None:
     layout = _retention_project(tmp_path)
     queue = prepare_shorts_script_queue(layout)
     payload = _retention_package(queue).model_dump(mode="json")
-    stacked = "Inscreva-se e compartilhe: os passos do medo não decidem seu caminho."
+    stacked = "Inscreva-se e compartilhe esta mensagem."
     payload["strategy"]["retention_story"]["engagement"]["spoken_text"] = stacked
     payload["script"]["sections"][-1]["narration"] = stacked
     write_json(layout.shorts_script_package_staging, payload)
@@ -1245,6 +1245,9 @@ def test_fifteen_second_profile_builds_cinematic_jesus_moment_without_cta(tmp_pa
         "deterministic_verified_compact_v1"
     )
     assert queue["deterministic_contract"]["opening_visual_standard"] == ("scroll_stop_concrete_v1")
+    assert queue["deterministic_contract"]["performance_profile"]["profile"] == (
+        "feed_compact_15_20_v1"
+    )
     assert queue["deterministic_contract"]["spoken_reference"] == (
         "Mateus, capítulo 11, versículo 29"
     )
@@ -1257,7 +1260,15 @@ def test_fifteen_second_profile_builds_cinematic_jesus_moment_without_cta(tmp_pa
     assert blocks[-1]["narration"] == "Mateus, capítulo 11, versículo 29."
     assert len(json.dumps(queue["schemas"]["package"])) < 2_000
     context = read_json(layout.shorts_script_context)
+    assert context["performance_profile_contract"]["candidate_reference_metrics"] == {
+        "stayed_to_watch_percent": 38.0,
+        "average_percentage_viewed": 100.0,
+    }
     assert context["opening_attention_contract"]["block_id"] == "block-001"
+    assert (
+        "primeiro quadro escuro ou visualmente congestionado"
+        in (context["opening_attention_contract"]["avoid"])
+    )
     assert context["blocks"][0]["attention_role"] == "scroll_stop_opening"
 
     fallback_plan = materialize_compact_visual_fallback(layout)

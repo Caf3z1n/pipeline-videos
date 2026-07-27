@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,8 @@ from pipeline_videos.state import (
 from pipeline_videos.storage import ProjectLayout, read_json, read_model, write_json
 from pipeline_videos.utils import relative_posix, sha256_file, sha256_value, utc_now
 
-CODEX_QUEUE_SCHEMA_VERSION = "1.7"
+CODEX_QUEUE_SCHEMA_VERSION = "1.8"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 def _scene_prompt_payload(layout: ProjectLayout, scenes: SceneManifest) -> dict[str, Any]:
@@ -93,6 +95,91 @@ def _staging_path(layout: ProjectLayout, scene_id: str, version: int, extension:
     if not extension.startswith("."):
         extension = f".{extension}"
     return layout.image_staging / f"{scene_id}-v{version:03d}{extension.lower()}"
+
+
+def _is_valid_png(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        with path.open("rb") as handle:
+            if handle.read(len(PNG_SIGNATURE)) != PNG_SIGNATURE:
+                return False
+        with Image.open(path) as image:
+            image.load()
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def stage_generated_image(
+    layout: ProjectLayout,
+    *,
+    job_id: str,
+    source_path: Path,
+    codex_home: Path | None = None,
+) -> Path:
+    """Materialize one Imagegen ``savedPath`` into its declared staging destination."""
+    if not layout.image_queue.is_file():
+        raise FileNotFoundError(f"Fila do Codex não encontrada: {layout.image_queue}")
+    queue = read_json(layout.image_queue)
+    items = queue.get("items") if isinstance(queue, dict) else None
+    if not isinstance(items, list):
+        raise ValueError("Fila do Codex inválida: items ausente ou não é uma lista.")
+    matches = [
+        entry for entry in items if isinstance(entry, dict) and entry.get("job_id") == job_id
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"Job de imagem desconhecido ou duplicado: {job_id}")
+    entry = matches[0]
+    staging_path = entry.get("staging_path")
+    if not isinstance(staging_path, str):
+        raise ValueError(f"Job {job_id} sem staging_path válido.")
+
+    if not source_path.is_absolute():
+        raise ValueError("O savedPath do Imagegen precisa ser um caminho absoluto.")
+    try:
+        source = source_path.expanduser().resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(
+            "Não foi possível abrir o savedPath retornado pelo Imagegen. "
+            "Não use result/base64, revisedPrompt ou outro campo como caminho."
+        ) from exc
+    configured_home = codex_home or Path(os.getenv("CODEX_HOME") or Path.home() / ".codex")
+    generated_root = (configured_home.expanduser().resolve() / "generated_images").resolve()
+    try:
+        relative_source = source.relative_to(generated_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"O arquivo precisa estar dentro do cache do Codex: {generated_root}"
+        ) from exc
+    if (
+        len(relative_source.parts) < 2
+        or not source.name.startswith("exec-")
+        or source.suffix.casefold() != ".png"
+    ):
+        raise ValueError("O savedPath não corresponde a um PNG gerado pelo Imagegen.")
+    if not _is_valid_png(source):
+        raise ValueError(f"O savedPath não contém um PNG íntegro: {source}")
+
+    destination = (layout.root / staging_path).resolve()
+    try:
+        destination.relative_to(layout.image_staging.resolve())
+    except ValueError as exc:
+        raise ValueError(f"Caminho de staging inseguro: {staging_path}") from exc
+    if _is_valid_png(destination):
+        return destination
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
+    try:
+        shutil.copyfile(source, temp)
+        if not _is_valid_png(temp):
+            raise ValueError(f"A cópia temporária não contém um PNG íntegro: {temp}")
+        os.replace(temp, destination)
+    finally:
+        if temp.exists():
+            temp.unlink()
+    return destination
 
 
 def _version(item: ImageItem, version: int | None) -> ImageVersion | None:
@@ -485,10 +572,28 @@ def _write_worker_job_files(layout: ProjectLayout, queue: dict[str, Any]) -> lis
                         "os bytes do texto."
                     ),
                     *imagegen_retry_instructions(asset_label="job de imagem"),
-                    "Salve cada PNG somente no staging_path declarado.",
+                    (
+                        "Após uma geração bem-sucedida, use exclusivamente o campo savedPath "
+                        "retornado pelo Imagegen. Nunca trate result/base64, revisedPrompt ou "
+                        "output_hint como caminho de arquivo."
+                    ),
+                    (
+                        "Execute jobs[].materialize_command substituindo "
+                        "<IMAGEGEN_SAVED_PATH> pelo savedPath absoluto entre aspas. O comando "
+                        "valida e copia o PNG atomicamente ao staging_path declarado."
+                    ),
+                    (
+                        "Se a materialização falhar, reporte job_id e savedPath integral ao "
+                        "coordenador e não regenere a imagem."
+                    ),
                     "Não importe, aprove ou modifique o estado compartilhado do projeto.",
                     "Processe o lote em uma única execução retomável sempre que possível.",
                 ],
+                "imagegen_result_contract": {
+                    "source_field": "savedPath",
+                    "forbidden_path_fields": ["result", "revisedPrompt", "output_hint"],
+                    "materialization_mode": "stage_generated_cli_v1",
+                },
                 "common_prompt_prefix": common_prompt_prefix,
                 "jobs": compacted_jobs,
             },
@@ -562,6 +667,11 @@ def build_codex_queue(
                 else None
             ),
             "status": StageStatus.WAITING_EXTERNAL.value,
+            "materialize_command": (
+                f'uv run pipeline-videos images stage-generated "{project.project_id}" '
+                f'--job-id "{item.scene_id}-v{version:03d}" '
+                '--source "<IMAGEGEN_SAVED_PATH>"'
+            ),
         }
         queue_items.append(queue_entry)
 
@@ -645,6 +755,15 @@ def build_codex_queue(
                 "incluídos em cada prompt; não substituir o padrão por outro meio visual."
             ),
             "Cada trabalhador salva somente no staging_path relativo à raiz do projeto.",
+            (
+                "Para materializar, use exclusivamente imagegen.savedPath no "
+                "materialize_command do item; nunca passe result/base64, revisedPrompt ou "
+                "output_hint como caminho."
+            ),
+            (
+                "Se a cópia falhar, preserve e reporte o savedPath ao agente principal; não "
+                "gere outra imagem para corrigir um erro de materialização."
+            ),
             "Trabalhadores não importam, não aprovam e não modificam JSONs compartilhados.",
             "O agente principal executa images import-batch após todos terminarem.",
         ],

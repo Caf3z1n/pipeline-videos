@@ -438,7 +438,7 @@ def build_usage_index(
                 engagement = retention_story.get("engagement")
                 if isinstance(engagement, dict):
                     engagement_mode = str(engagement.get("mode") or "").strip() or None
-                    if engagement_mode not in {"comment", "subscribe", "share"}:
+                    if engagement_mode not in {"comment", "subscribe", "share", "like"}:
                         engagement_mode = None
             creative_direction = strategy.get("creative_direction")
             if isinstance(creative_direction, dict):
@@ -451,7 +451,7 @@ def build_usage_index(
                 engagement = creative_direction.get("engagement")
                 if isinstance(engagement, dict):
                     engagement_mode = str(engagement.get("mode") or "").strip() or None
-                    if engagement_mode not in {"comment", "subscribe", "share"}:
+                    if engagement_mode not in {"comment", "subscribe", "share", "like"}:
                         engagement_mode = None
         tokens = sorted(
             {token for reference in references for token in reference_tokens(reference)}

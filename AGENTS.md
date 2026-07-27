@@ -182,6 +182,16 @@
 
 - Pedido simples de Short usa `new-short`, seguido de `status`, `run --dry-run` e one-shot; não peça
   novamente versículo, CTA, estilo ou fluxo já padronizados.
+- Projetos novos recebem um perfil de desempenho automático, sem migrar projetos antigos. De 15 a
+  20 segundos, use `feed_compact_15_20_v1`: hook concreto de 10 a 12 palavras, um único foco
+  visual com ação já em curso, cinco a seis cenas, fala direta de Jesus, referência final e nenhum
+  CTA. De 45 a 60 segundos, use `feed_depth_45_60_v1`: abertura em primeira pessoa de 4 a 14
+  palavras até 3 segundos, um loop central, três a cinco avanços com informação nova, seis a oito
+  cenas, payoff antes do CTA e CTA de uma ação com até nove palavras.
+- Os dois perfis registram 38% de `Stayed to watch` como faixa candidata a referência; percentual
+  médio assistido candidato é 100% no compacto e 90% no perfil de profundidade. São advisories de
+  coorte, nunca promessa ou bloqueio de publicação. Só promova aprendizado depois de 48 horas, 200
+  exposições no feed para apelo e 200 `engaged_views` para engajamento.
 - Shorts aceitam duração mínima de 15 segundos. De 15 a 44 segundos, respeite o perfil persistido
   `adaptive_compact_v1`, restrito a `devotional_application` e `pastoral_encouragement`. Ele encena
   um momento emocional de um filme épico sobre Jesus: a primeira frase interrompe o pensamento do
@@ -343,6 +353,10 @@
   câmera, enquadramento ou objetos não essenciais, sem trocar nem envelhecer o personagem.
 - Copie cada ativo ao `staging_path`; não o deixe apenas em `$CODEX_HOME`. O agente principal faz
   `images import-batch` uma vez.
+- Após cada chamada bem-sucedida de `imagegen`, use exclusivamente o `savedPath` absoluto retornado
+  pela ferramenta e execute o `materialize_command` declarado no job (`images stage-generated`).
+  Nunca passe `result`/base64, `revisedPrompt` ou `output_hint` como caminho. Se a cópia falhar,
+  preserve e reporte `job_id + savedPath`; não regenere a imagem para corrigir materialização.
 - Quando o job compacto declarar `common_prompt_prefix`, reconstrua cada prompt exatamente como
   `common_prompt_prefix + prompt_delta`; não duplique o prefixo nos jobs nem altere o texto.
 - Roteiro visual compacto e metadados aceitam no máximo uma correção agregada do modelo por etapa.

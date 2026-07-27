@@ -41,6 +41,25 @@ Essa faixa orienta somente a escrita ainda não aprovada. Depois da aprovação 
 contagem de palavras ou duração estimada pode reprovar ou modificar o roteiro. O perfil
 `approved_script_locked_v1` preserva o texto integral e aceita a duração natural resultante.
 
+### Perfis de desempenho por duração
+
+Projetos futuros recebem um contrato de desempenho ortogonal ao perfil editorial:
+
+- `feed_compact_15_20_v1`: mantém `adaptive_compact_v1`, prioriza hook concreto de 10 a 12
+  palavras, um único foco visual com ação já em curso, cinco a seis cenas, fala direta de Jesus,
+  referência final e nenhum CTA. O primeiro quadro evita multidão, fundo carregado, escuridão sem
+  contraste local e acolhimento genérico sem conflito legível;
+- `feed_depth_45_60_v1`: usa hook de 4 a 14 palavras concluído até 3 segundos, um loop central,
+  três a cinco avanços com informação nova, seis a oito cenas, payoff antes do CTA e CTA de uma
+  ação com até 9 palavras. A faixa de escrita é derivada da duração a 145 palavras por minuto,
+  entre 88% e 105% do alvo natural.
+
+Os números de referência são advisories de coorte, não garantias: `Stayed to watch` de 38% e
+percentual médio assistido de 100% no compacto ou 90% no perfil de profundidade. Só entram no
+aprendizado snapshots com janela de ao menos 48 horas e amostra compatível: 200 exposições no feed
+para apelo e 200 `engaged_views` para engajamento. Um único Short nunca reescreve automaticamente
+um hook selado.
+
 ### Perfil de grandes perguntas bíblicas
 
 `high_stakes_biblical_question_v1` é opt-in com `new-short --profile high-stakes` e aceita de 45 a
@@ -49,7 +68,8 @@ não o ponto de partida editorial. Cada candidato sela `opening_hook`, pergunta 
 prometida, pontos obrigatórios, fontes de apoio, estado da resposta (`direct`, `bounded_inference` ou
 `open`) e limites de incerteza.
 
-O contrato `high_stakes_opening_v1` não obriga o hook a ser pergunta. Ele alterna fato surpreendente,
+O contrato `high_stakes_opening_v1` não obriga o hook a ser pergunta. Nos projetos novos de 45 a
+60 segundos, a abertura tem até 14 palavras, mantém Jesus em primeira pessoa e alterna fato surpreendente,
 contradição, reversão de crença, consequência primeiro, cena em andamento, citação ou pergunta
 direta. O hook curado é copiado literalmente. A citação usa `adaptive_payoff_v1`: pode entrar como
 tensão, prova da virada ou recompensa, entre 0 e 44 segundos, sem janela universal de 8–20 segundos.
@@ -70,6 +90,30 @@ usuário aprova os textos exibidos, a aprovação por hash não chama modelo nem
 Cada texto aprovado é convertido automaticamente em snapshot `approved_fast_v1`, com cenas
 derivadas dos blocos contíguos da narração, SEO e CTA já congelados. A produção pode ser liberada
 pelo título exato e não reabre nenhuma decisão editorial.
+
+### Escrita magnética na bancada
+
+Lotes preparados depois da referência aprovada de julho de 2026 usam
+`quality_reference=approved_magnetic_curiosity_six_v2` e
+`writing_standard=magnetic_curiosity_payoff_v2`. O padrão separa qualidade em três sinais:
+
+- **apelo:** o hook corrige uma crença conhecida, abre uma contradição concreta ou antecipa uma
+  consequência real;
+- **engajamento:** três a seis avanços acrescentam orientação, evidência, virada, consequência ou
+  significado, sem reformular a mesma tese;
+- **satisfação:** a resolução entrega primeiro a resposta prometida e depois um valor humano que
+  nasce dessa resposta.
+
+A citação bíblica funciona como evidência ou virada, nunca como bloco isolado. O pacote de escrita
+inclui um `quality_plan` com a promessa literal do hook, os trechos literais de cada avanço, o
+payoff, o valor para o espectador e o tipo de CTA. O importador confere que esses trechos existem e
+aparecem nessa ordem. Isso impede que notas altas declaradas pelo próprio roteirista substituam a
+progressão real.
+
+O lote alterna CTAs coerentes entre `comment`, `subscribe`, `share` e `like`. A ação final deve
+combinar com a emoção entregue: compartilhar para alcançar outra pessoa, inscrever-se para
+acompanhar novas histórias, curtir quando a mensagem tocou ou esclareceu e comentar quando a
+pergunta gera uma resposta específica. Palavra-chave repetitiva não é o padrão.
 
 Pedidos entre 15 e 44 segundos usam `adaptive_compact_v1`. O pipeline deriva e persiste os limites
 antes de preparar a fila; o Python sela a locução e os validadores leem esses valores em vez de
@@ -198,7 +242,7 @@ como interpretação.
 
 ## CTA de uma única ação no perfil padrão
 
-`creative_direction.engagement.mode` aceita `comment`, `subscribe` ou `share`. O texto falado tem
+`creative_direction.engagement.mode` aceita `comment`, `subscribe`, `share` ou `like`. O texto falado tem
 no máximo 12 palavras e quatro segundos; combinação de ações é rejeitada.
 
 `comment_prompt` só existe quando o modo é `comment`. Palavra-chave é opcional e nunca pode ser

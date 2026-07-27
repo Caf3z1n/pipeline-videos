@@ -99,9 +99,9 @@
       "spoken_by": "other",
       "editorial_profile": "high_stakes_biblical_question_v1",
       "opening_hooks": {
-        "surprising_fact": "O dia mais misterioso da história de Jesus quase não aparece nos Evangelhos.",
-        "contradiction": "Jesus morreu na cruz, mas a Bíblia não encerra a história no túmulo.",
-        "unanswered_question": "O que aconteceu com Jesus entre a morte e a ressurreição?"
+        "surprising_fact": "Meu dia mais misterioso quase não aparece nos Evangelhos.",
+        "contradiction": "Eu morri na cruz, mas minha história não terminou no túmulo.",
+        "unanswered_question": "O que aconteceu comigo entre minha morte e minha ressurreição?"
       },
       "implicit_viewer_question": "Se os Evangelhos narram a morte e depois o túmulo vazio, o que a Bíblia permite afirmar sobre o intervalo?",
       "required_answer_points": [
@@ -205,9 +205,9 @@
       "spoken_by": "other",
       "editorial_profile": "high_stakes_biblical_question_v1",
       "opening_hooks": {
-        "contradiction": "Jesus amava Lázaro, mas decidiu esperar antes de ir ajuda-lo.",
-        "surprising_fact": "A demora de Jesus diante de Lázaro não foi um acidente de viagem.",
-        "unanswered_question": "Por que Jesus esperou se sabia que Lázaro estava morrendo?"
+        "contradiction": "Eu amava Lázaro, mas esperei antes de ir até ele.",
+        "surprising_fact": "Minha demora diante de Lázaro não foi um acidente de viagem.",
+        "unanswered_question": "Por que esperei se sabia que Lázaro estava morrendo?"
       },
       "implicit_viewer_question": "Como Jesus podia amar Lázaro e ainda assim permanecer dois dias onde estava?",
       "required_answer_points": [
@@ -320,9 +320,9 @@
       "spoken_by": "jesus",
       "editorial_profile": "high_stakes_biblical_question_v1",
       "opening_hooks": {
-        "contradiction": "Jesus ressuscitou mortos, mas não esvaziou todos os túmulos de Israel.",
-        "belief_reversal": "Os mortos que Jesus levantou não eram o fim da morte.",
-        "unanswered_question": "Se Jesus podia ressuscitar mortos, por que não ressuscitou todos?"
+        "contradiction": "Eu ressuscitei mortos, mas não esvaziei todos os túmulos de Israel.",
+        "belief_reversal": "Os mortos que levantei ainda não tinham vencido a morte.",
+        "unanswered_question": "Se eu podia ressuscitar mortos, por que não ressuscitei todos?"
       },
       "implicit_viewer_question": "Por que os milagres de ressurreição foram sinais seletivos em vez do fim imediato de toda morte?",
       "required_answer_points": [
@@ -426,7 +426,7 @@
       "spoken_by": "jesus",
       "editorial_profile": "high_stakes_biblical_question_v1",
       "opening_hooks": {
-        "contradiction": "Eu sabia que Judas me trairia e, mesmo assim, permiti que ele permanecesse entre os doze. Ele ouviu meus ensinamentos, participou das viagens e sentou-se à mesa comigo. Então por que eu não o afastei antes?"
+        "contradiction": "Eu sabia que Judas me trairia, mas ainda assim o escolhi."
       },
       "implicit_viewer_question": "Judas foi escolhido para ser forçado a trair ou sua responsabilidade permaneceu real?",
       "required_answer_points": [
@@ -530,9 +530,9 @@
       "spoken_by": "jesus",
       "editorial_profile": "high_stakes_biblical_question_v1",
       "opening_hooks": {
-        "consequence_first": "A cruz só aconteceu porque Jesus recusou a saída que tinha.",
-        "contradiction": "Jesus podia chamar um exército de anjos, mas mandou guardar a espada.",
-        "unanswered_question": "Por que Jesus não chamou os anjos para impedir a crucificação?"
+        "consequence_first": "A cruz aconteceu porque recusei a saída que eu tinha.",
+        "contradiction": "Eu podia chamar anjos, mas mandei guardar a espada.",
+        "unanswered_question": "Por que não chamei os anjos para impedir minha crucificação?"
       },
       "implicit_viewer_question": "A prisão de Jesus aconteceu por falta de poder ou por entrega voluntária?",
       "required_answer_points": [
@@ -636,9 +636,9 @@
       "spoken_by": "other",
       "editorial_profile": "high_stakes_biblical_question_v1",
       "opening_hooks": {
-        "belief_reversal": "Jesus não voltou da morte para retomar a vida de antes.",
-        "surprising_fact": "A ressurreição de Jesus foi seguida por quarenta dias de encontros verificaveis.",
-        "unanswered_question": "Se Jesus ressuscitou, por que não continuou visivelmente entre todos?"
+        "belief_reversal": "Eu não ressuscitei para retomar a vida de antes.",
+        "surprising_fact": "Depois de ressuscitar, permaneci quarenta dias com meus discípulos.",
+        "unanswered_question": "Se ressuscitei, por que não continuei visivelmente entre todos?"
       },
       "implicit_viewer_question": "Se Jesus voltou da morte, por que apareceu por um período limitado e depois ascendeu?",
       "required_answer_points": [
@@ -744,9 +744,9 @@
       "spoken_by": "other",
       "editorial_profile": "high_stakes_biblical_question_v1",
       "opening_hooks": {
-        "surprising_fact": "Uma cura de Jesus só ficou completa depois de um segundo toque.",
-        "contradiction": "Jesus tocou o cego, mas o homem ainda enxergava pessoas como árvores.",
-        "unanswered_question": "Por que Jesus curou o cego de Betsaida em duas etapas?"
+        "surprising_fact": "Minha cura só ficou completa depois de um segundo toque.",
+        "contradiction": "Eu toquei o cego, mas ele ainda via pessoas como árvores.",
+        "unanswered_question": "Por que curei o cego de Betsaida em duas etapas?"
       },
       "implicit_viewer_question": "Se Jesus podia curar imediatamente, por que a visão do homem de Betsaida foi restaurada de forma progressiva?",
       "required_answer_points": [
@@ -862,9 +862,9 @@
       "spoken_by": "jesus",
       "editorial_profile": "high_stakes_biblical_question_v1",
       "opening_hooks": {
-        "surprising_fact": "Jesus realizou milagres públicos e depois proibiu algumas pessoas de contar o que aconteceu.",
-        "contradiction": "Jesus veio para ser conhecido, mas em vários momentos ordenou silêncio.",
-        "unanswered_question": "Por que Jesus mandava algumas pessoas esconderem seus milagres?"
+        "surprising_fact": "Eu realizei milagres públicos e depois mandei algumas pessoas ficarem em silêncio.",
+        "contradiction": "Eu vim para ser conhecido, mas em vários momentos ordenei silêncio.",
+        "unanswered_question": "Por que mandei algumas pessoas esconderem os milagres que fiz?"
       },
       "implicit_viewer_question": "Se a missão cristã envolve anunciar Jesus, por que ele proibiu a divulgação em determinados momentos?",
       "required_answer_points": [

@@ -136,6 +136,11 @@ type ShortsEditorialProfile = Literal[
     "high_stakes_biblical_question_v1",
 ]
 
+type ShortsPerformanceProfile = Literal[
+    "feed_compact_15_20_v1",
+    "feed_depth_45_60_v1",
+]
+
 MIN_SHORT_DURATION_SECONDS = 15
 MIN_LONG_DURATION_SECONDS = 30
 COMPACT_SHORT_THRESHOLD_SECONDS = 45
@@ -508,6 +513,27 @@ class ShortsScriptConfig(PipelineModel):
 
     duration_profile: Literal["standard_45_55_v1", "adaptive_compact_v1"] = "standard_45_55_v1"
     editorial_profile: ShortsEditorialProfile = "verse_led_v1"
+    performance_profile: ShortsPerformanceProfile | None = None
+    performance_evidence_policy: Literal["cohort_48h_200_v1"] | None = None
+    candidate_reference_stayed_to_watch_percent: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+    )
+    candidate_reference_average_percentage_viewed: float | None = Field(
+        default=None,
+        ge=0.0,
+    )
+    minimum_performance_observation_hours: int = Field(default=48, ge=24, le=168)
+    minimum_feed_exposures_for_learning: int = Field(default=200, ge=1)
+    minimum_engaged_views_for_learning: int = Field(default=200, ge=1)
+    opening_performance_standard: (
+        Literal[
+            "single_focal_action_v1",
+            "question_conflict_first_v1",
+        ]
+        | None
+    ) = None
     compact_narrative_standard: Literal["cinematic_jesus_devotional_v1"] | None = None
     require_direct_jesus_speech: bool = False
     require_emotional_interruption_hook: bool = False
@@ -547,6 +573,7 @@ class ShortsScriptConfig(PipelineModel):
     )
     minimum_retention_beats: int = Field(default=5, ge=3, le=10)
     minimum_progression_beats: int = Field(default=2, ge=1, le=5)
+    maximum_progression_beats: int = Field(default=5, ge=1, le=8)
     minimum_sections: int = Field(default=6, ge=3, le=10)
     target_scene_min: int = Field(default=8, ge=3, le=12)
     target_scene_max: int = Field(default=10, ge=3, le=14)
@@ -580,10 +607,24 @@ class ShortsScriptConfig(PipelineModel):
             raise ValueError("retention_target_max_seconds deve ser maior ou igual ao mínimo")
         if self.target_scene_max < self.target_scene_min:
             raise ValueError("target_scene_max deve ser maior ou igual a target_scene_min")
+        if self.maximum_progression_beats < self.minimum_progression_beats:
+            raise ValueError(
+                "maximum_progression_beats deve ser maior ou igual a minimum_progression_beats"
+            )
         if self.scripture_citation_max_end_seconds <= self.scripture_citation_min_start_seconds:
             raise ValueError(
                 "scripture_citation_max_end_seconds deve ser posterior ao início mínimo"
             )
+        if (
+            self.performance_profile == "feed_compact_15_20_v1"
+            and self.duration_profile != "adaptive_compact_v1"
+        ):
+            raise ValueError("feed_compact_15_20_v1 exige duration_profile=adaptive_compact_v1")
+        if (
+            self.performance_profile == "feed_depth_45_60_v1"
+            and self.duration_profile != "standard_45_55_v1"
+        ):
+            raise ValueError("feed_depth_45_60_v1 exige duration_profile=standard_45_55_v1")
         return self
 
 
@@ -1001,7 +1042,7 @@ class VerseUsageRecord(PipelineModel):
     hook_family: str | None = None
     opening_hook: str | None = None
     creative_mode: CreativeMode | None = None
-    engagement_mode: Literal["comment", "subscribe", "share"] | None = None
+    engagement_mode: Literal["comment", "subscribe", "share", "like"] | None = None
     created_at: str
     updated_at: str | None = None
 
@@ -1612,6 +1653,7 @@ class ShortPublicationAnalyticsContext(PipelineModel):
     """Immutable editorial fingerprint captured when a Short is uploaded."""
 
     duration_profile: str
+    performance_profile: str | None = None
     video_duration_seconds: float | None = Field(default=None, gt=0.0)
     video_duration_source: Literal["ffprobe", "manifest_fallback"] | None = None
     hook_contract: str | None = None
@@ -1791,7 +1833,7 @@ class ShortsCommentPrompt(PipelineModel):
 
 
 class ShortsEngagementPlan(PipelineModel):
-    mode: Literal["comment", "subscribe", "share"]
+    mode: Literal["comment", "subscribe", "share", "like"]
     spoken_text: str
     objective: str
     fit_reason: str
@@ -2093,6 +2135,7 @@ class ShortMetricSnapshot(PipelineModel):
     subscribers_lost: int | None = Field(default=None, ge=0)
     video_duration_seconds: float | None = Field(default=None, gt=0.0)
     duration_profile: str | None = None
+    performance_profile: str | None = None
     hook_contract: str | None = None
     visual_standard_id: str | None = None
     hook_text: str | None = None
@@ -2221,6 +2264,7 @@ class ShortPerformanceDiagnostic(PipelineModel):
     video_duration_seconds: float | None = Field(default=None, gt=0.0)
     duration_cohort: str | None = None
     duration_profile: str | None = None
+    performance_profile: str | None = None
     hook_contract: str | None = None
     visual_standard_id: str | None = None
     hook_text: str | None = None

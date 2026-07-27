@@ -297,6 +297,7 @@ def test_only_confirmed_compatible_advisories_reach_next_short(tmp_path) -> None
         source,
         _snapshot(
             duration_profile=source_manifest.config.shorts_script.duration_profile,
+            performance_profile=source_manifest.config.shorts_script.performance_profile,
             hook_contract="user_six_v1",
             visual_standard_id=source_manifest.config.images.visual_standard_id,
             opening_visual_standard=source_manifest.config.images.opening_visual_standard,
@@ -499,7 +500,7 @@ def test_stale_diagnostic_policy_is_recomputed_and_migrated_on_import(tmp_path) 
     import_short_metric_file(layout, source)
 
     migrated = read_json(layout.short_performance_diagnostics)
-    assert migrated["policy"]["diagnostic_algorithm_revision"] == 3
+    assert migrated["policy"]["diagnostic_algorithm_revision"] == 4
     assert len(migrated["diagnostics"]) == 1
 
 
@@ -519,6 +520,7 @@ def _write_publication_fingerprint(layout, *, video_id: str = "youtube-short-01"
             privacy_status="private",
             short_analytics_context=ShortPublicationAnalyticsContext(
                 duration_profile=project.config.shorts_script.duration_profile,
+                performance_profile=project.config.shorts_script.performance_profile,
                 video_duration_seconds=60.0,
                 video_duration_source="ffprobe",
                 hook_contract="user_six_v1",
@@ -542,6 +544,7 @@ def test_publication_fingerprint_enrichment_is_idempotent_with_explicit_nulls(tm
     source = tmp_path / "snapshot.json"
     snapshot = _snapshot(
         duration_profile=None,
+        performance_profile=None,
         hook_contract=None,
         visual_standard_id=None,
         hook_text=None,
@@ -557,6 +560,7 @@ def test_publication_fingerprint_enrichment_is_idempotent_with_explicit_nulls(tm
 
     assert first == second
     assert first.snapshots[0].opening_visual_standard == "scroll_stop_concrete_v1"
+    assert first.snapshots[0].performance_profile == "feed_depth_45_60_v1"
     assert first.snapshots[0].video_duration_seconds == 60.0
     assert first.snapshots[0].first_frame_pattern is None
 

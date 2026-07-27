@@ -29,10 +29,14 @@ from pipeline_videos.storage import read_json, write_json
 from pipeline_videos.utils import sha256_value, slugify, tokenize_words, utc_now
 
 EDITORIAL_BOARD_SCHEMA_VERSION = "1.0"
-QUALITY_REFERENCE = "published_high_stakes_last_three_v1"
+LEGACY_QUALITY_REFERENCE = "published_high_stakes_last_three_v1"
+QUALITY_REFERENCE = "approved_magnetic_curiosity_six_v2"
+WRITING_STANDARD = "magnetic_curiosity_payoff_v2"
+LEGACY_WRITING_STANDARD = LEGACY_QUALITY_REFERENCE
 TopicStatus = Literal["suggested", "approved", "drafted", "withdrawn"]
 DraftStatus = Literal["draft", "approved", "withdrawn"]
 BatchStatus = Literal["prepared", "imported", "approved"]
+EditorialCtaMode = Literal["comment", "subscribe", "share", "like"]
 
 TOPIC_ID_PATTERN = re.compile(r"^topic-[a-z0-9][a-z0-9-]{0,72}-[a-f0-9]{8}$")
 DRAFT_ID_PATTERN = re.compile(r"^script-[a-z0-9][a-z0-9-]{0,72}-[a-f0-9]{8}$")
@@ -51,6 +55,38 @@ _HOOK_TENSION_MARKER = re.compile(
     r"\b(?:por que|mas|mesmo assim|então|ainda|nunca|apenas|só|se)\b|[?]",
     flags=re.IGNORECASE,
 )
+_CTA_MODE_PATTERNS: tuple[tuple[EditorialCtaMode, re.Pattern[str]], ...] = (
+    ("comment", re.compile(r"\b(?:coment|responda|escreva)\w*", flags=re.IGNORECASE)),
+    ("subscribe", re.compile(r"\b(?:inscrev|acompanhe)\w*", flags=re.IGNORECASE)),
+    ("share", re.compile(r"\b(?:compartilh|envie|mande)\w*", flags=re.IGNORECASE)),
+    ("like", re.compile(r"\b(?:curta|like)\b", flags=re.IGNORECASE)),
+)
+_MAGNETIC_BENCHMARK_HOOKS = [
+    (
+        "A famosa cena dos três reis na minha manjedoura nunca aparece na Bíblia. "
+        "Então o que realmente aconteceu?"
+    ),
+    (
+        "Eu fui colocado numa manjedoura, mas a Bíblia nunca diz que nasci num estábulo. "
+        "Então onde aconteceu meu nascimento?"
+    ),
+    (
+        "Eu nunca chamei Maria Madalena de prostituta. Mas durante séculos deram a ela "
+        "um passado que a Bíblia jamais contou."
+    ),
+    (
+        "Eu comparei Jonas à minha ressurreição, mas muita gente só discute a baleia. "
+        "E se esse nunca foi o verdadeiro mistério?"
+    ),
+    (
+        "Eu venci Satanás, mas Gênesis nunca chama a serpente do Éden por esse nome. "
+        "A ligação aparece muito depois — e muda tudo."
+    ),
+    (
+        "Eu nunca dei a Satanás um trono no inferno. A Bíblia revela algo muito mais "
+        "humilhante sobre o destino dele."
+    ),
+]
 
 
 def _normalize(value: str) -> str:
@@ -67,6 +103,116 @@ def validate_editorial_hook(hook: str) -> None:
         raise ValueError("O hook não pode abrir falando de Jesus em terceira pessoa.")
     if not _HOOK_TENSION_MARKER.search(normalized):
         raise ValueError("O hook precisa abrir uma tensão, contradição ou pergunta imediatamente.")
+
+
+def infer_editorial_cta_mode(cta: str) -> EditorialCtaMode:
+    normalized = _normalize(cta)
+    matches = [mode for mode, pattern in _CTA_MODE_PATTERNS if pattern.search(normalized)]
+    if len(matches) != 1:
+        raise ValueError(
+            "O CTA precisa declarar exatamente uma ação reconhecível: comentar, inscrever-se, "
+            "compartilhar ou curtir."
+        )
+    return matches[0]
+
+
+def _require_exact_excerpt(*, excerpt: Any, container: str, label: str) -> tuple[str, int]:
+    value = _normalize(str(excerpt or ""))
+    if len(value) < 12:
+        raise ValueError(f"{label} precisa conter um trecho literal específico do roteiro.")
+    position = container.find(value)
+    if position < 0:
+        raise ValueError(f"{label} precisa aparecer literalmente no roteiro.")
+    return value, position
+
+
+def _validate_magnetic_quality_plan(
+    *,
+    hook: str,
+    narration: str,
+    cta: str,
+    raw_plan: Any,
+) -> EditorialCtaMode:
+    if not isinstance(raw_plan, dict):
+        raise ValueError(
+            "O roteiro precisa incluir quality_plan no padrão magnetic_curiosity_payoff_v2."
+        )
+    normalized_hook = _normalize(hook)
+    normalized_narration = _normalize(narration)
+    _require_exact_excerpt(
+        excerpt=raw_plan.get("hook_promise_excerpt"),
+        container=normalized_hook,
+        label="hook_promise_excerpt",
+    )
+
+    raw_beats = raw_plan.get("progression_beats")
+    if not isinstance(raw_beats, list) or not 3 <= len(raw_beats) <= 6:
+        raise ValueError("quality_plan.progression_beats precisa ter de três a seis avanços reais.")
+    allowed_functions = {
+        "orientation",
+        "evidence",
+        "reversal",
+        "reengagement",
+        "meaning",
+        "application",
+    }
+    functions: list[str] = []
+    new_information: list[str] = []
+    previous_position = len(normalized_hook) - 1
+    for index, raw_beat in enumerate(raw_beats, start=1):
+        if not isinstance(raw_beat, dict):
+            raise ValueError("Cada progression_beat precisa ser um objeto estruturado.")
+        function = str(raw_beat.get("function") or "").strip()
+        if function not in allowed_functions:
+            raise ValueError(f"progression_beat {index} usa uma função editorial inválida.")
+        information = _normalize(str(raw_beat.get("new_information") or ""))
+        if len(information) < 12:
+            raise ValueError(
+                f"progression_beat {index} precisa declarar a informação nova que entrega."
+            )
+        _, position = _require_exact_excerpt(
+            excerpt=raw_beat.get("excerpt"),
+            container=normalized_narration,
+            label=f"progression_beat {index}",
+        )
+        if position <= previous_position:
+            raise ValueError("Os progression_beats precisam seguir a ordem real da narração.")
+        functions.append(function)
+        new_information.append(information.casefold())
+        previous_position = position
+    if len(set(new_information)) != len(new_information):
+        raise ValueError("Cada progression_beat precisa acrescentar informação realmente nova.")
+    if "evidence" not in functions:
+        raise ValueError(
+            "A progressão magnética precisa usar a evidência bíblica como avanço real."
+        )
+    if not {"reversal", "meaning", "application"}.intersection(functions):
+        raise ValueError("A progressão precisa incluir uma virada, significado ou aplicação.")
+
+    _, payoff_position = _require_exact_excerpt(
+        excerpt=raw_plan.get("payoff_excerpt"),
+        container=normalized_narration,
+        label="payoff_excerpt",
+    )
+    if payoff_position <= previous_position:
+        raise ValueError("O payoff precisa vir depois dos avanços que constroem a resposta.")
+    takeaway_excerpt, takeaway_position = _require_exact_excerpt(
+        excerpt=raw_plan.get("viewer_takeaway_excerpt"),
+        container=normalized_narration,
+        label="viewer_takeaway_excerpt",
+    )
+    if takeaway_position < payoff_position:
+        raise ValueError("O valor para o espectador precisa nascer do payoff, não antecipá-lo.")
+    if takeaway_excerpt.casefold() == _normalize(str(raw_plan.get("payoff_excerpt"))).casefold():
+        raise ValueError("Payoff e valor humano precisam ser etapas distintas da resolução.")
+
+    cta_mode = infer_editorial_cta_mode(cta)
+    if str(raw_plan.get("cta_mode") or "") != cta_mode:
+        raise ValueError("quality_plan.cta_mode não corresponde à ação falada no CTA.")
+    cta_position = normalized_narration.rfind(_normalize(cta))
+    if cta_position <= takeaway_position:
+        raise ValueError("O CTA precisa vir somente depois da entrega de valor.")
+    return cta_mode
 
 
 def _slug_id(prefix: str, label: str) -> str:
@@ -129,7 +275,10 @@ class EditorialTopic(PipelineModel):
         "high_stakes_biblical_question_v1"
     )
     narrator_identity: Literal["jesus_first_person_v1"] = "jesus_first_person_v1"
-    quality_reference: Literal["published_high_stakes_last_three_v1"] = QUALITY_REFERENCE
+    quality_reference: Literal[
+        "published_high_stakes_last_three_v1",
+        "approved_magnetic_curiosity_six_v2",
+    ] = QUALITY_REFERENCE
     content_hash: str
     created_at: str
     updated_at: str
@@ -172,7 +321,10 @@ class EditorialScriptDraft(PipelineModel):
     payoff_score: float = Field(ge=0, le=10)
     narrator_identity: Literal["jesus_first_person_v1"] = "jesus_first_person_v1"
     hook_contract: Literal["high_stakes_opening_v1"] = "high_stakes_opening_v1"
-    quality_reference: Literal["published_high_stakes_last_three_v1"] = QUALITY_REFERENCE
+    quality_reference: Literal[
+        "published_high_stakes_last_three_v1",
+        "approved_magnetic_curiosity_six_v2",
+    ] = QUALITY_REFERENCE
     content_hash: str
     created_at: str
     updated_at: str
@@ -258,6 +410,10 @@ class EditorialBatch(PipelineModel):
     approved_at: str | None = None
     approved_by: str | None = None
     production_script_ids: list[str] = Field(default_factory=list, max_length=12)
+    writing_standard: Literal[
+        "published_high_stakes_last_three_v1",
+        "magnetic_curiosity_payoff_v2",
+    ] = LEGACY_WRITING_STANDARD
 
     @field_validator("batch_id")
     @classmethod
@@ -520,13 +676,7 @@ def _approved_snapshot_from_editorial(
         pinned_comment=topic.central_question,
         publication_visibility="private",
     )
-    cta_mode: Literal["comment", "subscribe", "share"] = (
-        "comment"
-        if "coment" in draft.cta.casefold()
-        else "subscribe"
-        if "inscrev" in draft.cta.casefold()
-        else "share"
-    )
+    cta_mode = infer_editorial_cta_mode(draft.cta)
     cta_options = [
         ApprovedCtaOption(
             option_id="aprovado",
@@ -790,6 +940,7 @@ class EditorialBoardStore:
             },
             "quality_contract": {
                 "quality_reference": QUALITY_REFERENCE,
+                "writing_standard": WRITING_STANDARD,
                 "narrator_identity": "jesus_first_person_v1",
                 "hook_contract": "high_stakes_opening_v1",
                 "hook_must_open_narration_exactly": True,
@@ -814,8 +965,66 @@ class EditorialBoardStore:
                 "seo_in_same_output": True,
                 "description_hashtags": "3 específicas + #biblia + #jesus",
                 "internal_youtube_tags": "10-12 sem #",
+                "retention_model": "appeal_engagement_satisfaction_v1",
+                "narrative_shape": [
+                    (
+                        "Hook concreto: corrija uma crença conhecida, abra uma contradição ou "
+                        "revele uma consequência. Não termine numa pergunta seca quando uma "
+                        "promessa ou escalada for mais forte."
+                    ),
+                    (
+                        "Orientação rápida: identifique pessoa, objeto ou crença investigada sem "
+                        "repetir o hook."
+                    ),
+                    (
+                        "Progressão em três a seis avanços: cada beat acrescenta fato, evidência, "
+                        "reviravolta, consequência ou significado realmente novo."
+                    ),
+                    (
+                        "Use a citação bíblica como prova ou virada da investigação, nunca como "
+                        "bloco decorativo."
+                    ),
+                    (
+                        "Entregue primeiro a resposta factual prometida; depois revele por que "
+                        "isso muda a compreensão ou a vida do espectador."
+                    ),
+                    (
+                        "Encerre com um CTA de uma ação coerente com a emoção final e varie "
+                        "comment, subscribe, share e like dentro do lote."
+                    ),
+                ],
+                "forbidden_shortcuts": [
+                    "reformular a pergunta central sem acrescentar informação",
+                    "usar curiosidade sem responder integralmente ao hook",
+                    "colar um versículo sem fazê-lo avançar a explicação",
+                    "trocar o payoff por uma aplicação genérica desconectada do fato",
+                    "repetir a mesma fórmula de hook ou CTA no lote",
+                    "pedir palavra-chave por padrão",
+                    "prometer viralização ou desempenho",
+                ],
+                "benchmark_hooks": _MAGNETIC_BENCHMARK_HOOKS,
+                "quality_plan_required": {
+                    "hook_promise_excerpt": "trecho literal da promessa já presente no hook",
+                    "progression_beats": (
+                        "3-6 objetos em ordem, cada um com excerpt literal, function e "
+                        "new_information"
+                    ),
+                    "payoff_excerpt": "trecho literal que responde ao loop do hook",
+                    "viewer_takeaway_excerpt": (
+                        "trecho literal posterior que entrega significado ou aplicação"
+                    ),
+                    "cta_mode": "comment, subscribe, share ou like",
+                },
             },
             "topics": [_topic_summary(topic) for topic in candidates],
+            "required_package_contract": {
+                "batch_id": batch_id,
+                "writing_standard": WRITING_STANDARD,
+                "scripts": (
+                    "Exatamente um por tema, cada um com quality_plan completo e trechos "
+                    "literais em ordem."
+                ),
+            },
             "required_output_path": str((self.batches_root / f"{batch_id}-package.json").resolve()),
             "response_policy": (
                 "Não explique o processo. Grave o pacote e responda em uma frase curta."
@@ -828,6 +1037,7 @@ class EditorialBoardStore:
             queue_path=str(queue_path.resolve()),
             created_at=utc_now(),
             updated_at=utc_now(),
+            writing_standard=WRITING_STANDARD,
         )
         self._save_batch(batch)
         return batch
@@ -838,11 +1048,17 @@ class EditorialBoardStore:
         batch = self.find_batch(batch_id)
         if batch.status != "prepared":
             raise RuntimeError("Este lote já foi importado.")
+        if (
+            batch.writing_standard == WRITING_STANDARD
+            and payload.get("writing_standard") != WRITING_STANDARD
+        ):
+            raise ValueError(f"O pacote precisa declarar writing_standard={WRITING_STANDARD}.")
         raw_scripts = payload.get("scripts")
         if not isinstance(raw_scripts, list) or len(raw_scripts) != len(batch.topic_ids):
             raise ValueError("O pacote precisa conter exatamente um roteiro por tema.")
         now = utc_now()
         scripts: list[EditorialScriptDraft] = []
+        cta_modes: list[EditorialCtaMode] = []
         for raw in raw_scripts:
             if not isinstance(raw, dict):
                 raise ValueError("Cada roteiro do pacote precisa ser um objeto.")
@@ -875,9 +1091,25 @@ class EditorialBoardStore:
             script = EditorialScriptDraft.model_validate(
                 shell.model_copy(update={"content_hash": sha256_value(_draft_payload(shell))})
             )
+            if batch.writing_standard == WRITING_STANDARD:
+                cta_modes.append(
+                    _validate_magnetic_quality_plan(
+                        hook=script.hook,
+                        narration=script.narration,
+                        cta=script.cta,
+                        raw_plan=raw.get("quality_plan"),
+                    )
+                )
             _validate_topic_alignment(topic, script)
-            self._save_script(script)
             scripts.append(script)
+        if batch.writing_standard == WRITING_STANDARD and len(scripts) > 1:
+            required_modes = 2 if len(scripts) < 4 else 3
+            if len(set(cta_modes)) < required_modes:
+                raise ValueError(
+                    f"O lote precisa usar ao menos {required_modes} tipos de CTA distintos."
+                )
+        for script in scripts:
+            self._save_script(script)
         aggregate_hash = sha256_value(
             [{"script_id": item.script_id, "content_hash": item.content_hash} for item in scripts]
         )

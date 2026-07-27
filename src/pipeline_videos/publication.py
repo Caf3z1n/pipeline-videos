@@ -49,6 +49,7 @@ def _short_publication_analytics_context(
 
     return ShortPublicationAnalyticsContext(
         duration_profile=project.config.shorts_script.duration_profile,
+        performance_profile=project.config.shorts_script.performance_profile,
         video_duration_seconds=(
             video_duration_seconds
             if video_duration_seconds is not None
@@ -165,7 +166,12 @@ class GoogleYouTubeClient:
         while response is None:
             upload_status, response = request.next_chunk(num_retries=5)
             if upload_status is not None and progress is not None:
-                progress(float(upload_status.progress()))
+                try:
+                    progress(float(upload_status.progress()))
+                except OSError:
+                    # Progress reporting is observational. A closed terminal or
+                    # output pipe must never abort an otherwise healthy upload.
+                    progress = None
         return response
 
     def _mutable_status(self, video_id: str) -> dict[str, Any]:

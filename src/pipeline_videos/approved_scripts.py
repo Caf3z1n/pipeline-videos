@@ -37,7 +37,7 @@ PRODUCTION_STATUS_ORDER = {"approved": 0, "reserved": 1, "produced": 2}
 class ApprovedCtaOption(PipelineModel):
     option_id: str = Field(min_length=1, max_length=40)
     spoken_text: str = Field(min_length=1, max_length=240)
-    mode: Literal["comment", "subscribe", "share"]
+    mode: Literal["comment", "subscribe", "share", "like"]
 
     @field_validator("option_id", "spoken_text")
     @classmethod
@@ -159,11 +159,13 @@ def _default_cta_options(
     options: list[ApprovedCtaOption] = []
     selected: str | None = None
     if current and _normalize(current) in narration:
-        mode: Literal["comment", "subscribe", "share"] = (
+        mode: Literal["comment", "subscribe", "share", "like"] = (
             "comment"
             if "coment" in current.casefold()
             else "subscribe"
             if "inscrev" in current.casefold()
+            else "like"
+            if "curta" in current.casefold() or "like" in current.casefold()
             else "share"
         )
         options.append(
@@ -191,6 +193,11 @@ def _default_cta_options(
                 "Inscreva-se para acompanhar outras perguntas bíblicas explicadas com clareza."
             ),
             mode="subscribe",
+        ),
+        ApprovedCtaOption(
+            option_id="curtir",
+            spoken_text="Curta se esta verdade trouxe uma nova compreensão para você.",
+            mode="like",
         ),
     )
     existing = {_normalize(item.spoken_text) for item in options}
@@ -801,7 +808,7 @@ class ApprovedScriptStore:
         *,
         option_id: str,
         spoken_text: str | None = None,
-        mode: Literal["comment", "subscribe", "share"] | None = None,
+        mode: Literal["comment", "subscribe", "share", "like"] | None = None,
     ) -> ApprovedShortScript:
         script, path = self.find(script_id)
         if script.status != "draft":

@@ -19,6 +19,11 @@ inverte a autoridade editorial: seleciona primeiro uma dúvida bíblica conhecid
 passagens capazes de respondê-la. `required_answer_points`, `answer_status` e
 `uncertainty_boundaries` impedem que curiosidade vire especulação.
 
+Dois perfis de desempenho são resolvidos automaticamente pela duração e não substituem o modo
+criativo: `feed_compact_15_20_v1` concentra a decisão do feed em um hook e uma ação visual; e
+`feed_depth_45_60_v1` organiza uma única pergunta em três a cinco avanços, payoff e CTA curto.
+Ambos são versionados no projeto e avaliados somente contra coortes comparáveis.
+
 Nos Shorts, a direção criativa também entrega `strategy.visual_scenes`: blocos literais da locução
 com uma cena concreta por bloco e relação `literal`, `contextual` ou `symbolic`. A descrição deve
 variar ação, ambiente, personagem ou objeto quando isso beneficiar a continuidade, sem transformar

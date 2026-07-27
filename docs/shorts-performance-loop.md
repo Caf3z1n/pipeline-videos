@@ -76,6 +76,7 @@ Exemplo mínimo:
   "shares": 8,
   "subscribers_gained": 33,
   "duration_profile": "adaptive_compact_v1",
+  "performance_profile": "feed_compact_15_20_v1",
   "hook_contract": "cinematic_interruption_v1",
   "visual_standard_id": "biblical-midcentury-gouache-v1",
   "hook_mechanism": "concrete_human_tension",
@@ -103,15 +104,15 @@ O import cria ou atualiza deterministicamente:
 
 ## Política inicial
 
-`appeal_engagement_satisfaction_v1` usa como linha de base inicial o snapshot do canal entre
-23/06/2026 e 20/07/2026 (`Continuaram assistindo = 30,5%`). Isso é uma calibração local versionada,
+`appeal_engagement_satisfaction_v1` usa como linha de base o snapshot do canal entre
+27/06/2026 e 24/07/2026 (`Continuaram assistindo = 32,4%`). Isso é uma calibração local versionada,
 não um número universal do YouTube.
 
 - menos de 200 exposições no feed: amostra insuficiente para apelo;
 - menos de 200 `engaged_views`: amostra insuficiente para progressão/percentual assistido;
 - menos de 22% em `Stayed to watch`: apelo crítico;
-- 22% a menos de 30,5%: abaixo da linha de base;
-- 30,5% a menos de 35%: monitoramento;
+- 22% a menos de 32,4%: abaixo da linha de base;
+- 32,4% a menos de 35%: monitoramento;
 - 35% a menos de 38%: saudável;
 - 38% ou mais: faixa candidata a referência;
 - menos de 75% assistido: engajamento fraco;
@@ -163,6 +164,16 @@ Os advisories são congelados no instante em que a fila é criada. Novas métric
 planner em andamento; passam a valer somente na próxima fila deliberadamente materializada. O
 fallback visual usa o tema, o conflito, a pergunta central, o hook e a passagem verificada para
 selecionar um motivo concreto, em vez de repetir uma única cena genérica para todo o catálogo.
+
+Dois perfis novos materializam essa hipótese sem alterar projetos antigos:
+
+- `feed_compact_15_20_v1`: um foco visual, ação concreta, hook curto selado, fala bíblica contínua e
+  nenhum CTA; candidato a referência com 38% de apelo e 100% assistido;
+- `feed_depth_45_60_v1`: pergunta/contradição em até 14 palavras, três a cinco avanços, payoff antes
+  do CTA, seis a oito cenas; candidato a referência com 38% de apelo e 90% assistido.
+
+Esses limites não bloqueiam publicação nem afirmam causalidade. Eles identificam candidatos para
+comparação dentro do mesmo perfil, hook, duração e contrato visual.
 
 ## Experimentos recomendados
 

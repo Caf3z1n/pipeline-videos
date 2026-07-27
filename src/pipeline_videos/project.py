@@ -55,6 +55,9 @@ COMPACT_MINIMUM_MESSAGE_VALUE_SCORE = 0.9
 COMPACT_MINIMUM_REWATCH_VALUE_SCORE = 0.88
 PREFERRED_DURATION_LOWER_RATIO = 0.85
 PREFERRED_DURATION_UPPER_RATIO = 1.15
+PERFORMANCE_REFERENCE_STAYED_TO_WATCH_PERCENT = 38.0
+PERFORMANCE_MINIMUM_OBSERVATION_HOURS = 48
+PERFORMANCE_MINIMUM_SAMPLE = 200
 
 
 def preferred_duration_window(
@@ -95,9 +98,60 @@ def compact_narration_word_range(duration_seconds: int) -> tuple[int, int]:
     return minimum, maximum
 
 
+def configure_short_performance_profile(config: ProjectConfig, duration_seconds: int) -> None:
+    """Attach a channel-calibrated, advisory performance contract to future Shorts."""
+
+    shorts = config.shorts_script
+    shorts.performance_profile = None
+    shorts.performance_evidence_policy = None
+    shorts.candidate_reference_stayed_to_watch_percent = None
+    shorts.candidate_reference_average_percentage_viewed = None
+    shorts.opening_performance_standard = None
+    if 15 <= duration_seconds <= 20:
+        shorts.duration_profile = "adaptive_compact_v1"
+        shorts.performance_profile = "feed_compact_15_20_v1"
+        shorts.performance_evidence_policy = "cohort_48h_200_v1"
+        shorts.candidate_reference_stayed_to_watch_percent = (
+            PERFORMANCE_REFERENCE_STAYED_TO_WATCH_PERCENT
+        )
+        shorts.candidate_reference_average_percentage_viewed = 100.0
+        shorts.opening_performance_standard = "single_focal_action_v1"
+        shorts.minimum_performance_observation_hours = PERFORMANCE_MINIMUM_OBSERVATION_HOURS
+        shorts.minimum_feed_exposures_for_learning = PERFORMANCE_MINIMUM_SAMPLE
+        shorts.minimum_engaged_views_for_learning = PERFORMANCE_MINIMUM_SAMPLE
+        return
+    if 45 <= duration_seconds <= 60:
+        target_words = duration_seconds * shorts.estimated_narration_wpm / 60
+        shorts.performance_profile = "feed_depth_45_60_v1"
+        shorts.performance_evidence_policy = "cohort_48h_200_v1"
+        shorts.candidate_reference_stayed_to_watch_percent = (
+            PERFORMANCE_REFERENCE_STAYED_TO_WATCH_PERCENT
+        )
+        shorts.candidate_reference_average_percentage_viewed = 90.0
+        shorts.opening_performance_standard = "question_conflict_first_v1"
+        shorts.minimum_performance_observation_hours = PERFORMANCE_MINIMUM_OBSERVATION_HOURS
+        shorts.minimum_feed_exposures_for_learning = PERFORMANCE_MINIMUM_SAMPLE
+        shorts.minimum_engaged_views_for_learning = PERFORMANCE_MINIMUM_SAMPLE
+        shorts.hook_min_words = 4
+        shorts.hook_max_words = 14
+        shorts.hook_target_seconds = 3.0
+        shorts.min_words = max(70, math.ceil(target_words * 0.88))
+        shorts.max_words = min(180, math.ceil(target_words * 1.05))
+        shorts.minimum_retention_beats = 6
+        shorts.minimum_progression_beats = 3
+        shorts.maximum_progression_beats = 5
+        shorts.target_scene_min = 6
+        shorts.target_scene_max = 8
+        shorts.retention_target_min_seconds = max(38.0, duration_seconds * 0.85)
+        shorts.retention_target_max_seconds = float(duration_seconds)
+        shorts.cta_max_words = 9
+        shorts.cta_max_seconds = 3.2
+
+
 def configure_short_duration_profile(config: ProjectConfig, duration_seconds: int) -> None:
     """Persist a duration-aware Short contract before any specialist queue is built."""
 
+    configure_short_performance_profile(config, duration_seconds)
     if duration_seconds >= COMPACT_SHORT_THRESHOLD_SECONDS:
         return
     shorts = config.shorts_script
@@ -147,6 +201,7 @@ def configure_short_duration_profile(config: ProjectConfig, duration_seconds: in
     shorts.max_literal_verse_words = max_literal_verse_words
     shorts.minimum_retention_beats = 3
     shorts.minimum_progression_beats = 1
+    shorts.maximum_progression_beats = 1
     shorts.minimum_sections = 3
     shorts.target_scene_min = target_scene_min
     shorts.target_scene_max = target_scene_max
@@ -182,18 +237,23 @@ def configure_high_stakes_question_profile(
     shorts.editorial_profile = "high_stakes_biblical_question_v1"
     shorts.require_independent_biblical_review = False
     shorts.hook_min_words = 4
-    shorts.hook_max_words = 18
-    shorts.hook_target_seconds = 3.5
-    shorts.min_words = max(70, round(target_words * 0.84))
-    shorts.max_words = min(180, round(target_words * 1.08))
+    shorts.hook_max_words = 14
+    shorts.hook_target_seconds = 3.0
+    shorts.min_words = max(70, math.ceil(target_words * 0.88))
+    shorts.max_words = min(180, math.ceil(target_words * 1.05))
     shorts.scripture_citation_min_start_seconds = 0.0
     shorts.scripture_citation_max_end_seconds = min(44.0, duration_seconds - 4.0)
     shorts.scripture_citation_timing_policy = "adaptive_payoff_v1"
     shorts.minimum_retention_beats = 6
     shorts.minimum_progression_beats = 3
+    shorts.maximum_progression_beats = 5
     shorts.minimum_sections = 6
+    shorts.target_scene_min = 6
+    shorts.target_scene_max = 8
     shorts.retention_target_min_seconds = max(38.0, duration_seconds * 0.85)
     shorts.retention_target_max_seconds = float(duration_seconds)
+    shorts.cta_max_words = 9
+    shorts.cta_max_seconds = 3.2
     config.production.validation_policy = "completion_first_v1"
     config.production.token_budget_behavior = "fallback_then_continue"
     config.production.max_model_repairs_per_stage = 1

@@ -138,6 +138,42 @@ class _FakeGoogleService:
         return self.resource
 
 
+class _FakeUploadStatus:
+    def __init__(self, value: float) -> None:
+        self.value = value
+
+    def progress(self) -> float:
+        return self.value
+
+
+class _FakeUploadRequest:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def next_chunk(self, *, num_retries: int) -> tuple[_FakeUploadStatus | None, dict | None]:
+        assert num_retries == 5
+        self.calls += 1
+        if self.calls == 1:
+            return _FakeUploadStatus(0.5), None
+        return None, {"id": "video-123"}
+
+
+class _FakeUploadVideosResource:
+    def __init__(self) -> None:
+        self.request = _FakeUploadRequest()
+
+    def insert(self, **_kwargs) -> _FakeUploadRequest:
+        return self.request
+
+
+class _FakeUploadGoogleService:
+    def __init__(self) -> None:
+        self.resource = _FakeUploadVideosResource()
+
+    def videos(self) -> _FakeUploadVideosResource:
+        return self.resource
+
+
 def test_google_client_updates_snippet_and_status_separately() -> None:
     service = _FakeGoogleService()
     client = GoogleYouTubeClient(service)
@@ -155,6 +191,26 @@ def test_google_client_updates_snippet_and_status_separately() -> None:
         "embeddable": True,
         "selfDeclaredMadeForKids": False,
     }
+
+
+def test_google_client_ignores_broken_progress_output(tmp_path) -> None:
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+    service = _FakeUploadGoogleService()
+    client = GoogleYouTubeClient(service)
+
+    def broken_progress(_value: float) -> None:
+        raise OSError(22, "terminal fechado")
+
+    response = client.upload_video(
+        video_path=video,
+        body={"snippet": {"title": "Teste"}, "status": {"privacyStatus": "private"}},
+        notify_subscribers=False,
+        progress=broken_progress,
+    )
+
+    assert response == {"id": "video-123"}
+    assert service.resource.request.calls == 2
 
 
 def _ready_project(tmp_path, *, video_format: str = "landscape"):
@@ -381,6 +437,7 @@ def test_short_upload_records_analytics_context(tmp_path) -> None:
     )
 
     assert record.short_analytics_context is not None
+    assert record.short_analytics_context.performance_profile == "feed_depth_45_60_v1"
     assert record.short_analytics_context.opening_visual_standard == "scroll_stop_concrete_v1"
     assert record.short_analytics_context.video_duration_seconds == 60.0
     assert record.short_analytics_context.video_duration_source == "manifest_fallback"
