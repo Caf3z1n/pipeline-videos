@@ -49,6 +49,8 @@ def test_daily_schedule_accepts_fifteen_second_shorts(tmp_path) -> None:
     schedule = schedule_store.create(
         name="Micros",
         duration_seconds=15,
+        voice_variant="jesus_2",
+        music_track="aloboi",
         slots=[
             DailyShortSlot(
                 production_time=time(1, 0),
@@ -61,6 +63,8 @@ def test_daily_schedule_accepts_fifteen_second_shorts(tmp_path) -> None:
     )
 
     assert schedule.duration_seconds == 15
+    assert schedule.voice_variant == "jesus_2"
+    assert schedule.music_track == "aloboi"
 
 
 def test_same_day_publication_must_be_after_production() -> None:
@@ -102,6 +106,8 @@ def test_two_daily_slots_materialize_idempotent_separate_scheduled_jobs(tmp_path
     assert len({job.schedule_occurrence_id for job in first}) == 2
     assert all(job.request.publication_mode == "scheduled" for job in first)
     assert all(job.request.external_services_authorized for job in first)
+    assert all(job.request.voice_variant == "jesus_1" for job in first)
+    assert all(job.request.music_track == "leaning" for job in first)
     assert first[0].request.not_before.isoformat() == "2026-07-16T01:00:00-03:00"
     assert first[1].request.not_before.isoformat() == "2026-07-16T03:00:00-03:00"
     assert first[0].request.publish_at.isoformat() == "2026-07-17T12:00:00-03:00"
@@ -153,6 +159,14 @@ def test_schedule_cli_creates_two_slots_with_explicit_authorization(tmp_path) ->
             "19:00",
             "--publish-days-after",
             "1",
+            "--duration",
+            "18",
+            "--profile",
+            "verse-led",
+            "--voice-variant",
+            "jesus_2",
+            "--music-track",
+            "aloboi",
             "--authorize-external",
             "--authorize-public-schedule",
             "--jobs-dir",
@@ -164,6 +178,11 @@ def test_schedule_cli_creates_two_slots_with_explicit_authorization(tmp_path) ->
     response = json.loads(result.stdout)
     assert response["enabled"] is True
     assert response["timezone"] == "America/Sao_Paulo"
+    assert response["duration_seconds"] == 18
+    assert response["performance_profile"] == "feed_compact_15_20_v1"
+    assert response["editorial_profile"] == "verse_led_v1"
+    assert response["voice_variant"] == "jesus_2"
+    assert response["music_track"] == "aloboi"
     assert response["slots"] == [
         {
             "production_time": "01:00",

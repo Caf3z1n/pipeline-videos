@@ -929,6 +929,9 @@ def remote_schedule_create(
     duration_seconds: Annotated[
         int, typer.Option("--duration", min=MIN_SHORT_DURATION_SECONDS, max=180)
     ] = 50,
+    profile: Annotated[str, typer.Option("--profile")] = "verse-led",
+    voice_variant: Annotated[str, typer.Option("--voice-variant")] = "jesus_1",
+    music_track: Annotated[str, typer.Option("--music-track")] = "leaning",
     enabled: Annotated[bool, typer.Option("--enabled/--disabled")] = True,
     authorize_external: Annotated[bool, typer.Option("--authorize-external")] = False,
     authorize_public_schedule: Annotated[bool, typer.Option("--authorize-public-schedule")] = False,
@@ -946,6 +949,17 @@ def remote_schedule_create(
         raise typer.BadParameter("Informe um ou dois horários de produção.")
     if len(publication_times) != len(production_times):
         raise typer.BadParameter("Informe um horário de publicação para cada produção.")
+    profile_aliases = {
+        "verse-led": "verse_led_v1",
+        "high-stakes": "high_stakes_biblical_question_v1",
+    }
+    editorial_profile = profile_aliases.get(profile.strip().casefold())
+    if editorial_profile is None:
+        raise typer.BadParameter("--profile precisa ser verse-led ou high-stakes.")
+    if voice_variant not in {"jesus_1", "jesus_2"}:
+        raise typer.BadParameter("--voice-variant precisa ser jesus_1 ou jesus_2.")
+    if music_track not in {"leaning", "aloboi"}:
+        raise typer.BadParameter("--music-track precisa ser leaning ou aloboi.")
     slots = [
         DailyShortSlot(
             production_time=_daily_time(production_value),
@@ -962,6 +976,9 @@ def remote_schedule_create(
         slots=slots,
         timezone=timezone,
         duration_seconds=duration_seconds,
+        editorial_profile=editorial_profile,
+        voice_variant=voice_variant,
+        music_track=music_track,
         enabled=enabled,
         external_services_authorized=authorize_external,
         public_scheduling_authorized=authorize_public_schedule,

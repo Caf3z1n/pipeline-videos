@@ -55,6 +55,9 @@ class DailyShortSchedule(PipelineModel):
     enabled: bool = True
     timezone: str = "America/Sao_Paulo"
     duration_seconds: int = Field(default=50, ge=MIN_SHORT_DURATION_SECONDS, le=180)
+    editorial_profile: Literal["verse_led_v1", "high_stakes_biblical_question_v1"] = "verse_led_v1"
+    voice_variant: Literal["jesus_1", "jesus_2"] = "jesus_1"
+    music_track: Literal["leaning", "aloboi"] = "leaning"
     script_source: Literal["automatic_catalog", "approved_pool"] = "automatic_catalog"
     publication_mode: Literal["private_review", "scheduled"] = "scheduled"
     slots: list[DailyShortSlot] = Field(min_length=1, max_length=2)
@@ -98,6 +101,11 @@ class DailyShortSchedule(PipelineModel):
             raise ValueError("Cada produção agendada precisa de horário de publicação.")
         if len({slot.production_time for slot in self.slots}) != len(self.slots):
             raise ValueError("Cada Short diário precisa ter um horário de produção diferente.")
+        if (
+            self.editorial_profile == "high_stakes_biblical_question_v1"
+            and not 45 <= self.duration_seconds <= 60
+        ):
+            raise ValueError("A agenda high-stakes exige duração entre 45 e 60 segundos.")
         return self
 
 
@@ -118,6 +126,11 @@ class RemoteScheduleStore:
         slots: list[DailyShortSlot],
         timezone: str = "America/Sao_Paulo",
         duration_seconds: int = 50,
+        editorial_profile: Literal[
+            "verse_led_v1", "high_stakes_biblical_question_v1"
+        ] = "verse_led_v1",
+        voice_variant: Literal["jesus_1", "jesus_2"] = "jesus_1",
+        music_track: Literal["leaning", "aloboi"] = "leaning",
         enabled: bool = True,
         external_services_authorized: bool,
         public_scheduling_authorized: bool,
@@ -132,6 +145,9 @@ class RemoteScheduleStore:
             enabled=enabled,
             timezone=timezone,
             duration_seconds=duration_seconds,
+            editorial_profile=editorial_profile,
+            voice_variant=voice_variant,
+            music_track=music_track,
             script_source=script_source,
             publication_mode=publication_mode,
             slots=slots,
@@ -260,10 +276,16 @@ def materialize_daily_schedules(
                     else schedule.duration_seconds
                 ),
                 editorial_profile=(
-                    approved.editorial_profile if approved is not None else "verse_led_v1"
+                    approved.editorial_profile
+                    if approved is not None
+                    else schedule.editorial_profile
                 ),
-                music_track=approved.music_track if approved is not None else None,
-                voice_variant=approved.voice_variant if approved is not None else "jesus_1",
+                music_track=(
+                    approved.music_track if approved is not None else schedule.music_track
+                ),
+                voice_variant=(
+                    approved.voice_variant if approved is not None else schedule.voice_variant
+                ),
                 start_policy="immediate",
                 not_before=production_at,
                 publication_mode=schedule.publication_mode,
@@ -296,6 +318,14 @@ def schedule_summary(schedule: DailyShortSchedule) -> dict[str, Any]:
         "enabled": schedule.enabled,
         "timezone": schedule.timezone,
         "duration_seconds": schedule.duration_seconds,
+        "performance_profile": (
+            "feed_compact_15_20_v1"
+            if 15 <= schedule.duration_seconds <= 20
+            else ("feed_depth_45_60_v1" if 45 <= schedule.duration_seconds <= 60 else None)
+        ),
+        "editorial_profile": schedule.editorial_profile,
+        "voice_variant": schedule.voice_variant,
+        "music_track": schedule.music_track,
         "script_source": schedule.script_source,
         "publication_mode": schedule.publication_mode,
         "slots": [
