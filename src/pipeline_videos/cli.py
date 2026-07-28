@@ -760,10 +760,13 @@ def remote_status(
     jobs_dir: Annotated[Path | None, typer.Option("--jobs-dir")] = None,
 ) -> None:
     """Exibe o estado persistido de um job."""
-    from pipeline_videos.remote_jobs import RemoteJobStore, job_summary
+    from pipeline_videos.remote_jobs import RemoteJobStore, job_diagnostics, job_summary
 
-    job, _ = RemoteJobStore(jobs_dir).find(job_id)
-    typer.echo(json.dumps(job_summary(job), ensure_ascii=False))
+    store = RemoteJobStore(jobs_dir)
+    job, _ = store.find(job_id)
+    summary = job_summary(job)
+    summary["diagnostics"] = job_diagnostics(store, job)
+    typer.echo(json.dumps(summary, ensure_ascii=False))
 
 
 @remote_app.command("wait")

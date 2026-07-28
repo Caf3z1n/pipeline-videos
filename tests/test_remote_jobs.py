@@ -47,6 +47,7 @@ from pipeline_videos.remote_jobs import (
     _shorts_script_phase_spec,
     codex_checkpoint_prompt,
     codex_usage_summary,
+    job_diagnostics,
     job_is_due,
     job_summary,
     prepare_job_project,
@@ -319,6 +320,65 @@ def test_remote_high_stakes_job_persists_profile_voice_and_requested_music(
     summary = job_summary(job)
     assert summary["editorial_profile"] == "high_stakes_biblical_question_v1"
     assert summary["music_track"] == music_track
+
+
+def test_job_diagnostics_exposes_sanitized_latest_image_handoff(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    queued = store.enqueue(_request())
+    run = RemoteCodexRun(
+        phase="image_workers",
+        item_id="scene-003-v001",
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
+        started_at="2026-07-28T10:36:10Z",
+        finished_at="2026-07-28T10:38:29Z",
+        exit_code=2,
+        error="Saídas obrigatórias ausentes.",
+    )
+    job = store.transition(queued, "running", codex_runs=[run])
+    context_dir = store.root / "contexts" / job.job_id / "main-agent"
+    context_dir.mkdir(parents=True)
+    (context_dir / "run-001-image_workers-scene-last-message.txt").write_text(
+        "Imagem gerada; savedPath não foi materializado.",
+        encoding="utf-8",
+    )
+    logs_dir = store.root / "logs"
+    (logs_dir / f"{job.job_id}-run-001-image_workers-scene.hooks.jsonl").write_text(
+        json.dumps(
+            {
+                "event": "PostToolUse",
+                "tool_name": "imagegen",
+                "artifact_materialized": False,
+                "materialization_error": "imagegen_prompt_or_saved_path_missing",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (logs_dir / f"{job.job_id}-run-001-image_workers-scene.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "image_generation_call",
+                    "status": "completed",
+                    "result": {"savedPath": "/tmp/generated_images/thread/exec-example.png"},
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    diagnostics = job_diagnostics(store, job)
+
+    assert diagnostics is not None
+    assert diagnostics["last_message"].startswith("Imagem gerada")
+    assert diagnostics["hook_events"][-1]["materialization_error"] == (
+        "imagegen_prompt_or_saved_path_missing"
+    )
+    assert diagnostics["phase_event_counts"] == {"item.completed": 1}
+    assert diagnostics["imagegen_events"][-1]["saved_path"].endswith("exec-example.png")
 
 
 def test_remote_character_request_bootstraps_verified_storytelling_sources(tmp_path) -> None:

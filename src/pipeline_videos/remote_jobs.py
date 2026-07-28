@@ -3769,6 +3769,107 @@ def codex_usage_summary(job: RemoteVideoJob) -> dict[str, int]:
     }
 
 
+def _nested_saved_path(value: Any) -> str | None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if (
+                str(key).casefold().replace("_", "") == "savedpath"
+                and isinstance(item, str)
+                and item.strip()
+            ):
+                return item.strip()
+        for item in value.values():
+            saved_path = _nested_saved_path(item)
+            if saved_path:
+                return saved_path
+    elif isinstance(value, list | tuple):
+        for item in value:
+            saved_path = _nested_saved_path(item)
+            if saved_path:
+                return saved_path
+    return None
+
+
+def job_diagnostics(store: RemoteJobStore, job: RemoteVideoJob) -> dict[str, Any] | None:
+    if not job.codex_runs:
+        return None
+    run_number = len(job.codex_runs)
+    context_dir = store.root / "contexts" / job.job_id / "main-agent"
+    logs_dir = store.root / "logs"
+    message_paths = sorted(context_dir.glob(f"run-{run_number:03d}-*-last-message.txt"))
+    hook_paths = sorted(logs_dir.glob(f"{job.job_id}-run-{run_number:03d}-*.hooks.jsonl"))
+    phase_paths = sorted(
+        path
+        for path in logs_dir.glob(f"{job.job_id}-run-{run_number:03d}-*.jsonl")
+        if not path.name.endswith(".hooks.jsonl")
+    )
+
+    last_message: str | None = None
+    if message_paths:
+        value = message_paths[-1].read_text(encoding="utf-8", errors="replace").strip()
+        last_message = value[-2000:] or None
+
+    hook_events: list[dict[str, Any]] = []
+    if hook_paths:
+        for line in hook_paths[-1].read_text(encoding="utf-8", errors="replace").splitlines():
+            with suppress(json.JSONDecodeError):
+                payload = json.loads(line)
+                if not isinstance(payload, dict):
+                    continue
+                hook_events.append(
+                    {
+                        key: payload.get(key)
+                        for key in (
+                            "event",
+                            "tool_name",
+                            "image_job_id",
+                            "image_prompt_hash",
+                            "image_saved_path",
+                            "image_staging_path",
+                            "artifact_materialized",
+                            "materialization_error",
+                        )
+                        if payload.get(key) is not None
+                    }
+                )
+
+    phase_event_counts: dict[str, int] = {}
+    imagegen_events: list[dict[str, Any]] = []
+    if phase_paths:
+        for line in phase_paths[-1].read_text(encoding="utf-8", errors="replace").splitlines():
+            with suppress(json.JSONDecodeError):
+                payload = json.loads(line)
+                if not isinstance(payload, dict):
+                    continue
+                event_type = str(payload.get("type") or "unknown")
+                phase_event_counts[event_type] = phase_event_counts.get(event_type, 0) + 1
+                item = payload.get("item")
+                if not isinstance(item, dict):
+                    continue
+                item_type = str(item.get("type") or "")
+                tool_name = str(item.get("tool_name") or item.get("name") or "")
+                if "image" not in item_type.casefold() and "image" not in tool_name.casefold():
+                    continue
+                event = {
+                    "event_type": event_type,
+                    "item_type": item_type or None,
+                    "tool_name": tool_name or None,
+                    "status": item.get("status"),
+                    "saved_path": _nested_saved_path(item),
+                }
+                imagegen_events.append(
+                    {key: value for key, value in event.items() if value is not None}
+                )
+
+    return {
+        "latest_run": job.codex_runs[-1].model_dump(mode="json"),
+        "last_message": last_message,
+        "hook_events": hook_events[-20:],
+        "phase_event_counts": phase_event_counts,
+        "imagegen_events": imagegen_events[-10:],
+    }
+
+
 def job_summary(job: RemoteVideoJob) -> dict[str, Any]:
     account_usage = {
         "batch_id": job.codex_account_usage_batch_id,
