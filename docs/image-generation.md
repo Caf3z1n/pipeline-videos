@@ -84,8 +84,9 @@ e faz uma cópia atômica. Se ele falhar, preserve e reporte o `savedPath`; não
 corrigir uma falha de cópia. O coordenador importa o lote uma única vez com hashes e preserva
 versões anteriores. Imagens aprovadas nunca são sobrescritas ou regeneradas.
 
-Na produção remota, o hook `PostToolUse` executa esse handoff automaticamente a partir do
-`savedPath` retornado pelo próprio `imagegen`. O hash do prompt identifica de forma inequívoca o job
-e o staging autorizado, inclusive quando a chamada foi feita em uma sessão isolada de worker. Um
-recibo persistido permite repetir somente a cópia caso o hook seja interrompido; a imagem não é
-regenerada para reparar materialização.
+Na produção remota, cada checkpoint contém somente um job de imagem e um staging esperado. O hook
+`PostToolUse` tenta o handoff imediatamente pelo `savedPath`. Como fallback independente do hook, o
+executor tira snapshots globais de `.codex/generated_images` e aceita somente o caso inequívoco de
+um único PNG novo para o único destino da fase. O arquivo é validado e copiado atomicamente; zero ou
+mais de um candidato bloqueiam a recuperação. Assim, chamadas feitas por workers em sessões
+isoladas não dependem de o hook do coordenador ser herdado e não são associadas por ordem.

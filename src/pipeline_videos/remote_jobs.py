@@ -1785,114 +1785,91 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
     if not pending_items:
         return []
 
-    groups: dict[str, list[dict[str, Any]]] = {}
+    specs: list[CodexPhaseSpec] = []
     for index, item in enumerate(pending_items):
+        job_id = str(item["job_id"])
         worker_id = str(item.get("worker_id") or f"image-worker-{(index % 2) + 1}")
-        groups.setdefault(worker_id, []).append(item)
-    if len(groups) > 2:
-        redistributed: dict[str, list[dict[str, Any]]] = {
-            "image-worker-1": [],
-            "image-worker-2": [],
-        }
-        for index, item in enumerate(pending_items):
-            redistributed[f"image-worker-{(index % 2) + 1}"].append(item)
-        groups = redistributed
-
-    declared = queue.get("orchestration", {}).get("worker_job_files", {})
-    declared = declared if isinstance(declared, dict) else {}
-    assignments: list[dict[str, Any]] = []
-    image_artifacts: list[dict[str, str]] = []
-    expected_outputs: list[Path] = []
-    allowed_inputs: list[str] = []
-    for worker_id, items in groups.items():
-        relative_job_path = declared.get(worker_id)
-        if isinstance(relative_job_path, str):
-            job_path = _project_file(layout, relative_job_path)
-        else:
-            job_path = layout.image_jobs / f"remote-{worker_id}.json"
-            write_json(
-                job_path,
-                {
-                    "schema_version": "1.0",
-                    "project_id": queue.get("project_id"),
-                    "batch_id": queue.get("batch_id"),
-                    "worker_id": worker_id,
-                    "role": "image_worker",
-                    "context_policy": "compact_only",
-                    "fork_turns": "none",
-                    "recommended_model": DEFAULT_REMOTE_CODEX_MODEL,
-                    "reasoning_effort": "low",
-                    "generation_retry_policy": queue.get("generation_retry_policy", {}),
-                    "visual_standard": queue.get("visual_standard", {}),
-                    "jobs": items,
-                },
-            )
-        outputs = [_project_file(layout, str(item["staging_path"])) for item in items]
-        expected_outputs.extend(outputs)
-        image_artifacts.extend(
+        output = _project_file(layout, str(item["staging_path"]))
+        prompt = str(item["prompt"])
+        prompt_hash = str(item.get("prompt_hash") or sha256_value(prompt))
+        job_path = layout.image_jobs / f"remote-single-{slugify(job_id)}.json"
+        write_json(
+            job_path,
             {
-                "job_id": str(item["job_id"]),
-                "prompt_hash": str(item.get("prompt_hash") or sha256_value(str(item["prompt"]))),
-                "staging_path": str(output),
-            }
-            for item, output in zip(items, outputs, strict=True)
-        )
-        allowed_inputs.append(str(job_path))
-        assignments.append(
-            {
-                "role": "image_worker",
+                "schema_version": "1.2",
+                "project_id": queue.get("project_id"),
+                "batch_id": queue.get("batch_id"),
                 "worker_id": worker_id,
-                "job_path": str(job_path),
-                "required_outputs": [str(path) for path in outputs],
-            }
-        )
-
-    return [
-        CodexPhaseSpec(
-            phase="image_workers",
-            item_id=str(queue.get("batch_id") or "batch"),
-            model=DEFAULT_REMOTE_CODEX_MODEL,
-            reasoning_effort=DEFAULT_REMOTE_REASONING_EFFORT,
-            payload={
-                "image_artifacts": image_artifacts,
-                "delegation": {
-                    "required": True,
-                    "role": "image_worker",
-                    "count": len(assignments),
-                    "max_parallel": 2,
-                    "fork_turns": "none",
-                    "reasoning_effort": "low",
-                    "model": DEFAULT_REMOTE_CODEX_MODEL,
-                    "assignments": assignments,
-                },
-                "allowed_inputs": allowed_inputs,
-                "task": {
-                    "kind": "delegate_image_worker_batches",
-                    "tool": "$imagegen",
-                    "visual_standard": queue.get("visual_standard", {}),
-                    "generation_retry_policy": queue.get("generation_retry_policy", {}),
-                    "instructions": [
-                        "Crie um image_worker por assignment e inicie os dois em paralelo.",
-                        (
-                            "Cada trabalhador deve ler somente seu job_path e gravar seus "
-                            "staging_path."
-                        ),
-                        (
-                            "O hook PostToolUse materializa o savedPath no staging assim que o "
-                            "imagegen termina. Se o staging_path já for um PNG válido, não gere "
-                            "novamente esse item."
-                        ),
-                        *imagegen_retry_instructions(asset_label="job de imagem"),
-                        (
-                            "Nenhum trabalhador pode importar, aprovar ou alterar estado "
-                            "compartilhado."
-                        ),
-                    ],
-                },
+                "role": "image_worker",
+                "context_policy": "compact_only",
+                "fork_turns": "none",
+                "recommended_model": DEFAULT_REMOTE_CODEX_MODEL,
+                "reasoning_effort": "low",
+                "generation_retry_policy": queue.get("generation_retry_policy", {}),
+                "visual_standard": queue.get("visual_standard", {}),
+                "artifact_isolation": "single_expected_output_v1",
+                "jobs": [item],
             },
-            expected_outputs=tuple(expected_outputs),
         )
-    ]
+        assignment = {
+            "role": "image_worker",
+            "worker_id": worker_id,
+            "job_path": str(job_path),
+            "required_outputs": [str(output)],
+        }
+        specs.append(
+            CodexPhaseSpec(
+                phase="image_workers",
+                item_id=job_id,
+                model=DEFAULT_REMOTE_CODEX_MODEL,
+                reasoning_effort=DEFAULT_REMOTE_REASONING_EFFORT,
+                payload={
+                    "artifact_isolation": "single_expected_output_v1",
+                    "image_artifacts": [
+                        {
+                            "job_id": job_id,
+                            "prompt_hash": prompt_hash,
+                            "staging_path": str(output),
+                        }
+                    ],
+                    "delegation": {
+                        "required": True,
+                        "role": "image_worker",
+                        "count": 1,
+                        "max_parallel": 1,
+                        "fork_turns": "none",
+                        "reasoning_effort": "low",
+                        "model": DEFAULT_REMOTE_CODEX_MODEL,
+                        "assignments": [assignment],
+                    },
+                    "allowed_inputs": [str(job_path)],
+                    "task": {
+                        "kind": "delegate_single_image_worker",
+                        "tool": "$imagegen",
+                        "visual_standard": queue.get("visual_standard", {}),
+                        "generation_retry_policy": queue.get("generation_retry_policy", {}),
+                        "instructions": [
+                            "Crie exatamente um image_worker para o único assignment.",
+                            (
+                                "O trabalhador deve ler somente seu job_path e gravar o único "
+                                "staging_path declarado."
+                            ),
+                            (
+                                "O hook PostToolUse materializa o savedPath no staging. Se o "
+                                "staging_path já for um PNG válido, não gere novamente esse item."
+                            ),
+                            *imagegen_retry_instructions(asset_label="job de imagem"),
+                            (
+                                "Nenhum trabalhador pode importar, aprovar ou alterar estado "
+                                "compartilhado."
+                            ),
+                        ],
+                    },
+                },
+                expected_outputs=(output,),
+            )
+        )
+    return specs
 
 
 def _growth_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
@@ -2522,6 +2499,15 @@ def _hook_image_receipts(path: Path) -> list[dict[str, Any]]:
     return receipts
 
 
+def _generated_png_snapshot(codex_home: Path) -> frozenset[Path]:
+    generated_root = (codex_home.expanduser().resolve() / "generated_images").resolve()
+    if not generated_root.is_dir():
+        return frozenset()
+    return frozenset(
+        path.resolve() for path in generated_root.rglob("exec-*.png") if path.is_file()
+    )
+
+
 def _recover_generated_image_outputs(
     spec: CodexPhaseSpec,
     phase_log: Path,
@@ -2530,6 +2516,7 @@ def _recover_generated_image_outputs(
     hook_log: Path | None = None,
     session_id: str | None = None,
     generated_after_ns: int = 0,
+    generated_before: frozenset[Path] | None = None,
 ) -> list[tuple[Path, Path]]:
     if spec.phase not in {"image", "image_workers", "youtube_growth"}:
         return []
@@ -2567,30 +2554,56 @@ def _recover_generated_image_outputs(
     if not missing_pngs:
         return recovered
 
-    thread_id = _codex_thread_id_from_jsonl(phase_log) or session_id
-    if thread_id is None:
-        return recovered
-    session_dir = (generated_root / thread_id).resolve()
-    try:
-        session_dir.relative_to(generated_root)
-    except ValueError:
-        return recovered
-    if not session_dir.is_dir():
-        return recovered
-    candidates = sorted(
-        (
-            path
-            for path in session_dir.glob("exec-*.png")
-            if _is_png_file(path) and path.stat().st_mtime_ns >= generated_after_ns
-        ),
-        key=lambda path: (path.stat().st_mtime_ns, path.name),
+    isolated_single_output = (
+        spec.payload.get("artifact_isolation") == "single_expected_output_v1"
+        and len(spec.expected_outputs) == 1
     )
-    if len(candidates) < len(missing_pngs):
+    thread_id = _codex_thread_id_from_jsonl(phase_log) or session_id
+    if thread_id is not None and not isolated_single_output:
+        session_dir = (generated_root / thread_id).resolve()
+        try:
+            session_dir.relative_to(generated_root)
+        except ValueError:
+            session_dir = generated_root / "__invalid_session__"
+        if session_dir.is_dir():
+            candidates = sorted(
+                (
+                    path
+                    for path in session_dir.glob("exec-*.png")
+                    if _is_png_file(path) and path.stat().st_mtime_ns >= generated_after_ns
+                ),
+                key=lambda path: (path.stat().st_mtime_ns, path.name),
+            )
+            if len(candidates) >= len(missing_pngs):
+                selected = candidates[-len(missing_pngs) :]
+                for source, destination in zip(selected, list(missing_pngs), strict=True):
+                    if _copy_generated_png(source, destination, generated_root=generated_root):
+                        recovered.append((source, destination))
+                        missing_pngs.remove(destination)
+    if not missing_pngs:
         return recovered
-    selected = candidates[-len(missing_pngs) :]
-    for source, destination in zip(selected, missing_pngs, strict=True):
-        if _copy_generated_png(source, destination, generated_root=generated_root):
-            recovered.append((source, destination))
+
+    baseline = generated_before or frozenset()
+    if (
+        spec.phase in {"image", "image_workers"}
+        and isolated_single_output
+        and len(missing_pngs) == 1
+    ):
+        cross_session_candidates = sorted(
+            (
+                path.resolve()
+                for path in generated_root.rglob("exec-*.png")
+                if path.resolve() not in baseline
+                and _is_png_file(path)
+                and path.stat().st_mtime_ns >= generated_after_ns
+            ),
+            key=lambda path: (path.stat().st_mtime_ns, path.name),
+        )
+        if len(cross_session_candidates) == 1:
+            source = cross_session_candidates[0]
+            destination = missing_pngs[0]
+            if _copy_generated_png(source, destination, generated_root=generated_root):
+                recovered.append((source, destination))
     return recovered
 
 
@@ -2709,6 +2722,8 @@ def _execute_agent_checkpoint(
         env["PIPELINE_VIDEOS_IMAGE_ARTIFACT_MAP"] = str(artifact_map_path)
     started_at = utc_now()
     generated_after_ns = time.time_ns()
+    codex_home = Path(env.get("CODEX_HOME") or Path.home() / ".codex")
+    generated_before = _generated_png_snapshot(codex_home)
     master_log = store.log_path(job.job_id)
     with master_log.open("a", encoding="utf-8") as log:
         log.write(
@@ -2748,15 +2763,16 @@ def _execute_agent_checkpoint(
     recovered_outputs = _recover_generated_image_outputs(
         spec,
         phase_log,
-        codex_home=Path(env.get("CODEX_HOME") or Path.home() / ".codex"),
+        codex_home=codex_home,
         hook_log=hook_log,
         session_id=session_id,
         generated_after_ns=generated_after_ns,
+        generated_before=generated_before,
     )
     if recovered_outputs and output_message.is_file():
         with output_message.open("a", encoding="utf-8") as message:
             message.write(
-                "\nRecuperacao deterministica: o savedPath do imagegen foi "
+                "\nRecuperacao deterministica: o PNG do imagegen foi validado e "
                 "materializado no staging exigido.\n"
             )
     missing = [str(path) for path in spec.expected_outputs if not _is_nonempty_file(path)]
@@ -2802,11 +2818,13 @@ def _execute_agent_checkpoint(
     }
     recovery_event: RemoteRecoveryEvent | None = None
     if exit_code == 0 and (materialized_receipts or recovered_outputs):
-        action = (
-            "post_tool_saved_path_materialization_v1"
-            if materialized_receipts
-            else "artifact_receipt_recovery_v1"
-        )
+        receipts = _hook_image_receipts(hook_log)
+        if materialized_receipts:
+            action = "post_tool_saved_path_materialization_v1"
+        elif receipts:
+            action = "artifact_receipt_recovery_v1"
+        else:
+            action = "cross_session_single_artifact_recovery_v1"
         recovered_count = max(len(materialized_receipts), len(recovered_outputs))
         recovery_event = RemoteRecoveryEvent(
             recorded_at=finished_at,

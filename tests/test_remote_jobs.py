@@ -570,6 +570,67 @@ def test_image_checkpoint_completes_from_hook_receipt_after_agent_exit(
     assert completed.recovery_events[-1].action == "artifact_receipt_recovery_v1"
 
 
+def test_image_checkpoint_recovers_single_new_png_from_isolated_worker(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    session_id = "019f699a-9ff9-7092-983b-26e5e8937c16"
+    repo_root = tmp_path / "repo"
+    hook = repo_root / "scripts" / "remote_codex_hook.py"
+    hook.parent.mkdir(parents=True)
+    hook.write_text("", encoding="utf-8")
+    codex_home = tmp_path / ".codex"
+    old_image = codex_home / "generated_images" / "old-thread" / "exec-old.png"
+    old_image.parent.mkdir(parents=True)
+    old_image.write_bytes(b"\x89PNG\r\n\x1a\nold image")
+    generated = codex_home / "generated_images" / "worker-thread" / "exec-new.png"
+    destination = tmp_path / "project" / "images" / "staging" / "scene.png"
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request())
+
+    def fake_run(command, **kwargs):
+        kwargs["stdout"].write(
+            json.dumps({"type": "thread.started", "thread_id": session_id}) + "\n"
+        )
+        generated.parent.mkdir(parents=True)
+        generated.write_bytes(b"\x89PNG\r\n\x1a\nnew worker image")
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr("pipeline_videos.remote_jobs.shutil.which", lambda _: "codex")
+    monkeypatch.setattr("pipeline_videos.remote_jobs.subprocess.run", fake_run)
+    spec = CodexPhaseSpec(
+        phase="image_workers",
+        item_id="scene-001-v001",
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
+        payload={
+            "artifact_isolation": "single_expected_output_v1",
+            "image_artifacts": [
+                {
+                    "job_id": "scene-001-v001",
+                    "prompt_hash": sha256_value("prompt"),
+                    "staging_path": str(destination),
+                }
+            ],
+        },
+        expected_outputs=(destination,),
+    )
+
+    completed = _execute_agent_checkpoint(
+        job,
+        spec,
+        store,
+        repo_root=repo_root,
+        timeout_seconds=30,
+    )
+
+    assert destination.read_bytes() == generated.read_bytes()
+    assert completed.codex_runs[-1].exit_code == 0
+    assert completed.recovery_events[-1].outcome == "recovered"
+    assert completed.recovery_events[-1].action == ("cross_session_single_artifact_recovery_v1")
+
+
 def test_shorts_hook_type_confusion_is_normalized_without_another_codex_run() -> None:
     payload = {
         "strategy": {
@@ -951,7 +1012,7 @@ def test_revoked_youtube_oauth_is_not_retried(tmp_path) -> None:
     assert failed.next_retry_at is None
 
 
-def test_remote_image_phase_delegates_two_compact_workers_in_parallel(tmp_path) -> None:
+def test_remote_image_phases_isolate_one_artifact_per_worker_checkpoint(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Coragem"))
     layout = prepare_job_project(job, projects_root=tmp_path / "projects")
@@ -983,24 +1044,27 @@ def test_remote_image_phase_delegates_two_compact_workers_in_parallel(tmp_path) 
 
     specs = _image_phase_specs(layout)
 
-    assert len(specs) == 1
-    spec = specs[0]
-    assert spec.phase == "image_workers"
-    assert spec.model == "gpt-5.6-sol"
-    assert spec.reasoning_effort == "medium"
-    delegation = spec.payload["delegation"]
-    assert delegation["count"] == 2
-    assert delegation["max_parallel"] == 2
-    assert delegation["reasoning_effort"] == "low"
-    assert delegation["model"] == "gpt-5.6-sol"
-    assert len(spec.payload["allowed_inputs"]) == 2
-    assert len(spec.payload["image_artifacts"]) == 2
-    assert {artifact["prompt_hash"] for artifact in spec.payload["image_artifacts"]} == {
+    assert len(specs) == 2
+    assert all(spec.phase == "image_workers" for spec in specs)
+    assert all(spec.model == "gpt-5.6-sol" for spec in specs)
+    assert all(spec.reasoning_effort == "medium" for spec in specs)
+    assert all(spec.payload["artifact_isolation"] == "single_expected_output_v1" for spec in specs)
+    assert all(spec.payload["delegation"]["count"] == 1 for spec in specs)
+    assert all(spec.payload["delegation"]["max_parallel"] == 1 for spec in specs)
+    assert all(spec.payload["delegation"]["reasoning_effort"] == "low" for spec in specs)
+    assert all(spec.payload["delegation"]["model"] == "gpt-5.6-sol" for spec in specs)
+    assert all(len(spec.payload["allowed_inputs"]) == 1 for spec in specs)
+    assert all(len(spec.payload["image_artifacts"]) == 1 for spec in specs)
+    assert {spec.payload["image_artifacts"][0]["prompt_hash"] for spec in specs} == {
         sha256_value("PROMPT EXCLUSIVO UM"),
         sha256_value("PROMPT EXCLUSIVO DOIS"),
     }
-    first_job = json.loads(Path(spec.payload["allowed_inputs"][0]).read_text(encoding="utf-8"))
-    second_job = json.loads(Path(spec.payload["allowed_inputs"][1]).read_text(encoding="utf-8"))
+    first_job = json.loads(Path(specs[0].payload["allowed_inputs"][0]).read_text(encoding="utf-8"))
+    second_job = json.loads(Path(specs[1].payload["allowed_inputs"][0]).read_text(encoding="utf-8"))
+    assert first_job["artifact_isolation"] == "single_expected_output_v1"
+    assert second_job["artifact_isolation"] == "single_expected_output_v1"
+    assert len(first_job["jobs"]) == 1
+    assert len(second_job["jobs"]) == 1
     assert first_job["jobs"][0]["prompt"] == "PROMPT EXCLUSIVO UM"
     assert second_job["jobs"][0]["prompt"] == "PROMPT EXCLUSIVO DOIS"
 
@@ -1238,6 +1302,68 @@ def test_remote_image_recovery_uses_subagent_hook_receipt(tmp_path) -> None:
 
     assert recovered == [(generated, destination)]
     assert destination.read_bytes() == generated.read_bytes()
+
+
+def test_remote_image_recovery_finds_only_new_png_across_worker_sessions(tmp_path) -> None:
+    phase_log = tmp_path / "phase.jsonl"
+    phase_log.write_text("", encoding="utf-8")
+    codex_home = tmp_path / ".codex"
+    old_image = codex_home / "generated_images" / "old-worker-thread" / "exec-old-image.png"
+    old_image.parent.mkdir(parents=True)
+    old_image.write_bytes(b"\x89PNG\r\n\x1a\nold image")
+    generated_before = frozenset({old_image.resolve()})
+    generated = codex_home / "generated_images" / "new-worker-thread" / "exec-new-image.png"
+    generated.parent.mkdir(parents=True)
+    generated.write_bytes(b"\x89PNG\r\n\x1a\nnew image")
+    destination = tmp_path / "project" / "images" / "staging" / "scene-001.png"
+    spec = CodexPhaseSpec(
+        phase="image_workers",
+        item_id="scene-001-v001",
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
+        payload={"artifact_isolation": "single_expected_output_v1"},
+        expected_outputs=(destination,),
+    )
+
+    recovered = _recover_generated_image_outputs(
+        spec,
+        phase_log,
+        codex_home=codex_home,
+        generated_before=generated_before,
+    )
+
+    assert recovered == [(generated, destination)]
+    assert destination.read_bytes() == generated.read_bytes()
+
+
+def test_remote_cross_session_recovery_rejects_ambiguous_new_pngs(tmp_path) -> None:
+    phase_log = tmp_path / "phase.jsonl"
+    phase_log.write_text("", encoding="utf-8")
+    codex_home = tmp_path / ".codex"
+    generated_root = codex_home / "generated_images"
+    for worker_id in ("worker-one", "worker-two"):
+        generated = generated_root / worker_id / f"exec-{worker_id}.png"
+        generated.parent.mkdir(parents=True)
+        generated.write_bytes(b"\x89PNG\r\n\x1a\nnew image")
+    destination = tmp_path / "project" / "images" / "staging" / "scene-001.png"
+    spec = CodexPhaseSpec(
+        phase="image_workers",
+        item_id="scene-001-v001",
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
+        payload={"artifact_isolation": "single_expected_output_v1"},
+        expected_outputs=(destination,),
+    )
+
+    recovered = _recover_generated_image_outputs(
+        spec,
+        phase_log,
+        codex_home=codex_home,
+        generated_before=frozenset(),
+    )
+
+    assert recovered == []
+    assert not destination.exists()
 
 
 def test_remote_failure_keeps_moderation_as_root_cause(tmp_path) -> None:

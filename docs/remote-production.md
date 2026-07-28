@@ -72,11 +72,16 @@ Cada item pendente da fila vira um job isolado. Em `moderation_blocked`:
 
 O coordenador importa o lote uma única vez.
 
-O retorno do `imagegen` não depende de o worker executar manualmente a cópia. O hook
-`PostToolUse` recebe o `savedPath`, confere o hash do prompt contra o mapa imutável da fase, valida
-que o arquivo é um PNG `exec-*.png` dentro de `.codex/generated_images` e o copia atomicamente para
-o staging declarado. O recibo fica no log da fase. Se o hook for interrompido depois de registrar o
-recibo, o executor repete apenas a cópia; ele não gera outra imagem.
+Na VPS, cada cena usa um checkpoint com exatamente um worker e um output esperado. Essa isolação
+permite ao executor identificar sem ambiguidade o único PNG novo criado durante a fase, mesmo que o
+worker rode em outra sessão e o hook do coordenador não receba o retorno do `imagegen`.
+
+O hook `PostToolUse` continua como caminho rápido: recebe o `savedPath`, confere o hash do prompt
+contra o mapa imutável da fase, valida que o arquivo é um PNG `exec-*.png` dentro de
+`.codex/generated_images` e o copia atomicamente. Se não houver recibo, o executor compara o
+snapshot anterior e posterior de todas as sessões de imagem. A recuperação cross-session só ocorre
+quando existe exatamente um PNG novo e um destino; zero ou mais de um candidato bloqueiam a fase
+sem associação por ordem, nome ou suposição.
 
 Uma fase de imagens é considerada concluída quando todos os outputs declarados são PNGs válidos e a
 identidade da sessão persistente foi confirmada, mesmo que o processo do agente encerre com erro
@@ -99,9 +104,10 @@ mantêm o teto global de sete recuperações. Ao atingir qualquer limite, o job 
 emite um evento com `agent_attention_required=true`; ele não permanece em repetição infinita.
 
 O aprendizado automático é deliberadamente limitado a políticas seguras já implementadas:
-reutilizar recibos, preservar artefatos, retomar checkpoints e evitar repetição idêntica. Uma causa
-nova não modifica o próprio código do servidor; ela fica auditada para que uma correção revisada
-seja testada e implantada antes de virar política automática.
+reutilizar recibos, recuperar o único artefato novo cross-session, preservar arquivos, retomar
+checkpoints e evitar repetição idêntica. Uma causa nova não modifica o próprio código do servidor;
+ela fica auditada para que uma correção revisada seja testada e implantada antes de virar política
+automática.
 
 ## Medição de uso do Codex
 
