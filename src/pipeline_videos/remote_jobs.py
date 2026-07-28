@@ -1832,9 +1832,7 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
         image_artifacts.extend(
             {
                 "job_id": str(item["job_id"]),
-                "prompt_hash": str(
-                    item.get("prompt_hash") or sha256_value(str(item["prompt"]))
-                ),
+                "prompt_hash": str(item.get("prompt_hash") or sha256_value(str(item["prompt"]))),
                 "staging_path": str(output),
             }
             for item, output in zip(items, outputs, strict=True)
@@ -2496,9 +2494,7 @@ def _copy_generated_png(
     if _is_png_file(destination):
         return True
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_name(
-        f".{destination.name}.{os.getpid()}.{uuid4().hex[:8]}.tmp"
-    )
+    temporary = destination.with_name(f".{destination.name}.{os.getpid()}.{uuid4().hex[:8]}.tmp")
     try:
         shutil.copyfile(resolved_source, temporary)
         if not _is_png_file(temporary):
@@ -2611,9 +2607,7 @@ def _record_recovery_learning(
 ) -> None:
     path = store.root / "recovery-learnings.json"
     payload: dict[str, Any] = (
-        read_json(path)
-        if path.is_file()
-        else {"schema_version": "1.0", "fingerprints": {}}
+        read_json(path) if path.is_file() else {"schema_version": "1.0", "fingerprints": {}}
     )
     fingerprints = payload.setdefault("fingerprints", {})
     entry = fingerprints.setdefault(
@@ -2770,9 +2764,7 @@ def _execute_agent_checkpoint(
         observed_session_id is None or observed_session_id == session_id
     )
     completed_image_phase = (
-        spec.phase in {"image", "image_workers"}
-        and not missing
-        and session_identity_valid
+        spec.phase in {"image", "image_workers"} and not missing and session_identity_valid
     )
     if exit_code != 0 and completed_image_phase:
         exit_code = 0
@@ -3599,26 +3591,24 @@ def _failure_fingerprint(job: RemoteVideoJob, exc: Exception) -> tuple[str, str 
     if phase is None and job.codex_runs:
         latest_run = job.codex_runs[-1]
         phase = (
-            f"{latest_run.phase}:{latest_run.item_id}"
-            if latest_run.item_id
-            else latest_run.phase
+            f"{latest_run.phase}:{latest_run.item_id}" if latest_run.item_id else latest_run.phase
         )
     message = " ".join((str(exc).strip() or exc.__class__.__name__).casefold().split())
-    if phase and phase.split(":", 1)[0] in {"image", "image_workers"} and (
-        "saídas obrigatórias ausentes" in message
-        or "saÃ­das obrigatÃ³rias ausentes" in message
-        or "images/staging" in message
+    if (
+        phase
+        and phase.split(":", 1)[0] in {"image", "image_workers"}
+        and (
+            "saídas obrigatórias ausentes" in message
+            or "saÃ­das obrigatÃ³rias ausentes" in message
+            or "images/staging" in message
+        )
     ):
         return "image_artifact_materialization_missing_v1", phase
     if "invalid_grant" in message or (
         "oauth" in message and ("revog" in message or "expir" in message)
     ):
         return "youtube_oauth_invalid_grant_v1", phase
-    if "uuid" in message and (
-        "sessão" in message
-        or "sessÃ£o" in message
-        or "session" in message
-    ):
+    if "uuid" in message and ("sessão" in message or "sessÃ£o" in message or "session" in message):
         return "codex_session_identity_invalid_v1", phase
     normalized = re.sub(r"(?:[a-z]:)?[/\\][^\s,;]+", "<path>", message)
     normalized = re.sub(r"\b\d+\b", "<n>", normalized)
@@ -3660,10 +3650,7 @@ def _schedule_automatic_recovery(
         else 1
     )
     same_failure_limit = _same_failure_limit(fingerprint)
-    terminal = (
-        recovery_count >= MAX_AUTOMATIC_RECOVERIES
-        or consecutive_count >= same_failure_limit
-    )
+    terminal = recovery_count >= MAX_AUTOMATIC_RECOVERIES or consecutive_count >= same_failure_limit
     recorded_at = utc_now()
     if terminal:
         event = RemoteRecoveryEvent(
@@ -3793,10 +3780,7 @@ def job_summary(job: RemoteVideoJob) -> dict[str, Any]:
         "recovery": {
             "last_failure_fingerprint": job.last_failure_fingerprint,
             "consecutive_failure_count": job.consecutive_failure_count,
-            "events": [
-                event.model_dump(mode="json")
-                for event in job.recovery_events
-            ],
+            "events": [event.model_dump(mode="json") for event in job.recovery_events],
         },
         "terminal": job.status in TERMINAL_JOB_STATUSES,
         "agent_attention_required": job.status == "failed",

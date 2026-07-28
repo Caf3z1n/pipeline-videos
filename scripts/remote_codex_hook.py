@@ -162,9 +162,7 @@ def _materialize_imagegen_artifact(payload: dict[str, Any]) -> dict[str, Any]:
         turn_suffix = hashlib.sha256(
             str(payload.get("turn_id") or "hook").encode("utf-8")
         ).hexdigest()[:8]
-        temporary = destination.with_name(
-            f".{destination.name}.{os.getpid()}.{turn_suffix}.tmp"
-        )
+        temporary = destination.with_name(f".{destination.name}.{os.getpid()}.{turn_suffix}.tmp")
         try:
             shutil.copyfile(source, temporary)
             if not _is_png(temporary):

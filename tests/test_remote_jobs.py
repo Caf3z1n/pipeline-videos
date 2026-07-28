@@ -509,12 +509,7 @@ def test_image_checkpoint_completes_from_hook_receipt_after_agent_exit(
     hook.parent.mkdir(parents=True)
     hook.write_text("", encoding="utf-8")
     codex_home = tmp_path / ".codex"
-    generated = (
-        codex_home
-        / "generated_images"
-        / "isolated-worker-thread"
-        / "exec-image.png"
-    )
+    generated = codex_home / "generated_images" / "isolated-worker-thread" / "exec-image.png"
     generated.parent.mkdir(parents=True)
     generated.write_bytes(b"\x89PNG\r\n\x1a\nworker image")
     destination = tmp_path / "project" / "images" / "staging" / "scene.png"
@@ -1000,9 +995,7 @@ def test_remote_image_phase_delegates_two_compact_workers_in_parallel(tmp_path) 
     assert delegation["model"] == "gpt-5.6-sol"
     assert len(spec.payload["allowed_inputs"]) == 2
     assert len(spec.payload["image_artifacts"]) == 2
-    assert {
-        artifact["prompt_hash"] for artifact in spec.payload["image_artifacts"]
-    } == {
+    assert {artifact["prompt_hash"] for artifact in spec.payload["image_artifacts"]} == {
         sha256_value("PROMPT EXCLUSIVO UM"),
         sha256_value("PROMPT EXCLUSIVO DOIS"),
     }
@@ -1201,11 +1194,7 @@ def test_remote_image_recovery_uses_subagent_hook_receipt(tmp_path) -> None:
         encoding="utf-8",
     )
     generated = (
-        tmp_path
-        / ".codex"
-        / "generated_images"
-        / "different-worker-thread"
-        / "exec-image.png"
+        tmp_path / ".codex" / "generated_images" / "different-worker-thread" / "exec-image.png"
     )
     generated.parent.mkdir(parents=True)
     generated.write_bytes(b"\x89PNG\r\n\x1a\nworker image")
