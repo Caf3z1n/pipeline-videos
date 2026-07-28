@@ -72,9 +72,11 @@ Cada item pendente da fila vira um job isolado. Em `moderation_blocked`:
 
 O coordenador importa o lote uma única vez.
 
-Na VPS, cada cena usa um checkpoint com exatamente um worker e um output esperado. Essa isolação
-permite ao executor identificar sem ambiguidade o único PNG novo criado durante a fase, mesmo que o
-worker rode em outra sessão e o hook do coordenador não receba o retorno do `imagegen`.
+Na VPS, cada cena usa um checkpoint com exatamente um worker e um output esperado. O executor inicia
+esse `image_worker` como uma sessão Codex isolada e efêmera, sem retomar nem substituir a sessão
+persistente do coordenador. O hook e o cache de imagens pertencem diretamente ao processo da VPS,
+evitando a fronteira de filesystem dos subagentes internos. A isolação também permite identificar
+sem ambiguidade o único PNG novo criado durante a fase.
 
 O hook `PostToolUse` continua como caminho rápido: recebe o `savedPath`, confere o hash do prompt
 contra o mapa imutável da fase, valida que o arquivo é um PNG `exec-*.png` dentro de

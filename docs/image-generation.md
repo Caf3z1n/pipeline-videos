@@ -84,9 +84,10 @@ e faz uma cópia atômica. Se ele falhar, preserve e reporte o `savedPath`; não
 corrigir uma falha de cópia. O coordenador importa o lote uma única vez com hashes e preserva
 versões anteriores. Imagens aprovadas nunca são sobrescritas ou regeneradas.
 
-Na produção remota, cada checkpoint contém somente um job de imagem e um staging esperado. O hook
-`PostToolUse` tenta o handoff imediatamente pelo `savedPath`. Como fallback independente do hook, o
-executor tira snapshots globais de `.codex/generated_images` e aceita somente o caso inequívoco de
-um único PNG novo para o único destino da fase. O arquivo é validado e copiado atomicamente; zero ou
-mais de um candidato bloqueiam a recuperação. Assim, chamadas feitas por workers em sessões
-isoladas não dependem de o hook do coordenador ser herdado e não são associadas por ordem.
+Na produção remota, cada checkpoint contém somente um job de imagem e um staging esperado. O
+`image_worker` roda como processo Codex isolado, com hook e cache montados diretamente na VPS; ele
+não é um subagente interno do coordenador. O hook `PostToolUse` tenta o handoff imediatamente pelo
+`savedPath`. Como fallback independente do hook, o executor tira snapshots globais de
+`.codex/generated_images` e aceita somente o caso inequívoco de um único PNG novo para o único
+destino da fase. O arquivo é validado e copiado atomicamente; zero ou mais de um candidato bloqueiam
+a recuperação e nenhuma imagem é associada por ordem.

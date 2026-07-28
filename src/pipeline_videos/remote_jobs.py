@@ -148,6 +148,7 @@ class CodexPhaseSpec:
     reasoning_effort: RemoteReasoningEffort
     payload: dict[str, Any]
     expected_outputs: tuple[Path, ...]
+    session_scope: Literal["coordinator", "isolated_worker"] = "coordinator"
 
     def __post_init__(self) -> None:
         if self.model != DEFAULT_REMOTE_CODEX_MODEL:
@@ -725,7 +726,22 @@ def _project_file(layout: ProjectLayout, value: str) -> Path:
     return resolved
 
 
-def codex_checkpoint_prompt(request_path: Path) -> str:
+def codex_checkpoint_prompt(
+    request_path: Path,
+    *,
+    session_scope: Literal["coordinator", "isolated_worker"] = "coordinator",
+) -> str:
+    if session_scope == "isolated_worker":
+        return f"""Execute como o image_worker isolado descrito em `{request_path}`.
+
+Leia somente o JSON do checkpoint e o arquivo listado em allowed_inputs. Não leia o histórico,
+AGENTS.md, README.md, project.json ou outros manifestos. Não crie subagentes. O checkpoint contém
+exatamente um job e um required_output. Use uma chamada do imagegen por tentativa e siga
+generation_retry_policy somente em moderation_blocked. Após sucesso, use exclusivamente savedPath
+e execute materialize_command. Nunca use result, base64, revisedPrompt ou output_hint como caminho.
+Não importe, aprove, publique nem altere estado compartilhado. Responda somente com job_id,
+savedPath e o estado do required_output.
+"""
     return f"""Continue a produção deste vídeo pelo checkpoint descrito em `{request_path}`.
 
 Na primeira execução, leia uma única vez AGENTS.md, README.md, docs/optimized-production.md e o
@@ -742,15 +758,17 @@ Responda de forma breve com o estado do checkpoint e as saídas produzidas.
 
 
 def _phase_payload(job: RemoteVideoJob, spec: CodexPhaseSpec) -> dict[str, Any]:
+    isolated_worker = spec.session_scope == "isolated_worker"
     return {
         "schema_version": "1.0",
         "job_id": job.job_id,
         "phase": spec.phase,
         "item_id": spec.item_id,
         "contract": {
-            "persistent_coordinator": True,
+            "persistent_coordinator": not isolated_worker,
+            "session_scope": spec.session_scope,
             "shared_state_writer": "deterministic_remote_executor",
-            "may_create_subagents": True,
+            "may_create_subagents": not isolated_worker,
             "may_read_secrets": False,
             "may_import_or_approve": False,
             "may_upload_publish_or_schedule": False,
@@ -1811,12 +1829,6 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
                 "jobs": [item],
             },
         )
-        assignment = {
-            "role": "image_worker",
-            "worker_id": worker_id,
-            "job_path": str(job_path),
-            "required_outputs": [str(output)],
-        }
         specs.append(
             CodexPhaseSpec(
                 phase="image_workers",
@@ -1825,6 +1837,7 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
                 reasoning_effort=DEFAULT_REMOTE_REASONING_EFFORT,
                 payload={
                     "artifact_isolation": "single_expected_output_v1",
+                    "execution_role": "image_worker",
                     "image_artifacts": [
                         {
                             "job_id": job_id,
@@ -1833,25 +1846,17 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
                         }
                     ],
                     "delegation": {
-                        "required": True,
-                        "role": "image_worker",
-                        "count": 1,
-                        "max_parallel": 1,
-                        "fork_turns": "none",
-                        "reasoning_effort": "low",
-                        "model": DEFAULT_REMOTE_CODEX_MODEL,
-                        "assignments": [assignment],
+                        "required": False,
                     },
                     "allowed_inputs": [str(job_path)],
                     "task": {
-                        "kind": "delegate_single_image_worker",
+                        "kind": "produce_single_image",
                         "tool": "$imagegen",
                         "visual_standard": queue.get("visual_standard", {}),
                         "generation_retry_policy": queue.get("generation_retry_policy", {}),
                         "instructions": [
-                            "Crie exatamente um image_worker para o único assignment.",
                             (
-                                "O trabalhador deve ler somente seu job_path e gravar o único "
+                                "Leia somente o job_path permitido e grave o único "
                                 "staging_path declarado."
                             ),
                             (
@@ -1867,6 +1872,7 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
                     },
                 },
                 expected_outputs=(output,),
+                session_scope="isolated_worker",
             )
         )
     return specs
@@ -2705,13 +2711,15 @@ def _execute_agent_checkpoint(
 
     phase_label = f"{spec.phase}:{spec.item_id}" if spec.item_id else spec.phase
     latest = store.transition(latest, "running", current_phase=phase_label)
+    isolated_worker = spec.session_scope == "isolated_worker"
+    resume_session_id = None if isolated_worker else latest.codex_session_id
     command = _codex_agent_command(
         codex_binary=codex_binary,
         spec=spec,
         repo_root=repo_root.resolve(),
         output_message=output_message,
         hook_script=hook_script,
-        session_id=latest.codex_session_id,
+        session_id=resume_session_id,
     )
     env = os.environ.copy()
     env["PIPELINE_VIDEOS_CODEX_HOOK_LOG"] = str(hook_log)
@@ -2726,7 +2734,7 @@ def _execute_agent_checkpoint(
     with master_log.open("a", encoding="utf-8") as log:
         log.write(
             f"[{started_at}] codex_checkpoint_start phase={phase_label} "
-            f"session={latest.codex_session_id or 'new'} "
+            f"session={resume_session_id or 'new'} scope={spec.session_scope} "
             f"model={spec.model} reasoning={spec.reasoning_effort}\n"
         )
     exit_code = 0
@@ -2735,7 +2743,10 @@ def _execute_agent_checkpoint(
         with phase_log.open("w", encoding="utf-8") as log:
             completed = subprocess.run(
                 command,
-                input=codex_checkpoint_prompt(request_path),
+                input=codex_checkpoint_prompt(
+                    request_path,
+                    session_scope=spec.session_scope,
+                ),
                 text=True,
                 stdout=log,
                 stderr=subprocess.STDOUT,
@@ -2751,19 +2762,27 @@ def _execute_agent_checkpoint(
         error = f"Fase {phase_label} excedeu {timeout_seconds} segundos."
     recovered_outputs: list[tuple[Path, Path]] = []
     observed_session_id = _codex_thread_id_from_jsonl(phase_log)
-    session_id = latest.codex_session_id or observed_session_id
-    if session_id is None:
-        exit_code = 2
-        error = "O Codex não informou o UUID da sessão persistente."
-    elif observed_session_id is not None and observed_session_id != session_id:
-        exit_code = 2
-        error = "A retomada do Codex respondeu com um UUID de sessão diferente do job."
+    if isolated_worker:
+        run_session_id = observed_session_id
+        persistent_session_id = latest.codex_session_id
+        if run_session_id is None:
+            exit_code = 2
+            error = "O image_worker isolado não informou o UUID da própria sessão."
+    else:
+        run_session_id = latest.codex_session_id or observed_session_id
+        persistent_session_id = run_session_id
+        if run_session_id is None:
+            exit_code = 2
+            error = "O Codex não informou o UUID da sessão persistente."
+        elif observed_session_id is not None and observed_session_id != run_session_id:
+            exit_code = 2
+            error = "A retomada do Codex respondeu com um UUID de sessão diferente do job."
     recovered_outputs = _recover_generated_image_outputs(
         spec,
         phase_log,
         codex_home=codex_home,
         hook_log=hook_log,
-        session_id=session_id,
+        session_id=run_session_id,
         generated_after_ns=generated_after_ns,
         generated_before=generated_before,
     )
@@ -2774,8 +2793,8 @@ def _execute_agent_checkpoint(
                 "materializado no staging exigido.\n"
             )
     missing = [str(path) for path in spec.expected_outputs if not _is_nonempty_file(path)]
-    session_identity_valid = session_id is not None and (
-        observed_session_id is None or observed_session_id == session_id
+    session_identity_valid = run_session_id is not None and (
+        observed_session_id is None or observed_session_id == run_session_id
     )
     completed_image_phase = (
         spec.phase in {"image", "image_workers"} and not missing and session_identity_valid
@@ -2835,7 +2854,7 @@ def _execute_agent_checkpoint(
     current, _ = store.find(job.job_id)
     transition_updates: dict[str, Any] = {
         "current_phase": None,
-        "codex_session_id": session_id,
+        "codex_session_id": persistent_session_id,
         "codex_exit_code": exit_code,
         "codex_runs": [*current.codex_runs, record],
     }
@@ -2863,7 +2882,7 @@ def _execute_agent_checkpoint(
     with master_log.open("a", encoding="utf-8") as log:
         log.write(
             f"[{finished_at}] codex_checkpoint_exit phase={phase_label} code={exit_code} "
-            f"session={session_id or 'missing'} "
+            f"session={run_session_id or 'missing'} scope={spec.session_scope} "
             f"input={record.input_tokens} cached={record.cached_input_tokens} "
             f"output={record.output_tokens}\n"
         )

@@ -224,6 +224,13 @@ def test_prepare_job_project_enables_local_specialists_without_human_approval(tm
     assert "mesma sessão" in prompt
     assert "AGENTS.md" in prompt
     assert "crie exatamente os subagentes" in prompt.casefold()
+    worker_prompt = codex_checkpoint_prompt(
+        Path("/tmp/image-worker.json"),
+        session_scope="isolated_worker",
+    )
+    assert "image_worker isolado" in worker_prompt
+    assert "Não crie subagentes" in worker_prompt
+    assert "Leia somente o JSON do checkpoint" in worker_prompt
 
 
 def test_remote_duration_is_exact_only_when_explicitly_requested(tmp_path) -> None:
@@ -515,8 +522,13 @@ def test_image_checkpoint_completes_from_hook_receipt_after_agent_exit(
     destination = tmp_path / "project" / "images" / "staging" / "scene.png"
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request())
+    coordinator_session_id = "019f699a-1111-7092-983b-26e5e8937c16"
+    job = job.model_copy(update={"codex_session_id": coordinator_session_id})
+    store.save(job)
+    calls: list[list[str]] = []
 
     def fake_run(command, **kwargs):
+        calls.append(command)
         kwargs["stdout"].write(
             json.dumps({"type": "thread.started", "thread_id": session_id}) + "\n"
         )
@@ -554,6 +566,7 @@ def test_image_checkpoint_completes_from_hook_receipt_after_agent_exit(
             ]
         },
         expected_outputs=(destination,),
+        session_scope="isolated_worker",
     )
 
     completed = _execute_agent_checkpoint(
@@ -566,6 +579,8 @@ def test_image_checkpoint_completes_from_hook_receipt_after_agent_exit(
 
     assert destination.read_bytes() == generated.read_bytes()
     assert completed.codex_runs[-1].exit_code == 0
+    assert completed.codex_session_id == coordinator_session_id
+    assert "resume" not in calls[0]
     assert completed.recovery_events[-1].outcome == "recovered"
     assert completed.recovery_events[-1].action == "artifact_receipt_recovery_v1"
 
@@ -615,6 +630,7 @@ def test_image_checkpoint_recovers_single_new_png_from_isolated_worker(
             ],
         },
         expected_outputs=(destination,),
+        session_scope="isolated_worker",
     )
 
     completed = _execute_agent_checkpoint(
@@ -627,6 +643,7 @@ def test_image_checkpoint_recovers_single_new_png_from_isolated_worker(
 
     assert destination.read_bytes() == generated.read_bytes()
     assert completed.codex_runs[-1].exit_code == 0
+    assert completed.codex_session_id is None
     assert completed.recovery_events[-1].outcome == "recovered"
     assert completed.recovery_events[-1].action == ("cross_session_single_artifact_recovery_v1")
 
@@ -1048,11 +1065,10 @@ def test_remote_image_phases_isolate_one_artifact_per_worker_checkpoint(tmp_path
     assert all(spec.phase == "image_workers" for spec in specs)
     assert all(spec.model == "gpt-5.6-sol" for spec in specs)
     assert all(spec.reasoning_effort == "medium" for spec in specs)
+    assert all(spec.session_scope == "isolated_worker" for spec in specs)
     assert all(spec.payload["artifact_isolation"] == "single_expected_output_v1" for spec in specs)
-    assert all(spec.payload["delegation"]["count"] == 1 for spec in specs)
-    assert all(spec.payload["delegation"]["max_parallel"] == 1 for spec in specs)
-    assert all(spec.payload["delegation"]["reasoning_effort"] == "low" for spec in specs)
-    assert all(spec.payload["delegation"]["model"] == "gpt-5.6-sol" for spec in specs)
+    assert all(spec.payload["execution_role"] == "image_worker" for spec in specs)
+    assert all(spec.payload["delegation"] == {"required": False} for spec in specs)
     assert all(len(spec.payload["allowed_inputs"]) == 1 for spec in specs)
     assert all(len(spec.payload["image_artifacts"]) == 1 for spec in specs)
     assert {spec.payload["image_artifacts"][0]["prompt_hash"] for spec in specs} == {
