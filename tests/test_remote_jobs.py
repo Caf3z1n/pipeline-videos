@@ -1329,6 +1329,7 @@ def test_remote_image_recovery_finds_only_new_png_across_worker_sessions(tmp_pat
         spec,
         phase_log,
         codex_home=codex_home,
+        generated_after_ns=10**30,
         generated_before=generated_before,
     )
 

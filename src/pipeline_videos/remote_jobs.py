@@ -2593,9 +2593,7 @@ def _recover_generated_image_outputs(
             (
                 path.resolve()
                 for path in generated_root.rglob("exec-*.png")
-                if path.resolve() not in baseline
-                and _is_png_file(path)
-                and path.stat().st_mtime_ns >= generated_after_ns
+                if path.resolve() not in baseline and _is_png_file(path)
             ),
             key=lambda path: (path.stat().st_mtime_ns, path.name),
         )
