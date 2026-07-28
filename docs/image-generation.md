@@ -83,3 +83,9 @@ O comando aceita somente PNG íntegro dentro de `.codex/generated_images`, deriv
 e faz uma cópia atômica. Se ele falhar, preserve e reporte o `savedPath`; não regenere a imagem para
 corrigir uma falha de cópia. O coordenador importa o lote uma única vez com hashes e preserva
 versões anteriores. Imagens aprovadas nunca são sobrescritas ou regeneradas.
+
+Na produção remota, o hook `PostToolUse` executa esse handoff automaticamente a partir do
+`savedPath` retornado pelo próprio `imagegen`. O hash do prompt identifica de forma inequívoca o job
+e o staging autorizado, inclusive quando a chamada foi feita em uma sessão isolada de worker. Um
+recibo persistido permite repetir somente a cópia caso o hook seja interrompido; a imagem não é
+regenerada para reparar materialização.

@@ -54,6 +54,7 @@ from pipeline_videos.remote_jobs import (
     work_once,
 )
 from pipeline_videos.storage import read_json, read_model, write_json
+from pipeline_videos.utils import sha256_value
 
 
 def _request(**updates):
@@ -155,6 +156,9 @@ def test_store_supports_enqueue_cancel_retry_and_due_window(tmp_path) -> None:
     retried = store.retry(failed.job_id)
     assert retried.status == "queued"
     assert retried.error is None
+    assert retried.automatic_recovery_count == 0
+    assert retried.last_failure_fingerprint is None
+    assert retried.consecutive_failure_count == 0
     assert not store.terminal_event_path(second.job_id).exists()
 
 
@@ -494,6 +498,83 @@ def test_agent_checkpoints_persist_and_resume_the_same_session(tmp_path, monkeyp
     assert session_id in calls[1]
 
 
+def test_image_checkpoint_completes_from_hook_receipt_after_agent_exit(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    session_id = "019f699a-9ff9-7092-983b-26e5e8937c16"
+    prompt = "Cena concluída por subagente"
+    repo_root = tmp_path / "repo"
+    hook = repo_root / "scripts" / "remote_codex_hook.py"
+    hook.parent.mkdir(parents=True)
+    hook.write_text("", encoding="utf-8")
+    codex_home = tmp_path / ".codex"
+    generated = (
+        codex_home
+        / "generated_images"
+        / "isolated-worker-thread"
+        / "exec-image.png"
+    )
+    generated.parent.mkdir(parents=True)
+    generated.write_bytes(b"\x89PNG\r\n\x1a\nworker image")
+    destination = tmp_path / "project" / "images" / "staging" / "scene.png"
+    store = RemoteJobStore(tmp_path / "jobs")
+    job = store.enqueue(_request())
+
+    def fake_run(command, **kwargs):
+        kwargs["stdout"].write(
+            json.dumps({"type": "thread.started", "thread_id": session_id}) + "\n"
+        )
+        hook_log = Path(kwargs["env"]["PIPELINE_VIDEOS_CODEX_HOOK_LOG"])
+        hook_log.write_text(
+            json.dumps(
+                {
+                    "event": "PostToolUse",
+                    "image_job_id": "scene-001-v001",
+                    "image_prompt_hash": sha256_value(prompt),
+                    "image_saved_path": str(generated),
+                    "artifact_materialized": False,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr("pipeline_videos.remote_jobs.shutil.which", lambda _: "codex")
+    monkeypatch.setattr("pipeline_videos.remote_jobs.subprocess.run", fake_run)
+    spec = CodexPhaseSpec(
+        phase="image_workers",
+        item_id=None,
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
+        payload={
+            "image_artifacts": [
+                {
+                    "job_id": "scene-001-v001",
+                    "prompt_hash": sha256_value(prompt),
+                    "staging_path": str(destination),
+                }
+            ]
+        },
+        expected_outputs=(destination,),
+    )
+
+    completed = _execute_agent_checkpoint(
+        job,
+        spec,
+        store,
+        repo_root=repo_root,
+        timeout_seconds=30,
+    )
+
+    assert destination.read_bytes() == generated.read_bytes()
+    assert completed.codex_runs[-1].exit_code == 0
+    assert completed.recovery_events[-1].outcome == "recovered"
+    assert completed.recovery_events[-1].action == "artifact_receipt_recovery_v1"
+
+
 def test_shorts_hook_type_confusion_is_normalized_without_another_codex_run() -> None:
     payload = {
         "strategy": {
@@ -817,6 +898,64 @@ def test_automatic_recovery_stops_and_emits_attention_event_at_limit(tmp_path) -
     assert read_json(store.terminal_event_path(failed.job_id))["agent_attention_required"] is True
 
 
+def test_identical_image_handoff_failure_stops_after_two_occurrences(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    queued = store.enqueue(_request())
+    codex_run = RemoteCodexRun(
+        phase="image_workers",
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
+        started_at="2026-07-28T07:00:00Z",
+        finished_at="2026-07-28T07:01:00Z",
+        exit_code=2,
+        error="Saídas obrigatórias ausentes: images/staging/scene.png",
+    )
+    running = store.transition(queued, "running", codex_runs=[codex_run])
+
+    first = _schedule_automatic_recovery(
+        store,
+        running,
+        RuntimeError("Saídas obrigatórias ausentes: images/staging/scene.png"),
+        status="queued",
+    )
+    failed = _schedule_automatic_recovery(
+        store,
+        first,
+        RuntimeError("Saídas obrigatórias ausentes: images/staging/scene.png"),
+        status="queued",
+    )
+
+    assert first.status == "queued"
+    assert first.last_failure_fingerprint == "image_artifact_materialization_missing_v1"
+    assert first.consecutive_failure_count == 1
+    assert failed.status == "failed"
+    assert failed.automatic_recovery_count == 2
+    assert failed.consecutive_failure_count == 2
+    assert failed.recovery_events[-1].action == "stop_repeated_identical_failure_v1"
+    learnings = read_json(store.root / "recovery-learnings.json")
+    learned = learnings["fingerprints"]["image_artifact_materialization_missing_v1"]
+    assert learned["occurrences"] == 2
+    assert learned["terminal_failures"] == 1
+    assert learned["affected_jobs"] == [failed.job_id]
+
+
+def test_revoked_youtube_oauth_is_not_retried(tmp_path) -> None:
+    store = RemoteJobStore(tmp_path / "jobs")
+    queued = store.enqueue(_request())
+
+    failed = _schedule_automatic_recovery(
+        store,
+        queued,
+        RuntimeError("invalid_grant: OAuth token expired or revoked"),
+        status="queued",
+    )
+
+    assert failed.status == "failed"
+    assert failed.automatic_recovery_count == 1
+    assert failed.last_failure_fingerprint == "youtube_oauth_invalid_grant_v1"
+    assert failed.next_retry_at is None
+
+
 def test_remote_image_phase_delegates_two_compact_workers_in_parallel(tmp_path) -> None:
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request(topic="Coragem"))
@@ -860,6 +999,13 @@ def test_remote_image_phase_delegates_two_compact_workers_in_parallel(tmp_path) 
     assert delegation["reasoning_effort"] == "low"
     assert delegation["model"] == "gpt-5.6-sol"
     assert len(spec.payload["allowed_inputs"]) == 2
+    assert len(spec.payload["image_artifacts"]) == 2
+    assert {
+        artifact["prompt_hash"] for artifact in spec.payload["image_artifacts"]
+    } == {
+        sha256_value("PROMPT EXCLUSIVO UM"),
+        sha256_value("PROMPT EXCLUSIVO DOIS"),
+    }
     first_job = json.loads(Path(spec.payload["allowed_inputs"][0]).read_text(encoding="utf-8"))
     second_job = json.loads(Path(spec.payload["allowed_inputs"][1]).read_text(encoding="utf-8"))
     assert first_job["jobs"][0]["prompt"] == "PROMPT EXCLUSIVO UM"
@@ -1044,6 +1190,65 @@ def test_remote_image_recovery_rejects_non_png_cache_artifact(tmp_path) -> None:
 
     assert recovered == []
     assert not destination.exists()
+
+
+def test_remote_image_recovery_uses_subagent_hook_receipt(tmp_path) -> None:
+    prompt = "Prompt produzido por um trabalhador isolado"
+    thread_id = "019f699a-9ff9-7092-983b-26e5e8937c16"
+    phase_log = tmp_path / "phase.jsonl"
+    phase_log.write_text(
+        json.dumps({"type": "thread.started", "thread_id": thread_id}) + "\n",
+        encoding="utf-8",
+    )
+    generated = (
+        tmp_path
+        / ".codex"
+        / "generated_images"
+        / "different-worker-thread"
+        / "exec-image.png"
+    )
+    generated.parent.mkdir(parents=True)
+    generated.write_bytes(b"\x89PNG\r\n\x1a\nworker image")
+    destination = tmp_path / "project" / "images" / "staging" / "scene-001.png"
+    hook_log = tmp_path / "hook.jsonl"
+    hook_log.write_text(
+        json.dumps(
+            {
+                "event": "PostToolUse",
+                "image_prompt_hash": sha256_value(prompt),
+                "image_saved_path": str(generated),
+                "artifact_materialized": False,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    spec = CodexPhaseSpec(
+        phase="image_workers",
+        item_id=None,
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
+        payload={
+            "image_artifacts": [
+                {
+                    "job_id": "scene-001-v001",
+                    "prompt_hash": sha256_value(prompt),
+                    "staging_path": str(destination),
+                }
+            ]
+        },
+        expected_outputs=(destination,),
+    )
+
+    recovered = _recover_generated_image_outputs(
+        spec,
+        phase_log,
+        codex_home=tmp_path / ".codex",
+        hook_log=hook_log,
+    )
+
+    assert recovered == [(generated, destination)]
+    assert destination.read_bytes() == generated.read_bytes()
 
 
 def test_remote_failure_keeps_moderation_as_root_cause(tmp_path) -> None:

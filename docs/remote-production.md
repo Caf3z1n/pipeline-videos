@@ -72,6 +72,16 @@ Cada item pendente da fila vira um job isolado. Em `moderation_blocked`:
 
 O coordenador importa o lote uma única vez.
 
+O retorno do `imagegen` não depende de o worker executar manualmente a cópia. O hook
+`PostToolUse` recebe o `savedPath`, confere o hash do prompt contra o mapa imutável da fase, valida
+que o arquivo é um PNG `exec-*.png` dentro de `.codex/generated_images` e o copia atomicamente para
+o staging declarado. O recibo fica no log da fase. Se o hook for interrompido depois de registrar o
+recibo, o executor repete apenas a cópia; ele não gera outra imagem.
+
+Uma fase de imagens é considerada concluída quando todos os outputs declarados são PNGs válidos e a
+identidade da sessão persistente foi confirmada, mesmo que o processo do agente encerre com erro
+depois de entregar os artefatos.
+
 ## Retomada
 
 `autopilot --wait-external` mantém a mesma execução até que uma integração externa produza o
@@ -79,10 +89,19 @@ artefato esperado. Polling de estado usa `status --json`; não abra novas sessõ
 consultar progresso.
 
 Falhas recuperáveis preservam o projeto, os arquivos produzidos e a sessão raiz. O retry retoma do
-último checkpoint válido.
+último checkpoint válido. Cada falha recebe uma assinatura estável por fase e causa. O servidor
+registra a ação e o resultado em `recovery-learnings.json`; recuperações determinísticas conhecidas
+passam a valer para todos os jobs seguintes sem alterar código em produção.
 
-Depois de sete recuperações automáticas sem sucesso, o job termina em `failed` e emite um evento com
-`agent_attention_required=true`; ele não permanece em repetição infinita.
+Uma falha idêntica de materialização de imagem ou identidade de sessão é interrompida na segunda
+ocorrência; credencial OAuth revogada ou expirada não é repetida. Falhas ainda não classificadas
+mantêm o teto global de sete recuperações. Ao atingir qualquer limite, o job termina em `failed` e
+emite um evento com `agent_attention_required=true`; ele não permanece em repetição infinita.
+
+O aprendizado automático é deliberadamente limitado a políticas seguras já implementadas:
+reutilizar recibos, preservar artefatos, retomar checkpoints e evitar repetição idêntica. Uma causa
+nova não modifica o próprio código do servidor; ela fica auditada para que uma correção revisada
+seja testada e implantada antes de virar política automática.
 
 ## Medição de uso do Codex
 

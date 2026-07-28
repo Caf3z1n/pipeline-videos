@@ -68,12 +68,12 @@ from pipeline_videos.storage import (
     read_json,
     write_json,
 )
-from pipeline_videos.utils import compact_json_schema, slugify, utc_now
+from pipeline_videos.utils import compact_json_schema, sha256_value, slugify, utc_now
 from pipeline_videos.validation import validate_project
 from pipeline_videos.verse_selection import create_auto_video
 
 REMOTE_JOB_SCHEMA_VERSION = "1.1"
-REMOTE_JOB_STATE_SCHEMA_VERSION = "1.6"
+REMOTE_JOB_STATE_SCHEMA_VERSION = "1.7"
 DEFAULT_REMOTE_JOBS_DIR = REPO_ROOT / "remote-jobs"
 REMOTE_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 DEFAULT_REMOTE_CODEX_MODEL = "gpt-5.6-sol"
@@ -129,6 +129,15 @@ class RemoteCodexRun(PipelineModel):
     output_tokens: int = 0
     reasoning_output_tokens: int = 0
     error: str | None = None
+
+
+class RemoteRecoveryEvent(PipelineModel):
+    recorded_at: str
+    fingerprint: str
+    phase: str | None = None
+    action: str
+    outcome: Literal["recovered", "retry_scheduled", "terminal_failure"]
+    detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -269,7 +278,7 @@ class RemoteVideoRequest(PipelineModel):
 
 
 class RemoteVideoJob(PipelineModel):
-    schema_version: Literal["1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6"] = (
+    schema_version: Literal["1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7"] = (
         REMOTE_JOB_STATE_SCHEMA_VERSION
     )
     job_id: str
@@ -296,6 +305,9 @@ class RemoteVideoJob(PipelineModel):
     codex_account_usage_after: CodexRateLimitSnapshot | None = None
     codex_weekly_usage_delta_percent: float | None = None
     codex_account_usage_measurement_error: str | None = None
+    last_failure_fingerprint: str | None = None
+    consecutive_failure_count: int = 0
+    recovery_events: list[RemoteRecoveryEvent] = Field(default_factory=list)
     error: str | None = None
 
 
@@ -460,6 +472,9 @@ class RemoteJobStore:
             error=None,
             codex_exit_code=None,
             next_retry_at=None,
+            automatic_recovery_count=0,
+            last_failure_fingerprint=None,
+            consecutive_failure_count=0,
         )
 
     def due_jobs(self, *, now: datetime | None = None) -> list[RemoteVideoJob]:
@@ -1786,6 +1801,7 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
     declared = queue.get("orchestration", {}).get("worker_job_files", {})
     declared = declared if isinstance(declared, dict) else {}
     assignments: list[dict[str, Any]] = []
+    image_artifacts: list[dict[str, str]] = []
     expected_outputs: list[Path] = []
     allowed_inputs: list[str] = []
     for worker_id, items in groups.items():
@@ -1813,6 +1829,16 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
             )
         outputs = [_project_file(layout, str(item["staging_path"])) for item in items]
         expected_outputs.extend(outputs)
+        image_artifacts.extend(
+            {
+                "job_id": str(item["job_id"]),
+                "prompt_hash": str(
+                    item.get("prompt_hash") or sha256_value(str(item["prompt"]))
+                ),
+                "staging_path": str(output),
+            }
+            for item, output in zip(items, outputs, strict=True)
+        )
         allowed_inputs.append(str(job_path))
         assignments.append(
             {
@@ -1830,6 +1856,7 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
             model=DEFAULT_REMOTE_CODEX_MODEL,
             reasoning_effort=DEFAULT_REMOTE_REASONING_EFFORT,
             payload={
+                "image_artifacts": image_artifacts,
                 "delegation": {
                     "required": True,
                     "role": "image_worker",
@@ -1851,6 +1878,11 @@ def _image_phase_specs(layout: ProjectLayout) -> list[CodexPhaseSpec]:
                         (
                             "Cada trabalhador deve ler somente seu job_path e gravar seus "
                             "staging_path."
+                        ),
+                        (
+                            "O hook PostToolUse materializa o savedPath no staging assim que o "
+                            "imagegen termina. Se o staging_path já for um PNG válido, não gere "
+                            "novamente esse item."
                         ),
                         *imagegen_retry_instructions(asset_label="job de imagem"),
                         (
@@ -2416,11 +2448,90 @@ def _codex_thread_id_from_jsonl(path: Path) -> str | None:
     return None
 
 
+def _image_artifacts(spec: CodexPhaseSpec) -> list[dict[str, str]]:
+    raw = spec.payload.get("image_artifacts")
+    if not isinstance(raw, list):
+        return []
+    expected = {path.resolve() for path in spec.expected_outputs}
+    artifacts: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        job_id = item.get("job_id")
+        prompt_hash = item.get("prompt_hash")
+        staging_path = item.get("staging_path")
+        required_values = (job_id, prompt_hash, staging_path)
+        if not all(isinstance(value, str) and value for value in required_values):
+            continue
+        destination = Path(staging_path).expanduser().resolve()
+        if destination not in expected or destination.suffix.casefold() != ".png":
+            continue
+        artifacts.append(
+            {
+                "job_id": job_id,
+                "prompt_hash": prompt_hash,
+                "staging_path": str(destination),
+            }
+        )
+    return artifacts
+
+
+def _copy_generated_png(
+    source: Path,
+    destination: Path,
+    *,
+    generated_root: Path,
+) -> bool:
+    try:
+        resolved_source = source.expanduser().resolve(strict=True)
+        resolved_source.relative_to(generated_root)
+    except (OSError, ValueError):
+        return False
+    if (
+        not resolved_source.name.startswith("exec-")
+        or resolved_source.suffix.casefold() != ".png"
+        or not _is_png_file(resolved_source)
+    ):
+        return False
+    if _is_png_file(destination):
+        return True
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(
+        f".{destination.name}.{os.getpid()}.{uuid4().hex[:8]}.tmp"
+    )
+    try:
+        shutil.copyfile(resolved_source, temporary)
+        if not _is_png_file(temporary):
+            return False
+        os.replace(temporary, destination)
+        return _is_png_file(destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _hook_image_receipts(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    receipts: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        with suppress(json.JSONDecodeError):
+            payload = json.loads(line)
+            if (
+                isinstance(payload, dict)
+                and payload.get("event") == "PostToolUse"
+                and isinstance(payload.get("image_prompt_hash"), str)
+                and isinstance(payload.get("image_saved_path"), str)
+            ):
+                receipts.append(payload)
+    return receipts
+
+
 def _recover_generated_image_outputs(
     spec: CodexPhaseSpec,
     phase_log: Path,
     *,
     codex_home: Path,
+    hook_log: Path | None = None,
     session_id: str | None = None,
     generated_after_ns: int = 0,
 ) -> list[tuple[Path, Path]]:
@@ -2433,17 +2544,43 @@ def _recover_generated_image_outputs(
     ]
     if not missing_pngs:
         return []
+    generated_root = (codex_home.expanduser().resolve() / "generated_images").resolve()
+    recovered: list[tuple[Path, Path]] = []
+    artifacts_by_hash: dict[str, list[Path]] = {}
+    for artifact in _image_artifacts(spec):
+        artifacts_by_hash.setdefault(artifact["prompt_hash"], []).append(
+            Path(artifact["staging_path"])
+        )
+    if hook_log is not None:
+        for receipt in _hook_image_receipts(hook_log):
+            matches = artifacts_by_hash.get(receipt["image_prompt_hash"], [])
+            destination = matches[0] if len(matches) == 1 else None
+            source = Path(receipt["image_saved_path"])
+            if (
+                destination is None
+                or destination not in missing_pngs
+                or not _copy_generated_png(
+                    source,
+                    destination,
+                    generated_root=generated_root,
+                )
+            ):
+                continue
+            recovered.append((source, destination))
+            missing_pngs.remove(destination)
+    if not missing_pngs:
+        return recovered
+
     thread_id = _codex_thread_id_from_jsonl(phase_log) or session_id
     if thread_id is None:
-        return []
-    generated_root = (codex_home.expanduser().resolve() / "generated_images").resolve()
+        return recovered
     session_dir = (generated_root / thread_id).resolve()
     try:
         session_dir.relative_to(generated_root)
     except ValueError:
-        return []
+        return recovered
     if not session_dir.is_dir():
-        return []
+        return recovered
     candidates = sorted(
         (
             path
@@ -2453,23 +2590,65 @@ def _recover_generated_image_outputs(
         key=lambda path: (path.stat().st_mtime_ns, path.name),
     )
     if len(candidates) < len(missing_pngs):
-        return []
+        return recovered
     selected = candidates[-len(missing_pngs) :]
-    recovered: list[tuple[Path, Path]] = []
     for source, destination in zip(selected, missing_pngs, strict=True):
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
-        if not _is_png_file(destination):
-            with suppress(OSError):
-                destination.unlink()
-            continue
-        recovered.append((source, destination))
+        if _copy_generated_png(source, destination, generated_root=generated_root):
+            recovered.append((source, destination))
     return recovered
 
 
 def _phase_slug(spec: CodexPhaseSpec) -> str:
     value = f"{spec.phase}-{spec.item_id or 'main'}".casefold()
     return re.sub(r"[^a-z0-9._-]+", "-", value).strip("-")[:100]
+
+
+def _record_recovery_learning(
+    store: RemoteJobStore,
+    *,
+    job_id: str,
+    event: RemoteRecoveryEvent,
+) -> None:
+    path = store.root / "recovery-learnings.json"
+    payload: dict[str, Any] = (
+        read_json(path)
+        if path.is_file()
+        else {"schema_version": "1.0", "fingerprints": {}}
+    )
+    fingerprints = payload.setdefault("fingerprints", {})
+    entry = fingerprints.setdefault(
+        event.fingerprint,
+        {
+            "first_seen_at": event.recorded_at,
+            "last_seen_at": event.recorded_at,
+            "occurrences": 0,
+            "successful_recoveries": 0,
+            "terminal_failures": 0,
+            "last_action": None,
+            "affected_jobs": [],
+        },
+    )
+    entry["last_seen_at"] = event.recorded_at
+    entry["occurrences"] = int(entry.get("occurrences", 0)) + 1
+    if event.outcome == "recovered":
+        entry["successful_recoveries"] = int(entry.get("successful_recoveries", 0)) + 1
+    elif event.outcome == "terminal_failure":
+        entry["terminal_failures"] = int(entry.get("terminal_failures", 0)) + 1
+    entry["last_action"] = event.action
+    affected_jobs = [
+        str(value) for value in entry.get("affected_jobs", []) if isinstance(value, str)
+    ]
+    entry["affected_jobs"] = list(dict.fromkeys([*affected_jobs, job_id]))[-20:]
+    write_json(path, payload)
+    with suppress(OSError):
+        path.chmod(0o600)
+
+
+def _append_recovery_event(
+    job: RemoteVideoJob,
+    event: RemoteRecoveryEvent,
+) -> list[RemoteRecoveryEvent]:
+    return [*job.recovery_events[-49:], event]
 
 
 def _execute_agent_checkpoint(
@@ -2496,6 +2675,7 @@ def _execute_agent_checkpoint(
     requests_dir = context_dir / "checkpoints"
     requests_dir.mkdir(parents=True, exist_ok=True)
     request_path = requests_dir / f"run-{run_number:03d}-{slug}.json"
+    artifact_map_path = requests_dir / f"run-{run_number:03d}-{slug}-artifacts.json"
     output_message = context_dir / f"run-{run_number:03d}-{slug}-last-message.txt"
     phase_log = store.root / "logs" / f"{job.job_id}-run-{run_number:03d}-{slug}.jsonl"
     hook_log = store.root / "logs" / f"{job.job_id}-run-{run_number:03d}-{slug}.hooks.jsonl"
@@ -2504,6 +2684,19 @@ def _execute_agent_checkpoint(
         request_path.chmod(0o600)
     for output in spec.expected_outputs:
         output.parent.mkdir(parents=True, exist_ok=True)
+    artifacts = _image_artifacts(spec)
+    if artifacts:
+        write_json(
+            artifact_map_path,
+            {
+                "schema_version": "1.0",
+                "job_id": latest.job_id,
+                "phase": spec.phase,
+                "artifacts": artifacts,
+            },
+        )
+        with suppress(OSError):
+            artifact_map_path.chmod(0o600)
 
     phase_label = f"{spec.phase}:{spec.item_id}" if spec.item_id else spec.phase
     latest = store.transition(latest, "running", current_phase=phase_label)
@@ -2518,6 +2711,8 @@ def _execute_agent_checkpoint(
     env = os.environ.copy()
     env["PIPELINE_VIDEOS_CODEX_HOOK_LOG"] = str(hook_log)
     env["PIPELINE_VIDEOS_REMOTE_PHASE"] = phase_label
+    if artifacts:
+        env["PIPELINE_VIDEOS_IMAGE_ARTIFACT_MAP"] = str(artifact_map_path)
     started_at = utc_now()
     generated_after_ns = time.time_ns()
     master_log = store.log_path(job.job_id)
@@ -2556,21 +2751,32 @@ def _execute_agent_checkpoint(
     elif observed_session_id is not None and observed_session_id != session_id:
         exit_code = 2
         error = "A retomada do Codex respondeu com um UUID de sessão diferente do job."
-    if exit_code == 0:
-        recovered_outputs = _recover_generated_image_outputs(
-            spec,
-            phase_log,
-            codex_home=Path(env.get("CODEX_HOME") or Path.home() / ".codex"),
-            session_id=session_id,
-            generated_after_ns=generated_after_ns,
-        )
-        if recovered_outputs and output_message.is_file():
-            with output_message.open("a", encoding="utf-8") as message:
-                message.write(
-                    "\nRecuperacao deterministica: o PNG gerado pelo imagegen foi "
-                    "materializado no staging exigido.\n"
-                )
+    recovered_outputs = _recover_generated_image_outputs(
+        spec,
+        phase_log,
+        codex_home=Path(env.get("CODEX_HOME") or Path.home() / ".codex"),
+        hook_log=hook_log,
+        session_id=session_id,
+        generated_after_ns=generated_after_ns,
+    )
+    if recovered_outputs and output_message.is_file():
+        with output_message.open("a", encoding="utf-8") as message:
+            message.write(
+                "\nRecuperacao deterministica: o savedPath do imagegen foi "
+                "materializado no staging exigido.\n"
+            )
     missing = [str(path) for path in spec.expected_outputs if not _is_nonempty_file(path)]
+    session_identity_valid = session_id is not None and (
+        observed_session_id is None or observed_session_id == session_id
+    )
+    completed_image_phase = (
+        spec.phase in {"image", "image_workers"}
+        and not missing
+        and session_identity_valid
+    )
+    if exit_code != 0 and completed_image_phase:
+        exit_code = 0
+        error = None
     if exit_code == 0 and missing:
         exit_code = 2
         error = "Saídas obrigatórias ausentes: " + ", ".join(missing)
@@ -2596,15 +2802,56 @@ def _execute_agent_checkpoint(
         error=error,
         **usage,
     )
+    materialized_receipts = {
+        str(receipt.get("image_job_id"))
+        for receipt in _hook_image_receipts(hook_log)
+        if receipt.get("artifact_materialized") is True
+        and isinstance(receipt.get("image_job_id"), str)
+    }
+    recovery_event: RemoteRecoveryEvent | None = None
+    if exit_code == 0 and (materialized_receipts or recovered_outputs):
+        action = (
+            "post_tool_saved_path_materialization_v1"
+            if materialized_receipts
+            else "artifact_receipt_recovery_v1"
+        )
+        recovered_count = max(len(materialized_receipts), len(recovered_outputs))
+        recovery_event = RemoteRecoveryEvent(
+            recorded_at=finished_at,
+            fingerprint="image_artifact_materialization_missing_v1",
+            phase=phase_label,
+            action=action,
+            outcome="recovered",
+            detail=f"{recovered_count} artefato(s) de imagem materializado(s).",
+        )
     current, _ = store.find(job.job_id)
+    transition_updates: dict[str, Any] = {
+        "current_phase": None,
+        "codex_session_id": session_id,
+        "codex_exit_code": exit_code,
+        "codex_runs": [*current.codex_runs, record],
+    }
+    if exit_code == 0:
+        transition_updates.update(
+            last_failure_fingerprint=None,
+            consecutive_failure_count=0,
+        )
+    if recovery_event is not None:
+        transition_updates["recovery_events"] = _append_recovery_event(
+            current,
+            recovery_event,
+        )
     current = store.transition(
         current,
         "running",
-        current_phase=None,
-        codex_session_id=session_id,
-        codex_exit_code=exit_code,
-        codex_runs=[*current.codex_runs, record],
+        **transition_updates,
     )
+    if recovery_event is not None:
+        _record_recovery_learning(
+            store,
+            job_id=current.job_id,
+            event=recovery_event,
+        )
     with master_log.open("a", encoding="utf-8") as log:
         log.write(
             f"[{finished_at}] codex_checkpoint_exit phase={phase_label} code={exit_code} "
@@ -3347,6 +3594,55 @@ def _automatic_recovery_delay_seconds(recovery_count: int) -> int:
     return min(21_600, 60 * (2**exponent))
 
 
+def _failure_fingerprint(job: RemoteVideoJob, exc: Exception) -> tuple[str, str | None]:
+    phase = job.current_phase
+    if phase is None and job.codex_runs:
+        latest_run = job.codex_runs[-1]
+        phase = (
+            f"{latest_run.phase}:{latest_run.item_id}"
+            if latest_run.item_id
+            else latest_run.phase
+        )
+    message = " ".join((str(exc).strip() or exc.__class__.__name__).casefold().split())
+    if phase and phase.split(":", 1)[0] in {"image", "image_workers"} and (
+        "saídas obrigatórias ausentes" in message
+        or "saÃ­das obrigatÃ³rias ausentes" in message
+        or "images/staging" in message
+    ):
+        return "image_artifact_materialization_missing_v1", phase
+    if "invalid_grant" in message or (
+        "oauth" in message and ("revog" in message or "expir" in message)
+    ):
+        return "youtube_oauth_invalid_grant_v1", phase
+    if "uuid" in message and (
+        "sessão" in message
+        or "sessÃ£o" in message
+        or "session" in message
+    ):
+        return "codex_session_identity_invalid_v1", phase
+    normalized = re.sub(r"(?:[a-z]:)?[/\\][^\s,;]+", "<path>", message)
+    normalized = re.sub(r"\b\d+\b", "<n>", normalized)
+    digest = sha256_value(
+        {
+            "phase": phase or "unknown",
+            "exception": type(exc).__name__,
+            "message": normalized[:1000],
+        }
+    )[:16]
+    return f"unclassified_v1:{digest}", phase
+
+
+def _same_failure_limit(fingerprint: str) -> int:
+    if fingerprint == "youtube_oauth_invalid_grant_v1":
+        return 1
+    if fingerprint in {
+        "image_artifact_materialization_missing_v1",
+        "codex_session_identity_invalid_v1",
+    }:
+        return 2
+    return MAX_AUTOMATIC_RECOVERIES
+
+
 def _schedule_automatic_recovery(
     store: RemoteJobStore,
     job: RemoteVideoJob,
@@ -3357,35 +3653,79 @@ def _schedule_automatic_recovery(
     latest, _ = store.find(job.job_id)
     recovery_count = latest.automatic_recovery_count + 1
     error = _failure_with_codex_context(latest, store, exc)
-    if recovery_count >= MAX_AUTOMATIC_RECOVERIES:
+    fingerprint, phase = _failure_fingerprint(latest, exc)
+    consecutive_count = (
+        latest.consecutive_failure_count + 1
+        if latest.last_failure_fingerprint == fingerprint
+        else 1
+    )
+    same_failure_limit = _same_failure_limit(fingerprint)
+    terminal = (
+        recovery_count >= MAX_AUTOMATIC_RECOVERIES
+        or consecutive_count >= same_failure_limit
+    )
+    recorded_at = utc_now()
+    if terminal:
+        event = RemoteRecoveryEvent(
+            recorded_at=recorded_at,
+            fingerprint=fingerprint,
+            phase=phase,
+            action="stop_repeated_identical_failure_v1",
+            outcome="terminal_failure",
+            detail=(
+                f"Falha idêntica {consecutive_count}/{same_failure_limit}; "
+                f"recuperações totais {recovery_count}/{MAX_AUTOMATIC_RECOVERIES}."
+            ),
+        )
         failed = store.transition(
             latest,
             "failed",
             current_phase=None,
             automatic_recovery_count=recovery_count,
+            last_failure_fingerprint=fingerprint,
+            consecutive_failure_count=consecutive_count,
+            recovery_events=_append_recovery_event(latest, event),
             next_retry_at=None,
             error=error,
         )
+        _record_recovery_learning(store, job_id=failed.job_id, event=event)
         with store.log_path(job.job_id).open("a", encoding="utf-8") as log:
             log.write(
                 f"[{utc_now()}] automatic_recovery_exhausted "
-                f"count={recovery_count} error={error[:500]!r}\n"
+                f"count={recovery_count} fingerprint={fingerprint} "
+                f"consecutive={consecutive_count} error={error[:500]!r}\n"
             )
         return _finalize_scheduled_usage_if_ready(store, failed)
     delay_seconds = _automatic_recovery_delay_seconds(recovery_count)
     next_retry_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
+    event = RemoteRecoveryEvent(
+        recorded_at=recorded_at,
+        fingerprint=fingerprint,
+        phase=phase,
+        action="retry_with_backoff_v1",
+        outcome="retry_scheduled",
+        detail=(
+            f"Falha idêntica {consecutive_count}/{same_failure_limit}; "
+            f"nova tentativa em {delay_seconds}s."
+        ),
+    )
     recovered = store.transition(
         latest,
         status,
         current_phase=None,
         automatic_recovery_count=recovery_count,
+        last_failure_fingerprint=fingerprint,
+        consecutive_failure_count=consecutive_count,
+        recovery_events=_append_recovery_event(latest, event),
         next_retry_at=next_retry_at,
         error=error,
     )
+    _record_recovery_learning(store, job_id=recovered.job_id, event=event)
     with store.log_path(job.job_id).open("a", encoding="utf-8") as log:
         log.write(
             f"[{utc_now()}] automatic_recovery_scheduled status={status} "
-            f"count={recovery_count} next_retry_at={next_retry_at.isoformat()} "
+            f"count={recovery_count} fingerprint={fingerprint} "
+            f"consecutive={consecutive_count} next_retry_at={next_retry_at.isoformat()} "
             f"error={error[:500]!r}\n"
         )
     return recovered
@@ -3450,6 +3790,14 @@ def job_summary(job: RemoteVideoJob) -> dict[str, Any]:
         "codex_usage": codex_usage_summary(job),
         "codex_account_usage": account_usage,
         "automatic_recovery_count": job.automatic_recovery_count,
+        "recovery": {
+            "last_failure_fingerprint": job.last_failure_fingerprint,
+            "consecutive_failure_count": job.consecutive_failure_count,
+            "events": [
+                event.model_dump(mode="json")
+                for event in job.recovery_events
+            ],
+        },
         "terminal": job.status in TERMINAL_JOB_STATUSES,
         "agent_attention_required": job.status == "failed",
         "execution_owner": "deterministic_remote_executor",
