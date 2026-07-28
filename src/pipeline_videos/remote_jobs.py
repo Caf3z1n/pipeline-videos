@@ -2468,11 +2468,7 @@ def _copy_generated_png(
         resolved_source.relative_to(generated_root)
     except (OSError, ValueError):
         return False
-    if (
-        not resolved_source.name.startswith("exec-")
-        or resolved_source.suffix.casefold() != ".png"
-        or not _is_png_file(resolved_source)
-    ):
+    if resolved_source.suffix.casefold() != ".png" or not _is_png_file(resolved_source):
         return False
     if _is_png_file(destination):
         return True
@@ -2509,9 +2505,7 @@ def _generated_png_snapshot(codex_home: Path) -> frozenset[Path]:
     generated_root = (codex_home.expanduser().resolve() / "generated_images").resolve()
     if not generated_root.is_dir():
         return frozenset()
-    return frozenset(
-        path.resolve() for path in generated_root.rglob("exec-*.png") if path.is_file()
-    )
+    return frozenset(path.resolve() for path in generated_root.rglob("*.png") if path.is_file())
 
 
 def _recover_generated_image_outputs(
@@ -2575,7 +2569,7 @@ def _recover_generated_image_outputs(
             candidates = sorted(
                 (
                     path
-                    for path in session_dir.glob("exec-*.png")
+                    for path in session_dir.glob("*.png")
                     if _is_png_file(path) and path.stat().st_mtime_ns >= generated_after_ns
                 ),
                 key=lambda path: (path.stat().st_mtime_ns, path.name),
@@ -2598,7 +2592,7 @@ def _recover_generated_image_outputs(
         cross_session_candidates = sorted(
             (
                 path.resolve()
-                for path in generated_root.rglob("exec-*.png")
+                for path in generated_root.rglob("*.png")
                 if path.resolve() not in baseline and _is_png_file(path)
             ),
             key=lambda path: (path.stat().st_mtime_ns, path.name),

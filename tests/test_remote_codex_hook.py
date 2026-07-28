@@ -22,7 +22,7 @@ def test_post_tool_hook_materializes_imagegen_saved_path(tmp_path, monkeypatch) 
     hook = _load_hook_module()
     prompt = "Uma cena bíblica cinematográfica"
     codex_home = tmp_path / ".codex"
-    source = codex_home / "generated_images" / "worker-thread" / "exec-image.png"
+    source = codex_home / "generated_images" / "worker-thread" / "call_image.png"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"\x89PNG\r\n\x1a\nimage bytes")
     destination = tmp_path / "project" / "images" / "staging" / "scene.png"

@@ -167,7 +167,7 @@ def test_stage_generated_image_uses_saved_path_and_is_idempotent(tmp_path: Path)
     queue = build_codex_queue(layout)
     job = queue["items"][0]
     codex_home = tmp_path / ".codex"
-    generated = codex_home / "generated_images" / "thread-001" / "exec-image.png"
+    generated = codex_home / "generated_images" / "thread-001" / "call_image.png"
     generated.parent.mkdir(parents=True)
     Image.new("RGB", (96, 144), "#405867").save(generated)
 

@@ -14,7 +14,7 @@ from typing import Any
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 SAVED_PATH_PATTERN = re.compile(
     r"(?P<path>(?:[A-Za-z]:[\\/]|/)[^\r\n\"']*?"
-    r"generated_images[\\/][^\r\n\"']+[\\/]exec-[^\r\n\"']+\.png)"
+    r"generated_images[\\/][^\r\n\"']+[\\/][^\r\n\"']+\.png)"
 )
 
 
@@ -148,7 +148,7 @@ def _materialize_imagegen_artifact(payload: dict[str, Any]) -> dict[str, Any]:
         codex_home = Path(os.getenv("CODEX_HOME") or Path.home() / ".codex")
         generated_root = (codex_home.expanduser().resolve() / "generated_images").resolve()
         source.relative_to(generated_root)
-        if not source.name.startswith("exec-") or source.suffix.casefold() != ".png":
+        if source.suffix.casefold() != ".png":
             raise ValueError("saved_path_not_imagegen_png")
         if not _is_png(source):
             raise ValueError("saved_path_invalid_png")

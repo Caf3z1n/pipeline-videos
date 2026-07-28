@@ -658,7 +658,7 @@ def test_image_checkpoint_recovers_single_new_png_from_isolated_worker(
     old_image = codex_home / "generated_images" / "old-thread" / "exec-old.png"
     old_image.parent.mkdir(parents=True)
     old_image.write_bytes(b"\x89PNG\r\n\x1a\nold image")
-    generated = codex_home / "generated_images" / "worker-thread" / "exec-new.png"
+    generated = codex_home / "generated_images" / "worker-thread" / "call_new.png"
     destination = tmp_path / "project" / "images" / "staging" / "scene.png"
     store = RemoteJobStore(tmp_path / "jobs")
     job = store.enqueue(_request())

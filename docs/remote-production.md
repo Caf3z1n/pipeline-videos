@@ -79,7 +79,7 @@ evitando a fronteira de filesystem dos subagentes internos. A isolação também
 sem ambiguidade o único PNG novo criado durante a fase.
 
 O hook `PostToolUse` continua como caminho rápido: recebe o `savedPath`, confere o hash do prompt
-contra o mapa imutável da fase, valida que o arquivo é um PNG `exec-*.png` dentro de
+contra o mapa imutável da fase, valida que o arquivo é um PNG dentro de
 `.codex/generated_images` e o copia atomicamente. Se não houver recibo, o executor compara o
 snapshot anterior e posterior de todas as sessões de imagem. A recuperação cross-session só ocorre
 quando existe exatamente um PNG novo e um destino; zero ou mais de um candidato bloqueiam a fase

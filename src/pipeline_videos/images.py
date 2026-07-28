@@ -152,11 +152,7 @@ def stage_generated_image(
         raise ValueError(
             f"O arquivo precisa estar dentro do cache do Codex: {generated_root}"
         ) from exc
-    if (
-        len(relative_source.parts) < 2
-        or not source.name.startswith("exec-")
-        or source.suffix.casefold() != ".png"
-    ):
+    if len(relative_source.parts) < 2 or source.suffix.casefold() != ".png":
         raise ValueError("O savedPath não corresponde a um PNG gerado pelo Imagegen.")
     if not _is_valid_png(source):
         raise ValueError(f"O savedPath não contém um PNG íntegro: {source}")
