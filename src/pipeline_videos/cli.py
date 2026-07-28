@@ -21,6 +21,7 @@ from pipeline_videos.models import (
     COMPACT_SHORT_THRESHOLD_SECONDS,
     DEFAULT_ELEVENLABS_MODEL_ID,
     DEFAULT_ELEVENLABS_VOICE_ID,
+    ELEVENLABS_VOICE_VARIANTS,
     HIGH_STAKES_HOOK_FAMILIES,
     MIN_LONG_DURATION_SECONDS,
     MIN_SHORT_DURATION_SECONDS,
@@ -82,6 +83,7 @@ analytics_app = typer.Typer(
 catalog_app = typer.Typer(help="Capacidade e ciclos do catálogo bíblico verificado.")
 audit_app = typer.Typer(help="Auditoria local de tokens, contextos e orçamento de produção.")
 approved_app = typer.Typer(help="Roteiros de Shorts congelados para produção econômica em lote.")
+profile_app = typer.Typer(help="Perfis de produção e preflight visual de vídeos longos.")
 app.add_typer(images_app, name="images")
 app.add_typer(script_app, name="script")
 app.add_typer(audio_app, name="audio")
@@ -94,6 +96,7 @@ app.add_typer(analytics_app, name="analytics")
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(audit_app, name="audit")
 app.add_typer(approved_app, name="approved-scripts")
+app.add_typer(profile_app, name="profile")
 
 
 def _approved_store(jobs_dir: Path | None):
@@ -407,8 +410,9 @@ def approved_capture(
 ) -> None:
     """Congela um projeto editorial completo como candidato à aprovação."""
 
-    if voice_variant not in {"jesus_1", "jesus_2"}:
-        raise typer.BadParameter("--voice precisa ser jesus_1 ou jesus_2.")
+    if voice_variant not in ELEVENLABS_VOICE_VARIANTS:
+        choices = ", ".join(ELEVENLABS_VOICE_VARIANTS)
+        raise typer.BadParameter(f"--voice precisa ser uma de: {choices}.")
     if music_track not in {"leaning", "aloboi"}:
         raise typer.BadParameter("--music precisa ser leaning ou aloboi.")
     candidate = _approved_store(jobs_dir).capture_project(
@@ -968,8 +972,9 @@ def remote_schedule_create(
     editorial_profile = profile_aliases.get(profile.strip().casefold())
     if editorial_profile is None:
         raise typer.BadParameter("--profile precisa ser verse-led ou high-stakes.")
-    if voice_variant not in {"jesus_1", "jesus_2"}:
-        raise typer.BadParameter("--voice-variant precisa ser jesus_1 ou jesus_2.")
+    if voice_variant not in ELEVENLABS_VOICE_VARIANTS:
+        choices = ", ".join(ELEVENLABS_VOICE_VARIANTS)
+        raise typer.BadParameter(f"--voice-variant precisa ser uma de: {choices}.")
     if music_track not in {"leaning", "aloboi"}:
         raise typer.BadParameter("--music-track precisa ser leaning ou aloboi.")
     slots = [
@@ -1389,14 +1394,179 @@ def _apply_short_bootstrap_settings(
         import_music(layout, music_file)
 
 
+@profile_app.command("show")
+def profile_show(
+    profile: Annotated[
+        str,
+        typer.Argument(help="Perfil: cutout-explainer ou biblical_cutout_explainer_7m_v1."),
+    ] = "cutout-explainer",
+) -> None:
+    """Exibe o contrato oficial e a ordem econômica de produção."""
+
+    from pipeline_videos.long_form_profile import PROFILE_ID, profile_summary
+
+    if profile.strip().casefold() not in {
+        "cutout-explainer",
+        "cutout",
+        PROFILE_ID,
+    }:
+        raise typer.BadParameter(f"Perfil desconhecido. Use {PROFILE_ID}.")
+    console.print_json(json.dumps(profile_summary(), ensure_ascii=False))
+
+
+@profile_app.command("preflight")
+def profile_preflight(
+    project: str,
+    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
+) -> None:
+    """Confere hashes, tempos e arquivos do plano compilado."""
+
+    from pipeline_videos.long_form_profile import preflight_project_edit_plan
+
+    layout = _project(project, projects_dir)
+    report = preflight_project_edit_plan(layout)
+    console.print_json(json.dumps(report.model_dump(mode="json"), ensure_ascii=False))
+    if not report.valid:
+        raise typer.Exit(code=1)
+
+
+@profile_app.command("plan-prepare")
+def profile_plan_prepare(
+    project: str,
+    force: Annotated[bool, typer.Option("--force")] = False,
+    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
+) -> None:
+    """Compila localmente o plano visual depois do áudio."""
+
+    from pipeline_videos.long_form_profile import prepare_edit_plan_queue
+
+    layout = _project(project, projects_dir)
+    queue = prepare_edit_plan_queue(layout, force=force)
+    console.print_json(json.dumps(queue, ensure_ascii=False))
+
+
+@profile_app.command("plan-import")
+def profile_plan_import(
+    project: str,
+    force: Annotated[bool, typer.Option("--force")] = False,
+    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
+) -> None:
+    """Importa planos legados; projetos novos usam plan-prepare diretamente."""
+
+    from pipeline_videos.long_form_profile import import_project_edit_plan
+
+    layout = _project(project, projects_dir)
+    plan, report, inventory = import_project_edit_plan(layout, force=force)
+    console.print_json(
+        json.dumps(
+            {
+                "profile_id": plan.profile_id,
+                "valid": report.valid,
+                "block_count": len(plan.blocks),
+                "unique_assets": len(inventory["items"]),
+                "generation_count": inventory["generation_count"],
+                "plan": str(layout.long_form_edit_plan),
+                "inventory": str(layout.long_form_asset_inventory),
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+@profile_app.command("asset-inventory")
+def profile_asset_inventory(
+    project: str,
+    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
+) -> None:
+    """Deduplica e libera somente os assets usados por um plano já validado."""
+
+    from pipeline_videos.long_form_profile import build_project_asset_inventory
+
+    layout = _project(project, projects_dir)
+    inventory = build_project_asset_inventory(layout)
+    console.print_json(json.dumps(inventory, ensure_ascii=False))
+
+
+@profile_app.command("asset-queue")
+def profile_asset_queue(
+    project: str,
+    force: Annotated[bool, typer.Option("--force")] = False,
+    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
+) -> None:
+    """Libera somente os assets deduplicados depois do preflight válido."""
+
+    from pipeline_videos.long_form_profile import prepare_profile_asset_queue
+
+    layout = _project(project, projects_dir)
+    queue = prepare_profile_asset_queue(layout, force=force)
+    console.print_json(json.dumps(queue, ensure_ascii=False))
+
+
+@profile_app.command("asset-stage")
+def profile_asset_stage(
+    project: str,
+    job_id: Annotated[str, typer.Option("--job-id")],
+    source: Annotated[Path, typer.Option("--source")],
+    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
+) -> None:
+    """Materializa no staging o savedPath retornado pelo imagegen."""
+
+    from pipeline_videos.long_form_profile import stage_profile_asset
+
+    layout = _project(project, projects_dir)
+    destination = stage_profile_asset(layout, job_id=job_id, source=source)
+    console.print(f"[green]Asset materializado:[/green] {destination}")
+
+
+@profile_app.command("asset-import")
+def profile_asset_import(
+    project: str,
+    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
+) -> None:
+    """Importa atomicamente o lote completo de assets do perfil."""
+
+    from pipeline_videos.long_form_profile import import_profile_assets
+
+    layout = _project(project, projects_dir)
+    inventory = import_profile_assets(layout)
+    console.print_json(
+        json.dumps(
+            {
+                "status": "completed",
+                "asset_count": len(inventory["items"]),
+                "inventory": str(layout.long_form_asset_inventory),
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+@profile_app.command("render")
+def profile_render(
+    project: str,
+    force: Annotated[bool, typer.Option("--force")] = False,
+    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
+) -> None:
+    """Renderiza o plano validado no renderer oficial em camadas."""
+
+    from pipeline_videos.cutout_render import render_cutout_profile
+
+    layout = _project(project, projects_dir)
+    result = render_cutout_profile(layout, force=force)
+    console.print_json(json.dumps(result, ensure_ascii=False))
+
+
 @app.command("new")
 def new_project(
     project_id: Annotated[str, typer.Argument(help="Identificador curto do vídeo.")],
     title: Annotated[str, typer.Option("--title", "-t", help="Título editorial inicial.")],
     duration: Annotated[
-        int,
-        typer.Option("--duration", help="Meta aproximada de duração em segundos."),
-    ] = 540,
+        int | None,
+        typer.Option(
+            "--duration",
+            help="Meta aproximada; cutout-explainer usa 420s quando omitida.",
+        ),
+    ] = None,
     exact_duration: Annotated[
         bool,
         typer.Option(
@@ -1408,6 +1578,13 @@ def new_project(
     video_format: Annotated[
         str, typer.Option("--format", help="Formato do vídeo: landscape ou short.")
     ] = "landscape",
+    profile: Annotated[
+        str,
+        typer.Option(
+            "--profile",
+            help="Perfil de produção: standard ou cutout-explainer (somente landscape).",
+        ),
+    ] = "standard",
     creative_mode: Annotated[str, typer.Option("--creative-mode")] = "auto",
     hook_family: Annotated[str, typer.Option("--hook-family")] = "auto",
     voice_variant: Annotated[str, typer.Option("--voice-variant")] = "jesus_1",
@@ -1416,6 +1593,24 @@ def new_project(
 ) -> None:
     if video_format not in {"landscape", "short"}:
         raise typer.BadParameter("Use landscape ou short em --format.")
+    profile_aliases = {
+        "standard": "standard",
+        "cutout": "biblical_cutout_explainer_7m_v1",
+        "cutout-explainer": "biblical_cutout_explainer_7m_v1",
+        "biblical_cutout_explainer_7m_v1": "biblical_cutout_explainer_7m_v1",
+    }
+    long_form_profile = profile_aliases.get(profile.strip().casefold())
+    if long_form_profile is None:
+        raise typer.BadParameter("Use standard ou cutout-explainer em --profile.")
+    if video_format == "short" and long_form_profile != "standard":
+        raise typer.BadParameter("cutout-explainer é exclusivo de vídeos landscape.")
+    selected_duration = (
+        duration
+        if duration is not None
+        else 420
+        if long_form_profile == "biblical_cutout_explainer_7m_v1"
+        else 540
+    )
     mode: str | None = None
     family: str | None = None
     variant = voice_variant
@@ -1425,7 +1620,7 @@ def new_project(
             hook_family=hook_family,
             voice_variant=voice_variant,
             music_file=music_file,
-            duration=duration,
+            duration=selected_duration,
         )
     elif (
         creative_mode != "auto"
@@ -1440,10 +1635,11 @@ def new_project(
         project_id,
         title,
         projects_dir=projects_dir,
-        target_duration_seconds=duration,
+        target_duration_seconds=selected_duration,
         exact_duration=exact_duration,
         palette_id=palette,
         video_format=video_format,
+        long_form_profile=long_form_profile,
     )
     if video_format == "short":
         _apply_short_bootstrap_settings(
@@ -1458,6 +1654,53 @@ def new_project(
     console.print(
         "Próximo passo: execute o comando resume-prompt e use o texto na conversa com o Codex."
     )
+
+
+@app.command("new-long")
+def new_long(
+    duration: Annotated[
+        int,
+        typer.Option(
+            "--duration",
+            help="Meta aproximada de duraÃ§Ã£o em segundos.",
+            min=MIN_LONG_DURATION_SECONDS,
+        ),
+    ] = 420,
+    exact_duration: Annotated[
+        bool,
+        typer.Option(
+            "--exact-duration",
+            help="Exige o alvo somente quando a duraÃ§Ã£o tiver sido pedida como exata.",
+        ),
+    ] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+    projects_dir: Annotated[Path | None, typer.Option("--projects-dir")] = None,
+) -> None:
+    """Reserva um tema bÃ­blico verificado e cria o projeto no perfil cutout."""
+
+    layout, candidate, score = create_auto_video(
+        projects_dir=projects_dir,
+        target_duration_seconds=duration,
+        exact_duration=exact_duration,
+        video_format="landscape",
+        long_form_profile="biblical_cutout_explainer_7m_v1",
+    )
+    result = {
+        "project_id": layout.load_manifest().project_id,
+        "project_path": str(layout.root),
+        "passage": candidate.reference,
+        "central_question": candidate.central_question,
+        "selection_score": score,
+        "profile": "biblical_cutout_explainer_7m_v1",
+        "next_command": f'uv run pipeline-videos run "{layout.root}" --dry-run',
+    }
+    if json_output:
+        console.print_json(json.dumps(result, ensure_ascii=False))
+        return
+    console.print(f"[green]VÃ­deo longo criado:[/green] {layout.root}")
+    console.print(f"[bold]Tema reservado:[/bold] {candidate.central_question}")
+    console.print(f"[bold]Passagem central:[/bold] {candidate.reference}")
+    console.print(f'PrÃ³ximo passo: uv run pipeline-videos run "{layout.root}" --dry-run')
 
 
 @app.command("new-short")
@@ -1856,6 +2099,19 @@ def resume_prompt(
         if manifest.video_format != "short"
         else ""
     )
+    if config.long_form_profile.enabled:
+        long_script_instruction += (
+            "Este projeto usa `biblical_cutout_explainer_7m_v1`: a voz autoral é um narrador "
+            "bíblico explicativo em terceira pessoa e nunca Jesus narrando. O mesmo "
+            "ScriptDocument precisa decidir roteiro, blocos visuais concretos e distintos, "
+            "assets com cue literal, sequências fullscreen de duas a quatro ações e a combinação "
+            "final de título, descrição e thumbnail em `long_form_strategy.youtube_package`. "
+            "O hook abre com ação ou tensão visual, nunca com uma tela de texto. Depois do "
+            "roteiro, "
+            "gere a voz e o alinhamento uma única vez com `eleven_v3_strategic_tags_v1`. "
+            "O compilador local cria o plano cronometrado sem `long_form_visual_editor`, sem "
+            "especialista separado de metadados e sem ciclo de reparo. "
+        )
     from pipeline_videos.autopilot import prepare_local_coordinator_job
 
     coordinator_job = prepare_local_coordinator_job(layout)
@@ -1871,8 +2127,8 @@ O coordenador executa o comando declarado no job e cria somente os papéis que a
 sempre com `fork_turns=none`: o planejador de cenas lê `script/shorts-queue.json`, até dois
 image_workers leem exclusivamente seus arquivos em `images/jobs/`, e o especialista de metadados lê
 `youtube/growth-queue.json`. Não crie `biblical_reviewer`; a validação de fontes acontece no
-preflight incorporado. Após uma única
-correção agregada, use o fallback determinístico declarado e continue. {audio_instruction}
+preflight incorporado. Só use correção ou fallback quando a fila da etapa os declarar
+explicitamente. {audio_instruction}
 {long_script_instruction}
 Não releia manifestos grandes, não importe por cena, não publique e não registre aprovação humana.
 Entregue o único candidato final mesmo que existam alertas consultivos; somente bloqueios técnicos,
@@ -2139,7 +2395,7 @@ def audio_configure(
     voice_id: Annotated[str | None, typer.Option("--voice-id")] = None,
     voice_variant: Annotated[
         str | None,
-        typer.Option("--voice-variant", help="Preset jesus_1 ou jesus_2."),
+        typer.Option("--voice-variant", help="Preset jesus_1, jesus_2 ou matheus."),
     ] = None,
     model: Annotated[str | None, typer.Option("--model")] = None,
     output_format: Annotated[str | None, typer.Option("--output-format")] = None,
@@ -2740,7 +2996,7 @@ def autopilot_command(
         allow_external=allow_external,
         force=force,
     )
-    if result.status == "waiting_external":
+    while result.status == "waiting_external":
         if not json_output:
             console.print("[yellow]Autopilot aguardando saídas externas.[/yellow]")
             for wait in result.waits:

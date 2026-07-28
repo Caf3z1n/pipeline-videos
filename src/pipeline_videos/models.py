@@ -8,15 +8,25 @@ from typing import Any, Literal, cast
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-type ElevenLabsVoiceVariant = Literal["jesus_1", "jesus_2"]
+type ElevenLabsVoiceVariant = Literal["jesus_1", "jesus_2", "matheus"]
+type AuthorialNarrator = Literal[
+    "jesus_first_person_v1",
+    "biblical_explainer_third_person_v1",
+]
+type ElevenLabsPromptingProfile = Literal[
+    "plain_text_v1",
+    "eleven_v3_strategic_tags_v1",
+]
 
 ELEVENLABS_VOICE_VARIANTS: dict[ElevenLabsVoiceVariant, str] = {
     "jesus_1": "qfOmqDJTQP75MDYJvxKc",
     "jesus_2": "rtrpEL7BeMd5aTru4HPq",
+    "matheus": "36rVQA1AOIPwpA3Hg1tC",
 }
 ELEVENLABS_VOICE_ENV_BY_VARIANT: dict[ElevenLabsVoiceVariant, str] = {
     "jesus_1": "ELEVENLABS_VOICE_JESUS_1_ID",
     "jesus_2": "ELEVENLABS_VOICE_JESUS_2_ID",
+    "matheus": "ELEVENLABS_VOICE_MATHEUS_ID",
 }
 DEFAULT_ELEVENLABS_VOICE_VARIANT: ElevenLabsVoiceVariant = "jesus_1"
 DEFAULT_ELEVENLABS_VOICE_ID = ELEVENLABS_VOICE_VARIANTS[DEFAULT_ELEVENLABS_VOICE_VARIANT]
@@ -305,6 +315,7 @@ class AudioConfig(PipelineModel):
     ] = "per_scene_v1"
     voice_id: str | None = Field(default_factory=default_elevenlabs_voice_id)
     model_id: str = Field(default_factory=default_elevenlabs_model_id)
+    prompting_profile: ElevenLabsPromptingProfile = "plain_text_v1"
     output_format: str = "mp3_44100_128"
     language_code: str = "pt"
     stability: float = 0.55
@@ -331,6 +342,8 @@ class AudioConfig(PipelineModel):
                 "uma alteração exige pedido explícito do usuário e "
                 "speech_rate_policy=explicit_user_override_v1"
             )
+        if self.prompting_profile == "eleven_v3_strategic_tags_v1" and self.model_id != "eleven_v3":
+            raise ValueError("eleven_v3_strategic_tags_v1 exige audio.model_id=eleven_v3.")
         return self
 
     @field_validator("provider", mode="before")
@@ -344,12 +357,26 @@ class ImageConfig(PipelineModel):
     width: int = 1536
     height: int = 1024
     extension: str = ".png"
-    visual_standard_id: Literal["biblical-midcentury-gouache-v1"] = "biblical-midcentury-gouache-v1"
+    visual_standard_id: Literal[
+        "biblical-midcentury-gouache-v1",
+        "biblical-cutout-clay-v1",
+    ] = "biblical-midcentury-gouache-v1"
     enforce_visual_standard: bool = True
     reject_panel_like_images: bool = True
-    scene_planning_standard: Literal["narration_block_visual_v1"] = "narration_block_visual_v1"
-    opening_visual_standard: Literal["scroll_stop_concrete_v1"] = "scroll_stop_concrete_v1"
-    composition_safety_mode: Literal["unrestricted_scene_v1"] = "unrestricted_scene_v1"
+    scene_planning_standard: Literal[
+        "narration_block_visual_v1",
+        "script_audio_edit_plan_assets_v1",
+        "script_visual_blueprint_compiler_v2",
+    ] = "narration_block_visual_v1"
+    opening_visual_standard: Literal[
+        "scroll_stop_concrete_v1",
+        "first_30_dense_hook_v1",
+        "magnetic_visual_hook_v2",
+    ] = "scroll_stop_concrete_v1"
+    composition_safety_mode: Literal[
+        "unrestricted_scene_v1",
+        "reserved_non_overlapping_zones_v1",
+    ] = "unrestricted_scene_v1"
     spoken_reference_image_mode: Literal[
         "generated",
         "fixed_profile_asset_v1",
@@ -365,13 +392,37 @@ class ImageConfig(PipelineModel):
     )
     @classmethod
     def normalize_canonical_visual_contract(cls, value: object, info: Any) -> str:
+        allowed_values = {
+            "visual_standard_id": {
+                "biblical-midcentury-gouache-v1",
+                "biblical-cutout-clay-v1",
+            },
+            "scene_planning_standard": {
+                "narration_block_visual_v1",
+                "script_audio_edit_plan_assets_v1",
+                "script_visual_blueprint_compiler_v2",
+            },
+            "opening_visual_standard": {
+                "scroll_stop_concrete_v1",
+                "first_30_dense_hook_v1",
+                "magnetic_visual_hook_v2",
+            },
+            "composition_safety_mode": {
+                "unrestricted_scene_v1",
+                "reserved_non_overlapping_zones_v1",
+            },
+        }
         canonical_values = {
             "visual_standard_id": "biblical-midcentury-gouache-v1",
             "scene_planning_standard": "narration_block_visual_v1",
             "opening_visual_standard": "scroll_stop_concrete_v1",
             "composition_safety_mode": "unrestricted_scene_v1",
         }
-        return canonical_values[info.field_name]
+        return (
+            str(value)
+            if value in allowed_values[info.field_name]
+            else canonical_values[info.field_name]
+        )
 
     @model_validator(mode="after")
     def validate_spoken_reference_image(self) -> ImageConfig:
@@ -402,6 +453,7 @@ class YouTubeGrowthConfig(PipelineModel):
     generation_mode: Literal[
         "specialist_full_package_v1",
         "compact_metadata_draft_v1",
+        "script_package_local_v1",
     ] = "specialist_full_package_v1"
     validation_mode: Literal[
         "strict_v1",
@@ -421,7 +473,7 @@ class YouTubeGrowthConfig(PipelineModel):
 
 class EditorialPolicyConfig(PipelineModel):
     standard: Literal["scripture_rich_ptbr_v1"] = "scripture_rich_ptbr_v1"
-    authorial_narrator: Literal["jesus_first_person_v1"] = "jesus_first_person_v1"
+    authorial_narrator: AuthorialNarrator = "jesus_first_person_v1"
     forbid_english_editorial_jargon: bool = False
     forbid_generic_text_reference: bool = False
     require_literal_scripture_citations: bool = False
@@ -652,6 +704,131 @@ class ProductionConfig(PipelineModel):
         return migrated
 
 
+class LongFormProductionProfileConfig(PipelineModel):
+    """Opt-in production contract for the layered biblical cutout explainer."""
+
+    enabled: bool = False
+    profile_id: Literal[
+        "standard_long_v1",
+        "biblical_cutout_explainer_7m_v1",
+    ] = "standard_long_v1"
+    target_duration_seconds: int = Field(default=420, ge=180, le=1200)
+    planning_standard: Literal[
+        "standard_scene_plan_v1",
+        "single_pass_timed_edit_plan_v1",
+        "deterministic_script_blueprint_compiler_v2",
+    ] = "standard_scene_plan_v1"
+    renderer: Literal[
+        "ffmpeg_scene_v1",
+        "remotion_layered_cutout_v1",
+    ] = "ffmpeg_scene_v1"
+    block_contract: Literal[
+        "standard_scene_v1",
+        "biblical_cutout_synced_blocks_v3",
+        "biblical_cutout_magnetic_blocks_v4",
+    ] = "standard_scene_v1"
+    validation_mode: Literal[
+        "standard_pipeline_v1",
+        "aggregate_before_asset_generation_v1",
+        "compiled_invariants_once_v2",
+    ] = "standard_pipeline_v1"
+    script_language_standard: Literal[
+        "human_authorial_voice_v1",
+        "conversational_concrete_ptbr_v1",
+    ] = "human_authorial_voice_v1"
+    quote_rendering_standard: Literal[
+        "caption_owned_v1",
+        "renderer_owned_single_boundary_v1",
+    ] = "caption_owned_v1"
+    collision_policy: Literal[
+        "scene_owned_v1",
+        "reserved_non_overlapping_zones_v1",
+    ] = "scene_owned_v1"
+    asset_selection_policy: Literal[
+        "scene_image_v1",
+        "semantic_inventory_no_fallback_v1",
+        "semantic_blueprint_dedup_v2",
+    ] = "scene_image_v1"
+    allowed_block_types: list[
+        Literal[
+            "assets_with_full_text_v1",
+            "center_statement_v1",
+            "fullscreen_image_sequence_v1",
+        ]
+    ] = Field(
+        default_factory=lambda: [
+            "assets_with_full_text_v1",
+            "center_statement_v1",
+            "fullscreen_image_sequence_v1",
+        ]
+    )
+    minimum_asset_hold_seconds: float = Field(default=2.0, ge=1.5, le=6.0)
+    minimum_asset_area_ratio: float = Field(default=0.06, ge=0.04, le=0.5)
+    minimum_text_asset_gap_ratio: float = Field(default=0.025, ge=0.0, le=0.1)
+    maximum_asset_uses: int = Field(default=3, ge=1, le=6)
+    minimum_asset_reuse_gap_seconds: float = Field(default=20.0, ge=5.0, le=90.0)
+    first_30_minimum_blocks: int = Field(default=9, ge=6, le=15)
+    first_30_minimum_visual_events: int = Field(default=12, ge=8, le=24)
+    first_30_maximum_asset_uses: int = Field(default=1, ge=1, le=2)
+    maximum_visual_idle_seconds: float = Field(default=7.0, ge=4.0, le=12.0)
+    planner_model_passes: int = Field(default=0, ge=0, le=1)
+    aggregate_model_repairs: int = Field(default=1, ge=0, le=1)
+    image_worker_limit: int = Field(default=2, ge=1, le=2)
+    captions_enabled: bool = False
+    approved_sfx: list[Literal["whoosh", "click"]] = Field(
+        default_factory=lambda: ["whoosh", "click"]
+    )
+
+    @model_validator(mode="after")
+    def validate_profile_contract(self) -> LongFormProductionProfileConfig:
+        expected_types = [
+            "assets_with_full_text_v1",
+            "center_statement_v1",
+            "fullscreen_image_sequence_v1",
+        ]
+        if self.enabled:
+            legacy_contract = {
+                "profile_id": "biblical_cutout_explainer_7m_v1",
+                "planning_standard": "single_pass_timed_edit_plan_v1",
+                "renderer": "remotion_layered_cutout_v1",
+                "block_contract": "biblical_cutout_synced_blocks_v3",
+                "validation_mode": "aggregate_before_asset_generation_v1",
+                "script_language_standard": "conversational_concrete_ptbr_v1",
+                "quote_rendering_standard": "renderer_owned_single_boundary_v1",
+                "collision_policy": "reserved_non_overlapping_zones_v1",
+                "asset_selection_policy": "semantic_inventory_no_fallback_v1",
+            }
+            direct_contract = {
+                "profile_id": "biblical_cutout_explainer_7m_v1",
+                "planning_standard": "deterministic_script_blueprint_compiler_v2",
+                "renderer": "remotion_layered_cutout_v1",
+                "block_contract": "biblical_cutout_magnetic_blocks_v4",
+                "validation_mode": "compiled_invariants_once_v2",
+                "script_language_standard": "conversational_concrete_ptbr_v1",
+                "quote_rendering_standard": "renderer_owned_single_boundary_v1",
+                "collision_policy": "reserved_non_overlapping_zones_v1",
+                "asset_selection_policy": "semantic_blueprint_dedup_v2",
+            }
+            if not any(
+                all(
+                    getattr(self, field_name) == expected
+                    for field_name, expected in contract.items()
+                )
+                for contract in (legacy_contract, direct_contract)
+            ):
+                raise ValueError(
+                    "O perfil cutout precisa usar um contrato completo e coerente, sem misturar "
+                    "o planejador legado com o compilador determinístico."
+                )
+            if self.allowed_block_types != expected_types:
+                raise ValueError(
+                    "O perfil cutout aceita exatamente os três tipos de bloco oficiais."
+                )
+            if self.captions_enabled:
+                raise ValueError("O perfil cutout não usa legendas convencionais.")
+        return self
+
+
 class ProjectConfig(PipelineModel):
     render: RenderConfig = Field(default_factory=RenderConfig)
     captions: CaptionStyle = Field(default_factory=CaptionStyle)
@@ -660,6 +837,9 @@ class ProjectConfig(PipelineModel):
     music: MusicConfig = Field(default_factory=MusicConfig)
     shorts_script: ShortsScriptConfig = Field(default_factory=ShortsScriptConfig)
     long_form_script: LongFormScriptConfig = Field(default_factory=LongFormScriptConfig)
+    long_form_profile: LongFormProductionProfileConfig = Field(
+        default_factory=LongFormProductionProfileConfig
+    )
     youtube_growth: YouTubeGrowthConfig = Field(default_factory=YouTubeGrowthConfig)
     youtube_publication: YouTubePublicationConfig = Field(default_factory=YouTubePublicationConfig)
     production: ProductionConfig = Field(default_factory=ProductionConfig)
@@ -1113,11 +1293,58 @@ class LongFormEngagementPlan(PipelineModel):
     payoff_connection: str
 
 
+class CutoutAssetCue(PipelineModel):
+    """Concrete cutout requested by the script specialist for one narration cue."""
+
+    semantic_key: str = Field(min_length=1)
+    cue_phrase: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    shareable: bool = False
+
+
+class CutoutFullscreenShot(PipelineModel):
+    """One observable action inside a fullscreen visual sequence."""
+
+    cue_phrase: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+
+
+class CutoutYouTubePackageSeed(PipelineModel):
+    """Creative packaging decided together with the script, before media production."""
+
+    title: str = Field(min_length=1, max_length=100)
+    description: str = Field(min_length=1)
+    primary_keyword: str = Field(min_length=1)
+    secondary_keywords: list[str] = Field(default_factory=list, max_length=8)
+    topics: list[str] = Field(default_factory=list, min_length=8, max_length=15)
+    pinned_comment: str = Field(min_length=1)
+    thumbnail_text_lines: list[str] = Field(min_length=2, max_length=3)
+    thumbnail_emphasis_line: int = Field(default=1, ge=0, le=2)
+    thumbnail_visual_description: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_thumbnail_copy(self) -> CutoutYouTubePackageSeed:
+        if self.thumbnail_emphasis_line >= len(self.thumbnail_text_lines):
+            raise ValueError("thumbnail_emphasis_line precisa apontar para uma linha existente.")
+        if any(len(line.split()) > 4 for line in self.thumbnail_text_lines):
+            raise ValueError("Cada linha da thumbnail aceita no máximo quatro palavras.")
+        return self
+
+
 class NarrationVisualScene(PipelineModel):
     section_id: str
     narration: str
     scene_description: str
     visual_relation: Literal["literal", "contextual", "symbolic"]
+    presentation: Literal[
+        "auto",
+        "assets_with_full_text_v1",
+        "center_statement_v1",
+        "fullscreen_image_sequence_v1",
+    ] = "auto"
+    asset_cues: list[CutoutAssetCue] = Field(default_factory=list, max_length=3)
+    fullscreen_shots: list[CutoutFullscreenShot] = Field(default_factory=list, max_length=4)
+    emphasis_terms: list[str] = Field(default_factory=list, max_length=6)
 
     @model_validator(mode="after")
     def validate_visual_scene(self) -> NarrationVisualScene:
@@ -1125,6 +1352,49 @@ class NarrationVisualScene(PipelineModel):
             raise ValueError("O bloco de narração da cena não pode ficar vazio")
         if not self.scene_description.strip():
             raise ValueError("A descrição específica da cena não pode ficar vazia")
+        if self.presentation == "assets_with_full_text_v1" and not self.asset_cues:
+            raise ValueError("Asset + texto precisa declarar de um a três assets concretos.")
+        if self.presentation == "center_statement_v1" and (
+            self.asset_cues or self.fullscreen_shots
+        ):
+            raise ValueError("Frase central não aceita assets nem sequência fullscreen.")
+        if self.presentation == "fullscreen_image_sequence_v1":
+            if not 2 <= len(self.fullscreen_shots) <= 4:
+                raise ValueError("Sequência fullscreen precisa declarar de duas a quatro ações.")
+            if self.asset_cues:
+                raise ValueError("Sequência fullscreen não aceita assets recortados.")
+        semantic_keys = [cue.semantic_key.casefold().strip() for cue in self.asset_cues]
+        if len(semantic_keys) != len(set(semantic_keys)):
+            raise ValueError("Os assets de um bloco precisam ter chaves semânticas distintas.")
+        missing_asset_cues = [
+            cue.cue_phrase
+            for cue in self.asset_cues
+            if cue.cue_phrase.casefold() not in self.narration.casefold()
+        ]
+        if missing_asset_cues:
+            raise ValueError(
+                "Todo asset precisa ancorar em uma frase literal da narração: "
+                + ", ".join(missing_asset_cues)
+            )
+        asset_descriptions = [cue.description.casefold().strip() for cue in self.asset_cues]
+        if len(asset_descriptions) != len(set(asset_descriptions)):
+            raise ValueError("Os assets de um bloco precisam descrever elementos distintos.")
+        missing_shot_cues = [
+            shot.cue_phrase
+            for shot in self.fullscreen_shots
+            if shot.cue_phrase.casefold() not in self.narration.casefold()
+        ]
+        if missing_shot_cues:
+            raise ValueError(
+                "Toda imagem fullscreen precisa ancorar na narração: "
+                + ", ".join(missing_shot_cues)
+            )
+        shot_descriptions = [shot.description.casefold().strip() for shot in self.fullscreen_shots]
+        if len(shot_descriptions) != len(set(shot_descriptions)):
+            raise ValueError("A sequência fullscreen precisa mostrar ações distintas.")
+        shot_cues = [shot.cue_phrase.casefold().strip() for shot in self.fullscreen_shots]
+        if len(shot_cues) != len(set(shot_cues)):
+            raise ValueError("Cada ação fullscreen precisa ter um cue diferente.")
         return self
 
 
@@ -1149,7 +1419,7 @@ class LongFormScriptStrategy(PipelineModel):
     opening_conflict: str = ""
     opening_line: str = ""
     creative_mode: CreativeMode = "auto"
-    narrator_identity: Literal["jesus_first_person_v1"] = "jesus_first_person_v1"
+    narrator_identity: AuthorialNarrator = "jesus_first_person_v1"
     interpretive_stance: InterpretiveStance = "expository"
     hook_policy: HookPolicy = "auto"
     hook_family: HookFamily = "auto"
@@ -1164,6 +1434,7 @@ class LongFormScriptStrategy(PipelineModel):
     callback: str = ""
     engagement: LongFormEngagementPlan
     visual_scenes: list[NarrationVisualScene] = Field(min_length=1, max_length=240)
+    youtube_package: CutoutYouTubePackageSeed | None = None
     source_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -1218,6 +1489,18 @@ class LongFormScriptStrategy(PipelineModel):
                 and not self.practical_application.strip()
             ):
                 raise ValueError("O modo devocional precisa declarar aplicação prática")
+        if self.youtube_package is not None:
+            if self.visual_scenes[0].presentation == "center_statement_v1":
+                raise ValueError("O perfil cutout não pode abrir com texto central.")
+            presentations = {scene.presentation for scene in self.visual_scenes}
+            required_presentations = {
+                "assets_with_full_text_v1",
+                "fullscreen_image_sequence_v1",
+            }
+            if not required_presentations.issubset(presentations):
+                raise ValueError(
+                    "O blueprint cutout precisa combinar asset + texto e sequência fullscreen."
+                )
         beat_ids = [beat.beat_id for beat in self.progression]
         if len(set(beat_ids)) != len(beat_ids):
             raise ValueError("beat_id precisa ser único na estratégia longa")
@@ -1588,6 +1871,9 @@ class AudioManifest(PipelineModel):
     sample_rate: int
     narration_path: str
     duration: float
+    prompting_profile: ElevenLabsPromptingProfile = "plain_text_v1"
+    synthesis_prompt_path: str | None = None
+    synthesis_prompt_hash: str | None = None
     segments: list[AudioSegment]
     words: list[WordTiming]
 

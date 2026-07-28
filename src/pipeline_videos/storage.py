@@ -108,6 +108,10 @@ class ProjectLayout:
         return self.root / "script" / "narration.txt"
 
     @property
+    def audio_synthesis_prompt(self) -> Path:
+        return self.root / "audio" / "tts-prompt.json"
+
+    @property
     def approved_script_lock(self) -> Path:
         return self.root / "script" / "approved-lock.json"
 
@@ -142,6 +146,46 @@ class ProjectLayout:
     @property
     def continuity(self) -> Path:
         return self.root / "visual" / "continuity.json"
+
+    @property
+    def long_form_edit_plan(self) -> Path:
+        return self.root / "visual" / "edit-plan.json"
+
+    @property
+    def long_form_edit_plan_queue(self) -> Path:
+        return self.root / "visual" / "edit-plan-queue.json"
+
+    @property
+    def long_form_edit_plan_staging(self) -> Path:
+        return self.root / "visual" / "staging" / "long-form-visual-editor"
+
+    @property
+    def long_form_edit_plan_staging_file(self) -> Path:
+        return self.long_form_edit_plan_staging / "edit-plan.json"
+
+    @property
+    def long_form_asset_inventory(self) -> Path:
+        return self.root / "visual" / "asset-inventory.json"
+
+    @property
+    def long_form_asset_queue(self) -> Path:
+        return self.root / "visual" / "asset-queue.json"
+
+    @property
+    def long_form_asset_files(self) -> Path:
+        return self.root / "visual" / "assets" / "files"
+
+    @property
+    def long_form_asset_staging(self) -> Path:
+        return self.root / "visual" / "assets" / "staging"
+
+    @property
+    def long_form_asset_jobs(self) -> Path:
+        return self.root / "visual" / "assets" / "jobs"
+
+    @property
+    def long_form_edit_preflight(self) -> Path:
+        return self.root / "audit" / "edit-plan-preflight.json"
 
     @property
     def scenes(self) -> Path:
@@ -260,6 +304,18 @@ class ProjectLayout:
         return self.root / "youtube" / "growth-warnings.json"
 
     @property
+    def thumbnail_plan(self) -> Path:
+        return self.root / "youtube" / "thumbnail-plan.json"
+
+    @property
+    def thumbnail_png(self) -> Path:
+        return self.root / "youtube" / "thumbnail.png"
+
+    @property
+    def thumbnail_jpg(self) -> Path:
+        return self.root / "youtube" / "thumbnail.jpg"
+
+    @property
     def publication(self) -> Path:
         return self.root / "youtube" / "publication.json"
 
@@ -303,6 +359,11 @@ class ProjectLayout:
             self.biblical_review.parent,
             self.shorts_biblical_review_staging,
             self.style_profile.parent,
+            self.long_form_edit_plan_staging,
+            self.long_form_edit_preflight.parent,
+            self.long_form_asset_files,
+            self.long_form_asset_staging,
+            self.long_form_asset_jobs,
             self.scenes.parent,
             self.image_assets,
             self.image_staging,

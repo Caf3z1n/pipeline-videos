@@ -10,7 +10,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, field_validator, model_validator
 
-from pipeline_videos.models import MIN_SHORT_DURATION_SECONDS, PipelineModel
+from pipeline_videos.models import (
+    MIN_SHORT_DURATION_SECONDS,
+    ElevenLabsVoiceVariant,
+    PipelineModel,
+)
 from pipeline_videos.remote_jobs import RemoteJobStore, RemoteVideoJob, RemoteVideoRequest
 from pipeline_videos.storage import write_json
 from pipeline_videos.utils import sha256_value, slugify, utc_now
@@ -56,7 +60,7 @@ class DailyShortSchedule(PipelineModel):
     timezone: str = "America/Sao_Paulo"
     duration_seconds: int = Field(default=50, ge=MIN_SHORT_DURATION_SECONDS, le=180)
     editorial_profile: Literal["verse_led_v1", "high_stakes_biblical_question_v1"] = "verse_led_v1"
-    voice_variant: Literal["jesus_1", "jesus_2"] = "jesus_1"
+    voice_variant: ElevenLabsVoiceVariant = "jesus_1"
     music_track: Literal["leaning", "aloboi"] = "leaning"
     script_source: Literal["automatic_catalog", "approved_pool"] = "automatic_catalog"
     publication_mode: Literal["private_review", "scheduled"] = "scheduled"
@@ -129,7 +133,7 @@ class RemoteScheduleStore:
         editorial_profile: Literal[
             "verse_led_v1", "high_stakes_biblical_question_v1"
         ] = "verse_led_v1",
-        voice_variant: Literal["jesus_1", "jesus_2"] = "jesus_1",
+        voice_variant: ElevenLabsVoiceVariant = "jesus_1",
         music_track: Literal["leaning", "aloboi"] = "leaning",
         enabled: bool = True,
         external_services_authorized: bool,

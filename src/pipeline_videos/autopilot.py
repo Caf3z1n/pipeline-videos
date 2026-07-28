@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pipeline_videos.models import StageStatus
 from pipeline_videos.storage import ProjectLayout, read_json, write_json
-from pipeline_videos.utils import relative_posix, utc_now
+from pipeline_videos.utils import relative_posix, sha256_value, utc_now
 
 
 @dataclass(frozen=True)
@@ -83,17 +83,52 @@ def collect_external_waits(layout: ProjectLayout) -> list[dict[str, Any]]:
         )
         return waits
 
-    pending_images = _pending_image_entries(layout)
-    if pending_images:
-        queue = read_json(layout.image_queue)
-        waits.append(
-            {
-                "kind": "images",
-                "ready": _all_staged_images_ready(layout),
-                "pending": len(pending_images),
-                "worker_job_files": queue.get("orchestration", {}).get("worker_job_files", {}),
-            }
-        )
+    if project.config.long_form_profile.enabled:
+        if not layout.long_form_edit_plan.is_file() and layout.long_form_edit_plan_queue.is_file():
+            waits.append(
+                {
+                    "kind": "long_form_edit_plan",
+                    "ready": _is_nonempty_file(layout.long_form_edit_plan_staging_file),
+                    "queue": relative_posix(
+                        layout.long_form_edit_plan_queue,
+                        layout.root,
+                    ),
+                }
+            )
+        elif layout.long_form_asset_queue.is_file():
+            asset_queue = read_json(layout.long_form_asset_queue)
+            pending_assets = [
+                item
+                for item in asset_queue.get("items", [])
+                if isinstance(item, dict) and item.get("status") != "completed"
+            ]
+            if pending_assets:
+                waits.append(
+                    {
+                        "kind": "cutout_assets",
+                        "ready": _cutout_asset_staging_ready(layout),
+                        "pending": len(pending_assets),
+                        "jobs_directory": relative_posix(
+                            layout.long_form_asset_jobs,
+                            layout.root,
+                        ),
+                    }
+                )
+    else:
+        pending_images = _pending_image_entries(layout)
+        if pending_images:
+            queue = read_json(layout.image_queue)
+            waits.append(
+                {
+                    "kind": "images",
+                    "ready": _all_staged_images_ready(layout),
+                    "pending": len(pending_images),
+                    "worker_job_files": queue.get("orchestration", {}).get(
+                        "worker_job_files",
+                        {},
+                    ),
+                }
+            )
 
     if (
         project.config.audio.provider == "local_manual"
@@ -145,16 +180,44 @@ def prepare_local_coordinator_job(layout: ProjectLayout) -> dict[str, Any]:
     project = layout.load_manifest()
     external_roles: dict[str, Any] = {
         "image_workers": {
-            "jobs_directory": relative_posix(layout.image_jobs, layout.root),
-            "maximum_parallel": min(2, project.config.production.image_workers),
+            "jobs_directory": relative_posix(
+                (
+                    layout.long_form_asset_jobs
+                    if project.config.long_form_profile.enabled
+                    else layout.image_jobs
+                ),
+                layout.root,
+            ),
+            "maximum_parallel": (
+                project.config.long_form_profile.image_worker_limit
+                if project.config.long_form_profile.enabled
+                else min(2, project.config.production.image_workers)
+            ),
             "reasoning_effort": "low",
+            "fork_turns": "none",
+            "when_present": True,
         },
     }
-    if project.config.youtube_growth.enabled:
+    if (
+        project.config.youtube_growth.enabled
+        and project.config.youtube_growth.use_specialist_subagent
+    ):
         external_roles["youtube_growth_specialist"] = {
             "queue": relative_posix(layout.growth_queue, layout.root),
             "reasoning_effort": "medium",
             "when_present": True,
+        }
+    if (
+        project.config.long_form_profile.enabled
+        and project.config.long_form_profile.planner_model_passes > 0
+    ):
+        external_roles["long_form_visual_editor"] = {
+            "queue": relative_posix(layout.long_form_edit_plan_queue, layout.root),
+            "reasoning_effort": "medium",
+            "fork_turns": "none",
+            "when_ready_after_audio": True,
+            "model_pass_limit": project.config.long_form_profile.planner_model_passes,
+            "aggregate_repair_limit": (project.config.long_form_profile.aggregate_model_repairs),
         }
     if (
         project.video_format == "short"
@@ -218,10 +281,226 @@ def prepare_local_coordinator_job(layout: ProjectLayout) -> dict[str, Any]:
             "natural_voice_speed": project.config.audio.speed,
             "forbid_duration_based_speech_rate_changes": True,
             "forbid_duration_padding_or_time_stretch": True,
+            "long_form_profile": project.config.long_form_profile.profile_id,
+            "plan_before_assets": project.config.long_form_profile.enabled,
+            "asset_generation_requires_valid_aggregate_preflight": (
+                project.config.long_form_profile.enabled
+            ),
+            "forbid_text_asset_overlap": project.config.long_form_profile.enabled,
+            "forbid_generic_asset_fallback": project.config.long_form_profile.enabled,
         },
     }
     write_json(layout.coordinator_job, payload)
     return payload
+
+
+def _cutout_asset_staging_ready(layout: ProjectLayout) -> bool:
+    if not layout.long_form_asset_queue.is_file():
+        return False
+    queue = read_json(layout.long_form_asset_queue)
+    if not isinstance(queue, dict) or not isinstance(queue.get("items"), list):
+        return False
+    pending = [
+        item
+        for item in queue["items"]
+        if isinstance(item, dict) and item.get("status") != "completed"
+    ]
+    return bool(pending) and all(
+        isinstance(item.get("staging_path"), str)
+        and _is_nonempty_file(layout.root / item["staging_path"])
+        for item in pending
+    )
+
+
+def _run_cutout_autopilot_once(
+    layout: ProjectLayout,
+    *,
+    allow_external: bool,
+    force: bool,
+) -> AutopilotResult:
+    """Run the opt-in plan-first profile without entering the legacy image/render path."""
+
+    from pipeline_videos.audio import generate_audio
+    from pipeline_videos.long_form_profile import (
+        compile_project_edit_plan,
+        import_profile_assets,
+        prepare_profile_asset_queue,
+    )
+    from pipeline_videos.music import select_music
+    from pipeline_videos.scenes import build_scenes
+    from pipeline_videos.state import complete_stage
+
+    if layout.approved_script_lock.is_file():
+        from pipeline_videos.approved_scripts import verify_project_approved_script_lock
+
+        verify_project_approved_script_lock(layout)
+    else:
+        from pipeline_videos.review import validate_draft_preflight
+
+        validate_draft_preflight(layout)
+    build_scenes(layout, force=force, skip_approvals=True)
+
+    project = layout.load_manifest()
+    if project.config.audio.provider == "local_manual":
+        from pipeline_videos.manual_audio import prepare_manual_audio
+
+        prepare_manual_audio(layout, force=force)
+        if project.stages["audio"].status != StageStatus.COMPLETED:
+            result = AutopilotResult(
+                "waiting_external",
+                [
+                    {
+                        "kind": "manual_audio",
+                        "ready": False,
+                        "queue": relative_posix(layout.manual_audio_queue, layout.root),
+                    }
+                ],
+            )
+            _write_state(layout, result)
+            return result
+    else:
+        generate_audio(layout, force=force, allow_external=allow_external)
+    select_music(layout, force=force)
+
+    project = layout.load_manifest()
+    if (
+        not project.demo
+        and project.config.youtube_growth.enabled
+        and project.stages["youtube_growth"].status != StageStatus.COMPLETED
+    ):
+        from pipeline_videos.growth import prepare_growth_queue
+
+        prepare_growth_queue(layout, force=force)
+
+    _, report, _ = compile_project_edit_plan(layout, force=force)
+    if not report.valid:
+        raise RuntimeError("O plano visual cutout não preservou os invariantes compilados.")
+
+    queue = prepare_profile_asset_queue(layout, force=force)
+    if queue["items"]:
+        if _cutout_asset_staging_ready(layout):
+            inventory = import_profile_assets(layout)
+            complete_stage(
+                layout,
+                "images",
+                sha256_value(inventory),
+                [
+                    relative_posix(layout.long_form_asset_inventory, layout.root),
+                    relative_posix(layout.long_form_asset_queue, layout.root),
+                ],
+                provider="cutout-profile-asset-batch",
+            )
+        else:
+            result = AutopilotResult(
+                "waiting_external",
+                [
+                    {
+                        "kind": "cutout_assets",
+                        "ready": False,
+                        "pending": len(queue["items"]),
+                        "queue": relative_posix(
+                            layout.long_form_asset_queue,
+                            layout.root,
+                        ),
+                        "jobs_directory": relative_posix(
+                            layout.long_form_asset_jobs,
+                            layout.root,
+                        ),
+                    }
+                ],
+            )
+            _write_state(layout, result)
+            return result
+    else:
+        inventory = read_json(layout.long_form_asset_inventory)
+        complete_stage(
+            layout,
+            "images",
+            sha256_value(inventory),
+            [
+                relative_posix(layout.long_form_asset_inventory, layout.root),
+                relative_posix(layout.long_form_asset_queue, layout.root),
+            ],
+            provider="cutout-profile-reused-assets",
+        )
+
+    project = layout.load_manifest()
+    if project.config.youtube_growth.generation_mode == "script_package_local_v1":
+        from pipeline_videos.growth import materialize_cutout_growth_package
+        from pipeline_videos.thumbnail import compose_cutout_thumbnail
+
+        materialize_cutout_growth_package(layout, force=force)
+        compose_cutout_thumbnail(layout, force=force)
+
+    project = layout.load_manifest()
+    project.stages["image_manifest"] = project.stages["image_manifest"].model_copy(
+        update={
+            "status": StageStatus.SKIPPED,
+            "note": "O perfil cutout usa inventário deduplicado em vez do manifesto por cena.",
+        }
+    )
+    project.stages["captions"] = project.stages["captions"].model_copy(
+        update={
+            "status": StageStatus.SKIPPED,
+            "note": "O perfil cutout não usa legendas convencionais.",
+        }
+    )
+    layout.save_manifest(project)
+
+    from pipeline_videos.cutout_render import render_cutout_profile
+
+    render_result = render_cutout_profile(layout, force=force)
+    project = layout.load_manifest()
+    if (
+        not project.demo
+        and project.config.youtube_growth.enabled
+        and project.stages["youtube_growth"].status != StageStatus.COMPLETED
+        and _growth_outputs_ready(layout)
+    ):
+        from pipeline_videos.growth import import_growth_package
+
+        import_growth_package(layout, force=force)
+    waits = [
+        wait
+        for wait in collect_external_waits(layout)
+        if wait.get("kind") == "youtube_growth" and not wait.get("ready")
+    ]
+    if waits:
+        result = AutopilotResult(
+            "waiting_external",
+            waits,
+            render_path=layout.final_video,
+            validation_ok=True,
+        )
+        _write_state(layout, result)
+        return result
+
+    from pipeline_videos.metadata import build_metadata
+
+    project = layout.load_manifest()
+    if not project.demo and project.config.youtube_growth.enabled:
+        if project.stages["metadata"].status != StageStatus.COMPLETED:
+            from pipeline_videos.growth import refresh_growth_metadata
+
+            refresh_growth_metadata(layout)
+    elif project.stages["metadata"].status != StageStatus.COMPLETED:
+        build_metadata(layout, force=force)
+    validation_path = layout.long_form_edit_preflight.parent / "cutout-render.json"
+    complete_stage(
+        layout,
+        "validation",
+        render_result["input_hash"],
+        [relative_posix(validation_path, layout.root)],
+        provider="cutout-profile-aggregate-validator",
+    )
+    result = AutopilotResult(
+        "completed",
+        [],
+        render_path=layout.final_video,
+        validation_ok=True,
+    )
+    _write_state(layout, result)
+    return result
 
 
 def run_autopilot_once(
@@ -232,6 +511,12 @@ def run_autopilot_once(
 ) -> AutopilotResult:
     prepare_local_coordinator_job(layout)
     project = layout.load_manifest()
+    if project.config.long_form_profile.enabled:
+        return _run_cutout_autopilot_once(
+            layout,
+            allow_external=allow_external,
+            force=force,
+        )
 
     if (
         project.video_format == "short"

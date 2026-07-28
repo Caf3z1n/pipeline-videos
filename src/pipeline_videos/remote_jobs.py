@@ -2031,6 +2031,8 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
     )
     briefing = Briefing.model_validate(read_json(layout.briefing))
     is_creative = long_config.narrative_standard == "creative_retention_long_v2"
+    cutout_profile = project.config.long_form_profile.enabled
+    narrator_identity = project.config.editorial_policy.authorial_narrator
     creative_contract = {
         "narrative_standard": long_config.narrative_standard,
         "content_promise_source": "briefing.central_theme",
@@ -2040,7 +2042,14 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
         "pacing_profile": "long_creative_v2" if is_creative else "long_retention_v1",
         "creative_mode": briefing.creative_mode if is_creative else None,
         "interpretive_stance": briefing.interpretive_stance if is_creative else None,
-        "mode_guidance": (creative_mode_payload(briefing.creative_mode) if is_creative else None),
+        "mode_guidance": (
+            creative_mode_payload(
+                briefing.creative_mode,
+                narrator_identity=narrator_identity,
+            )
+            if is_creative
+            else None
+        ),
         "hook_policy": briefing.hook_policy if is_creative else "required",
         "hook_family": briefing.hook_family if is_creative else None,
         "hook_templates": HOOK_TEMPLATE_EXAMPLES if is_creative else None,
@@ -2067,21 +2076,77 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
             else None
         ),
         "authorial_narration_standard": "human_authorial_voice_v1",
-        "narrator_identity": "jesus_first_person_v1",
-        "visual_scene_standard": "narration_block_visual_v1",
-        "visual_style": "biblical-midcentury-gouache-v1",
+        "narrator_identity": narrator_identity,
+        "visual_scene_standard": (
+            "script_visual_blueprint_compiler_v2" if cutout_profile else "narration_block_visual_v1"
+        ),
+        "visual_style": (
+            "biblical-cutout-clay-v1" if cutout_profile else "biblical-midcentury-gouache-v1"
+        ),
     }
+    visual_scene_instruction = (
+        (
+            "Divida integralmente a locução em long_form_strategy.visual_scenes. Cada item copia "
+            "um bloco contíguo, preserva a ordem e já decide presentation, emphasis_terms e de "
+            "um a três asset_cues ancorados em frases literais. Use asset + texto lado a lado "
+            "como base, center_statement somente para referência bíblica ou frase rara e "
+            "fullscreen_image_sequence para duas a quatro ações visualmente distintas. O hook "
+            "começa com asset ou ação, nunca com tela de texto. Não use ícone genérico quando "
+            "houver personagem, objeto ou ação bíblica concreta. Como direção de ritmo, use "
+            "asset + texto em cerca de metade a dois terços dos blocos, fullscreen em cerca de "
+            "um quarto e texto central quase só nas referências. Faça cada shot fullscreen "
+            "cobrir aproximadamente três a cinco segundos de fala e escolha a quantidade de "
+            "shots de acordo com a extensão do trecho."
+        )
+        if cutout_profile
+        else (
+            "Divida integralmente a locução em long_form_strategy.visual_scenes. Cada item "
+            "copia um bloco contíguo da narração, preserva a ordem e descreve uma cena "
+            "concreta, distinta e criativa em guache editorial cristão de meados do século. "
+            "Use relações literal, contextual ou symbolic; varie ação, ambiente, objeto, "
+            "escala e simbolismo, sem colagem, painéis, texto legível ou visual 3D."
+        )
+    )
+    packaging_instruction = (
+        (
+            "Preencha long_form_strategy.youtube_package com uma única combinação final. O "
+            "título complementa a thumbnail, traz a passagem depois da barra e usa um termo "
+            "cristão verdadeiro para o tema. A thumbnail usa duas ou três linhas curtas em "
+            "Knewave, uma linha de ênfase e uma descrição 3D em massinha com composição bíblica "
+            "à direita e área limpa à esquerda. A descrição abre pelo assunto e inclui a "
+            "timeline das citações."
+        )
+        if cutout_profile
+        else ""
+    )
+    narrator_instructions = (
+        [
+            (
+                "Toda a voz autoral usa um narrador bíblico explicativo em terceira pessoa. "
+                "Nunca escreva como se Jesus estivesse narrando nem atribua a Ele uma "
+                "dramatização em primeira pessoa."
+            ),
+            (
+                "Fale de Jesus em terceira pessoa. Somente excerpts verificados entre aspas "
+                "podem ser apresentados como palavras bíblicas literais."
+            ),
+        ]
+        if narrator_identity == "biblical_explainer_third_person_v1"
+        else [
+            (
+                "Toda a voz autoral é Jesus narrando em primeira pessoa. Escreva como Jesus "
+                "contando o que viveu, ensinou, viu, fez e sentiu, sem transformar a narração "
+                "em uma imitação de versículo."
+            ),
+            (
+                "Separe com rigor a dramatização autoral das citações: apenas excerpts "
+                "verificados entre aspas são palavras bíblicas literais. As demais frases em "
+                "primeira pessoa são narração dramatizada sustentada pelas fontes."
+            ),
+        ]
+    )
     authorial_style_instructions = [
-        (
-            "Toda a voz autoral é Jesus narrando em primeira pessoa. Escreva como Jesus contando "
-            "o que viveu, ensinou, viu, fez e sentiu, sem transformar a narração em uma imitação "
-            "de versículo."
-        ),
-        (
-            "Separe com rigor a dramatização autoral das citações: apenas excerpts verificados "
-            "entre aspas são palavras bíblicas literais. As demais frases em primeira pessoa são "
-            "narração dramatizada sustentada pelas fontes."
-        ),
+        *narrator_instructions,
         (
             "Aplique human_authorial_voice_v1 a toda locução autoral, independentemente do modo. "
             "Narre diretamente o fato, a ação, a dúvida ou a explicação e nunca descreva o próprio "
@@ -2182,6 +2247,12 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 "continua precisando de uma abertura específica e útil; não simule urgência."
             ),
             (
+                "Nos primeiros trinta segundos, entregue a promessa do título e da thumbnail "
+                "por uma sequência concreta de acontecimento, pergunta e primeira pista. Abra uma "
+                "lacuna de informação que possa ser respondida pelo vídeo, sem adiar "
+                "artificialmente a resposta nem forçar uma citação antes de ela ter função."
+            ),
+            (
                 "Copie briefing.audience em target_viewer, briefing.central_theme em "
                 "content_promise e briefing.viewer_outcome em viewer_takeaway. central_question, "
                 "practical_application e callback são opcionais, salvo quando mode_guidance "
@@ -2192,6 +2263,12 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 "evidência, contexto, comparação, argumento, consequência, revelação ou síntese; "
                 "não reformule a mesma mensagem motivacional."
             ),
+            (
+                "Faça cada movimento mudar o entendimento do espectador: apresente um fato ou "
+                "ação, mostre por que ele cria a pergunta, traga evidência bíblica e explique a "
+                "implicação em português falado. Reengaje com nova evidência, contraste ou "
+                "consequência, nunca com metalinguagem sobre o próprio vídeo."
+            ),
             *storytelling_instructions,
             (
                 "Cada beat mapeia exatamente uma seção em ordem; copie viewer_value em "
@@ -2199,13 +2276,8 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 f"{required_reengagements} reengajamentos e nunca passe de "
                 f"{long_config.maximum_reengagement_gap_seconds:.0f}s sem valor novo."
             ),
-            (
-                "Divida integralmente a locução em long_form_strategy.visual_scenes. Cada item "
-                "copia um bloco contíguo da narração, preserva a ordem e descreve uma cena "
-                "concreta, distinta e criativa em guache editorial cristão de meados do século. "
-                "Use relações literal, contextual ou symbolic; varie ação, ambiente, objeto, "
-                "escala e simbolismo, sem colagem, painéis, texto legível ou visual 3D."
-            ),
+            visual_scene_instruction,
+            *([packaging_instruction] if packaging_instruction else []),
             (
                 "Mapeie cada citação em scripture_anchors na mesma ordem da locução. Insira a "
                 "primeira até "
@@ -2213,11 +2285,20 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 "e faça cada citação cumprir função narrativa ou argumentativa real."
             ),
             (
+                "Varie naturalmente a apresentação das citações. A referência pode vir antes ou "
+                "depois do trecho literal. Preserve as aspas no roteiro e não repita "
+                "automaticamente a fórmula 'lemos'."
+            ),
+            (
                 "Declare resolution_timing conforme o modo. A resolução pode ser conclusão "
                 "factual, síntese analítica, posição filosófica, incerteza preservada ou "
                 "aplicação. "
                 "Copie resolution e viewer_takeaway no beat de resolution; não force uma lição "
                 "para a vida."
+            ),
+            (
+                "O payoff responde exatamente à pergunta ou contradição aberta no início, fecha a "
+                "cadeia de evidências e só então permite o CTA."
             ),
             (
                 "A closing termina imediatamente após exatamente uma ação de CTA: comentar, "
@@ -2251,11 +2332,8 @@ def _long_script_phase_spec(layout: ProjectLayout) -> CodexPhaseSpec:
                 f"{long_config.maximum_reengagement_gap_seconds:.0f}s sem nova informação."
             ),
             "Preencha long_form_strategy por completo e mapeie cada seção em ordem.",
-            (
-                "Divida integralmente a locução em long_form_strategy.visual_scenes. Cada bloco "
-                "é contíguo, reconstrói a seção sem lacunas e recebe uma cena concreta e distinta "
-                "no padrão biblical-midcentury-gouache-v1, sem 3D, colagem ou texto legível."
-            ),
+            visual_scene_instruction,
+            *([packaging_instruction] if packaging_instruction else []),
             "Mapeie cada citação em scripture_anchors na mesma ordem da locução.",
             "Reserve payoff e aplicação para o quarto final e retome a abertura no callback.",
             "A closing termina imediatamente após exatamente uma ação de CTA.",
@@ -3013,13 +3091,18 @@ def _validate_long_script_staging(
         policy=project.config.editorial_policy,
         sources=sources,
     )
-    validate_long_form_retention_script(
-        document,
-        target_duration_seconds=project.target_duration_seconds,
-        config=project.config.long_form_script,
-        sources=sources,
-        briefing=Briefing.model_validate(read_json(layout.briefing)),
-    )
+    if project.config.long_form_profile.enabled:
+        from pipeline_videos.long_form_profile import validate_cutout_script_blueprint
+
+        validate_cutout_script_blueprint(document)
+    else:
+        validate_long_form_retention_script(
+            document,
+            target_duration_seconds=project.target_duration_seconds,
+            config=project.config.long_form_script,
+            sources=sources,
+            briefing=Briefing.model_validate(read_json(layout.briefing)),
+        )
     if review.script_version != document.version:
         raise ValueError("A revisão em staging não corresponde ao roteiro longo.")
     return document, review

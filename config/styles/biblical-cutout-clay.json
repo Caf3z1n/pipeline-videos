@@ -1,0 +1,33 @@
+{
+  "style_id": "biblical-cutout-clay",
+  "name": "Explicador bíblico 3D em massinha",
+  "medium": "render 3D de massinha e soft vinyl, com aparência de brinquedo colecionável fosco",
+  "principles": [
+    "estilo mascote 3D de massinha, cute clay render e soft vinyl toy",
+    "proporções chibi, formas arredondadas e olhos ovais simples",
+    "textura suave e fosca, cores vibrantes controladas e iluminação difusa de estúdio",
+    "sombras macias, composição minimalista e leitura imediata em 16:9",
+    "personagens, objetos e símbolos precisam representar literalmente a narração do bloco",
+    "assets recortados usam chroma key uniforme e folga limpa ao redor de toda a silhueta",
+    "asset e texto ocupam metades laterais independentes e nunca se sobrepõem",
+    "um asset pode ser dominante; combinações usam dois ou três elementos menores em escalas variadas",
+    "imagens fullscreen mostram estágios distintos de uma ação, sem texto nem elementos de interface",
+    "personagens recorrentes mantêm rosto, cabelo, roupa, proporções, silhueta e paleta",
+    "thumbnail usa fundo bíblico quente texturizado, personagens e objetos à direita e reserva limpa à esquerda para tipografia"
+  ],
+  "negative_constraints": [
+    "sem fotografia, live action, fotorrealismo, pele humana realista ou textura de poros",
+    "sem anime, ilustração 2D, pintura, low-poly ou metal brilhante",
+    "sem texto, legenda, letras, números, logotipo ou marca-d'água dentro da imagem",
+    "sem colagem, quadrinhos, storyboard, díptico, tríptico ou múltiplos painéis",
+    "sem assets cortados, pequenos demais, encostados nas bordas ou com chroma key irregular",
+    "sem texto acima, abaixo ou sobre qualquer asset",
+    "sem assets igualmente pequenos repetidos em todos os blocos",
+    "sem objeto genérico quando a narração não fornecer uma relação semântica explícita",
+    "sem sobreposição de personagens, objetos ou elementos que altere o sentido da cena",
+    "sem duas imagens fullscreen quase idênticas na mesma sequência",
+    "sem violência gráfica"
+  ],
+  "visual_standard_id": "biblical-cutout-clay-v1",
+  "reference_note": "Padrão oficial do perfil biblical_cutout_explainer_7m_v1: massinha 3D fosca e chibi para assets recortados e sequências fullscreen, sempre semanticamente ligadas à narração."
+}

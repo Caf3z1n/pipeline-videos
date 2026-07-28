@@ -1,0 +1,19 @@
+{
+  "skillVersion": "1.0",
+  "generatedAt": "2026-07-28T00:00:00Z",
+  "references": {
+    "product": "PRODUCT.md",
+    "design": "DESIGN.md"
+  },
+  "system": {
+    "surface": "biblical_cutout_explainer_7m_v1",
+    "visualLanguage": "warm biblical clay explainer",
+    "displayFont": "Knewave",
+    "layoutContracts": [
+      "asset_text_side_by_side",
+      "centered_reference_without_asset",
+      "fullscreen_action_without_overlay"
+    ],
+    "thumbnailContract": "text_left_clay_subjects_right"
+  }
+}

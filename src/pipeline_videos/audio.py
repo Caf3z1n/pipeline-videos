@@ -9,6 +9,7 @@ import random
 import re
 import struct
 import time
+import unicodedata
 import wave
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -46,13 +47,16 @@ ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
 ELEVENLABS_ENDPOINT = "https://api.elevenlabs.io/v1/text-to-speech"
 ELEVENLABS_RETRYABLE_STATUSES = frozenset({429, 500, 503})
 ELEVENLABS_MAX_RETRIES = 3
-AUDIO_ALGORITHM_VERSION = "2.1"
+AUDIO_ALGORITHM_VERSION = "2.2"
 
 _MOCK_WORD_FRAMES = 18_000  # 375 ms at 48 kHz
 _MOCK_SPOKEN_FRAMES = 14_400  # 300 ms at 48 kHz
 _VERSION_RE = re.compile(r"-v(?P<version>\d+)\.wav$", flags=re.IGNORECASE)
 _WORD_RE = re.compile(r"\S+", flags=re.UNICODE)
 _SUSPICIOUS_QUESTION_MARK_RE = re.compile(r"(?<=\w)\?(?=[\w-])", flags=re.UNICODE)
+_ELEVEN_V3_AUDIO_TAG_RE = re.compile(r"^\[[a-z]+\]$", flags=re.IGNORECASE)
+_ELEVEN_V3_AUDIO_TAG_IN_TEXT_RE = re.compile(r"\[[a-z]+\]\s*", flags=re.IGNORECASE)
+_ELEVEN_V3_STRATEGIC_TAGS = frozenset({"curious", "thoughtful", "surprised"})
 
 
 class HttpPoster(Protocol):
@@ -99,6 +103,87 @@ class NarrationGroup:
     @property
     def text(self) -> str:
         return " ".join(scene.narration.strip() for scene in self.scenes)
+
+
+def _delivery_signal(value: str) -> str:
+    folded = unicodedata.normalize("NFKD", value).casefold()
+    return "".join(character for character in folded if not unicodedata.combining(character))
+
+
+def _eleven_v3_delivery_tag(scene: Scene, *, index: int, total: int) -> str:
+    """Choose a restrained, voice-only v3 tag from the scene's narrative function."""
+
+    signal = _delivery_signal(
+        " ".join((scene.narrative_function, scene.emotional_intent, scene.narration[:180]))
+    )
+    if index == 0 or "pergunta" in signal or "curios" in signal:
+        return "curious"
+    if any(
+        marker in signal for marker in ("reengaj", "reveal", "revel", "payoff", "resolu", "virada")
+    ):
+        return "surprised"
+    if index == total - 1:
+        return "thoughtful"
+    return "thoughtful"
+
+
+def _eleven_v3_prompt_for_scenes(
+    scenes: Sequence[Scene],
+) -> tuple[str, list[dict[str, str]]]:
+    """Add strategic delivery tags without changing any spoken word."""
+
+    parts: list[str] = []
+    records: list[dict[str, str]] = []
+    for index, scene in enumerate(scenes):
+        tag = _eleven_v3_delivery_tag(scene, index=index, total=len(scenes))
+        if tag not in _ELEVEN_V3_STRATEGIC_TAGS:
+            raise ValueError(f"Tag Eleven v3 não aprovada pelo perfil: {tag!r}.")
+        narration = scene.narration.strip()
+        parts.append(f"[{tag}] {narration}")
+        records.append(
+            {
+                "scene_id": scene.scene_id,
+                "tag": tag,
+                "narration": narration,
+            }
+        )
+    prompt = " ".join(parts).strip()
+    spoken_prompt_words = [
+        token for token in _WORD_RE.findall(prompt) if not _ELEVEN_V3_AUDIO_TAG_RE.fullmatch(token)
+    ]
+    narration_words = _WORD_RE.findall(" ".join(scene.narration.strip() for scene in scenes))
+    if spoken_prompt_words != narration_words:
+        raise ValueError(
+            "As tags Eleven v3 alteraram as palavras do roteiro; o prompt TTS foi bloqueado."
+        )
+    if "<break" in prompt.casefold():
+        raise ValueError("Eleven v3 não aceita SSML break; use somente tags de áudio e pontuação.")
+    return prompt, records
+
+
+def _synthesis_prompt_for_scenes(
+    scenes: Sequence[Scene],
+    *,
+    prompting_profile: str,
+    model_id: str | None,
+) -> tuple[str, list[dict[str, str]]]:
+    if prompting_profile == "plain_text_v1":
+        return (
+            " ".join(scene.narration.strip() for scene in scenes),
+            [
+                {
+                    "scene_id": scene.scene_id,
+                    "tag": "",
+                    "narration": scene.narration.strip(),
+                }
+                for scene in scenes
+            ],
+        )
+    if prompting_profile != "eleven_v3_strategic_tags_v1":
+        raise ValueError(f"Perfil de prompting de áudio desconhecido: {prompting_profile!r}.")
+    if model_id != "eleven_v3":
+        raise ValueError("As tags estratégicas exigem o modelo eleven_v3.")
+    return _eleven_v3_prompt_for_scenes(scenes)
 
 
 def _validate_tts_text(text: str) -> None:
@@ -659,9 +744,13 @@ def _synthesize_elevenlabs(
         duration_frames = _convert_to_wav_48k(source, destination, input_args=input_args)
     duration = duration_frames / TARGET_SAMPLE_RATE
     words = character_alignment_to_words(result.alignment)
+    words = [word for word in words if not _ELEVEN_V3_AUDIO_TAG_RE.fullmatch(word.word)]
     alignment_source: Literal["provider", "simulated"] = "provider"
     if not words:
-        words = _proportional_words(text, duration)
+        words = _proportional_words(
+            _ELEVEN_V3_AUDIO_TAG_IN_TEXT_RE.sub("", text),
+            duration,
+        )
         alignment_source = "simulated"
     words = _clamp_words(words, duration)
     usage = {
@@ -802,6 +891,9 @@ def _scene_input_hash(
     *,
     previous_scene: Scene | None,
     next_scene: Scene | None,
+    synthesis_text: str | None = None,
+    previous_synthesis_text: str | None = None,
+    next_synthesis_text: str | None = None,
     provider: str,
     config: Any,
     voice_id: str | None,
@@ -809,14 +901,16 @@ def _scene_input_hash(
 ) -> str:
     payload = {
         "algorithm_version": AUDIO_ALGORITHM_VERSION,
-        "text": scene.narration,
+        "text": synthesis_text or scene.narration,
         "previous_text": (
-            previous_scene.narration
+            previous_synthesis_text or previous_scene.narration
             if provider == "elevenlabs" and previous_scene is not None
             else None
         ),
         "next_text": (
-            next_scene.narration if provider == "elevenlabs" and next_scene is not None else None
+            next_synthesis_text or next_scene.narration
+            if provider == "elevenlabs" and next_scene is not None
+            else None
         ),
         "provider": provider,
         "voice_id": voice_id,
@@ -829,6 +923,7 @@ def _scene_input_hash(
         "output_format": config.output_format if provider == "elevenlabs" else "wav",
         "sample_rate": TARGET_SAMPLE_RATE,
         "synthesis_segmentation": config.synthesis_segmentation,
+        "prompting_profile": config.prompting_profile,
         "comment_response_silence_seconds": config.comment_response_silence_seconds,
         "mock_contract": 1 if provider == "mock" else None,
     }
@@ -881,6 +976,9 @@ def _continuous_group_input_hash(
     *,
     previous_group: NarrationGroup | None,
     next_group: NarrationGroup | None,
+    synthesis_text: str | None = None,
+    previous_synthesis_text: str | None = None,
+    next_synthesis_text: str | None = None,
     provider: str,
     config: Any,
     voice_id: str | None,
@@ -889,12 +987,16 @@ def _continuous_group_input_hash(
 ) -> str:
     payload = {
         "algorithm_version": AUDIO_ALGORITHM_VERSION,
-        "text": group.text,
+        "text": synthesis_text or group.text,
         "previous_text": (
-            previous_group.text if provider == "elevenlabs" and previous_group is not None else None
+            previous_synthesis_text or previous_group.text
+            if provider == "elevenlabs" and previous_group is not None
+            else None
         ),
         "next_text": (
-            next_group.text if provider == "elevenlabs" and next_group is not None else None
+            next_synthesis_text or next_group.text
+            if provider == "elevenlabs" and next_group is not None
+            else None
         ),
         "provider": provider,
         "voice_id": voice_id,
@@ -907,6 +1009,7 @@ def _continuous_group_input_hash(
         "output_format": config.output_format if provider == "elevenlabs" else "wav",
         "sample_rate": TARGET_SAMPLE_RATE,
         "synthesis_segmentation": segmentation,
+        "prompting_profile": config.prompting_profile,
         "comment_response_silence_seconds": config.comment_response_silence_seconds,
         "mock_contract": 1 if provider == "mock" else None,
     }
@@ -1037,6 +1140,9 @@ def _synthesize_scene(
     scene: Scene,
     previous_scene: Scene | None,
     next_scene: Scene | None,
+    synthesis_text: str | None = None,
+    previous_synthesis_text: str | None = None,
+    next_synthesis_text: str | None = None,
     destination: Path,
     provider: str,
     config: Any,
@@ -1047,9 +1153,11 @@ def _synthesize_scene(
     jitter: Callable[[], float],
 ) -> SynthesisResult:
     return _synthesize_text(
-        text=scene.narration,
-        previous_text=previous_scene.narration if previous_scene else None,
-        next_text=next_scene.narration if next_scene else None,
+        text=synthesis_text or scene.narration,
+        previous_text=(
+            previous_synthesis_text or (previous_scene.narration if previous_scene else None)
+        ),
+        next_text=(next_synthesis_text or (next_scene.narration if next_scene else None)),
         destination=destination,
         provider=provider,
         config=config,
@@ -1222,6 +1330,7 @@ def _generate_continuous_section_rows(
     *,
     groups: Sequence[NarrationGroup],
     group_hashes: Mapping[str, str],
+    group_synthesis_texts: Mapping[str, str],
     scene_hashes: Mapping[str, str],
     existing_by_scene: Mapping[str, AudioSegment],
     selected_scene_id: str | None,
@@ -1292,9 +1401,17 @@ def _generate_continuous_section_rows(
             source_version = _next_segment_version(layout, source_id)
             source_path = _segment_destination(layout, source_id, source_version)
             source_result = _synthesize_text(
-                text=group.text,
-                previous_text=groups[group_index - 1].text if group_index > 0 else None,
-                next_text=(groups[group_index + 1].text if group_index + 1 < len(groups) else None),
+                text=group_synthesis_texts[group.group_id],
+                previous_text=(
+                    group_synthesis_texts[groups[group_index - 1].group_id]
+                    if group_index > 0
+                    else None
+                ),
+                next_text=(
+                    group_synthesis_texts[groups[group_index + 1].group_id]
+                    if group_index + 1 < len(groups)
+                    else None
+                ),
                 destination=source_path,
                 provider=provider,
                 config=config,
@@ -1383,9 +1500,24 @@ def generate_audio(
         voice_id, model_id = _effective_elevenlabs_values(config)
     else:
         voice_id, model_id = None, "mock-deterministic-v1"
+    effective_prompting_profile = (
+        config.prompting_profile if selected_provider == "elevenlabs" else "plain_text_v1"
+    )
+    _full_synthesis_prompt, prompt_records = _synthesis_prompt_for_scenes(
+        scenes,
+        prompting_profile=effective_prompting_profile,
+        model_id=model_id,
+    )
+    scene_synthesis_texts = {
+        record["scene_id"]: (
+            f"[{record['tag']}] {record['narration']}" if record["tag"] else record["narration"]
+        )
+        for record in prompt_records
+    }
 
     continuous_groups: list[NarrationGroup] = []
     group_hashes: dict[str, str] = {}
+    group_synthesis_texts: dict[str, str] = {}
     hashes: dict[str, str] = {}
     if config.synthesis_segmentation in {
         "continuous_section_v1",
@@ -1395,12 +1527,29 @@ def generate_audio(
             scenes,
             segmentation=config.synthesis_segmentation,
         )
+        group_synthesis_texts = {
+            group.group_id: " ".join(
+                scene_synthesis_texts[scene.scene_id] for scene in group.scenes
+            )
+            for group in continuous_groups
+        }
         for index, group in enumerate(continuous_groups):
             group_hash = _continuous_group_input_hash(
                 group,
                 previous_group=continuous_groups[index - 1] if index > 0 else None,
                 next_group=(
                     continuous_groups[index + 1] if index + 1 < len(continuous_groups) else None
+                ),
+                synthesis_text=group_synthesis_texts[group.group_id],
+                previous_synthesis_text=(
+                    group_synthesis_texts[continuous_groups[index - 1].group_id]
+                    if index > 0
+                    else None
+                ),
+                next_synthesis_text=(
+                    group_synthesis_texts[continuous_groups[index + 1].group_id]
+                    if index + 1 < len(continuous_groups)
+                    else None
                 ),
                 provider=selected_provider,
                 config=config,
@@ -1424,6 +1573,15 @@ def generate_audio(
                 scene,
                 previous_scene=scenes[index - 1] if index > 0 else None,
                 next_scene=scenes[index + 1] if index + 1 < len(scenes) else None,
+                synthesis_text=scene_synthesis_texts[scene.scene_id],
+                previous_synthesis_text=(
+                    scene_synthesis_texts[scenes[index - 1].scene_id] if index > 0 else None
+                ),
+                next_synthesis_text=(
+                    scene_synthesis_texts[scenes[index + 1].scene_id]
+                    if index + 1 < len(scenes)
+                    else None
+                ),
                 provider=selected_provider,
                 config=config,
                 voice_id=voice_id,
@@ -1433,6 +1591,7 @@ def generate_audio(
         {
             "provider": selected_provider,
             "synthesis_segmentation": config.synthesis_segmentation,
+            "prompting_profile": effective_prompting_profile,
             "scenes": [
                 {
                     "scene_id": scene.scene_id,
@@ -1460,6 +1619,48 @@ def generate_audio(
     if layout.audio.is_file():
         existing = read_model(layout.audio, AudioManifest)
     existing_by_scene = {item.scene_id: item for item in existing.segments} if existing else {}
+    prompt_payload = {
+        "schema_version": "1.0",
+        "generated_at": utc_now(),
+        "provider": selected_provider,
+        "model_id": model_id,
+        "voice_id": voice_id,
+        "prompting_profile": effective_prompting_profile,
+        "guidance_source": (
+            "https://elevenlabs.io/docs/overview/capabilities/"
+            "text-to-speech/best-practices#prompting-eleven-v3"
+            if effective_prompting_profile == "eleven_v3_strategic_tags_v1"
+            else None
+        ),
+        "rules": {
+            "voice_only_tags": True,
+            "preserve_spoken_words": True,
+            "ssml_breaks_allowed": False,
+            "tag_allowlist": sorted(_ELEVEN_V3_STRATEGIC_TAGS),
+        },
+        "segments": (
+            [
+                {
+                    "segment_id": group.group_id,
+                    "scene_ids": [scene.scene_id for scene in group.scenes],
+                    "text": group_synthesis_texts[group.group_id],
+                }
+                for group in continuous_groups
+            ]
+            if continuous_groups
+            else [
+                {
+                    "segment_id": scene.scene_id,
+                    "scene_ids": [scene.scene_id],
+                    "text": scene_synthesis_texts[scene.scene_id],
+                }
+                for scene in scenes
+            ]
+        ),
+        "scene_directions": prompt_records,
+    }
+    prompt_hash = sha256_value(prompt_payload)
+    write_json(layout.audio_synthesis_prompt, prompt_payload)
 
     start_stage(layout, "audio", input_hash, provider=selected_provider)
     generated_count = 0
@@ -1491,6 +1692,7 @@ def generate_audio(
                 layout,
                 groups=continuous_groups,
                 group_hashes=group_hashes,
+                group_synthesis_texts=group_synthesis_texts,
                 scene_hashes=hashes,
                 existing_by_scene=existing_by_scene,
                 selected_scene_id=scene_id,
@@ -1581,6 +1783,13 @@ def generate_audio(
                     scene=scene,
                     previous_scene=previous,
                     next_scene=following,
+                    synthesis_text=scene_synthesis_texts[scene.scene_id],
+                    previous_synthesis_text=(
+                        scene_synthesis_texts[previous.scene_id] if previous else None
+                    ),
+                    next_synthesis_text=(
+                        scene_synthesis_texts[following.scene_id] if following else None
+                    ),
                     destination=path,
                     provider=selected_provider,
                     config=config,
@@ -1664,6 +1873,12 @@ def generate_audio(
             sample_rate=TARGET_SAMPLE_RATE,
             narration_path=relative_posix(layout.narration_audio, layout.root),
             duration=round(narration_frames / TARGET_SAMPLE_RATE, 6),
+            prompting_profile=effective_prompting_profile,
+            synthesis_prompt_path=relative_posix(
+                layout.audio_synthesis_prompt,
+                layout.root,
+            ),
+            synthesis_prompt_hash=prompt_hash,
             segments=segments,
             words=global_words,
         )
@@ -1671,6 +1886,7 @@ def generate_audio(
         artifacts = [
             relative_posix(layout.audio, layout.root),
             relative_posix(layout.narration_audio, layout.root),
+            relative_posix(layout.audio_synthesis_prompt, layout.root),
             *(item.path for item in segments),
             *(relative_posix(path, layout.root) for path in source_artifacts if path.is_file()),
             *(
@@ -1700,6 +1916,7 @@ def generate_audio(
                 "recovered_segments": recovered_count,
                 "tts_requests": tts_requests,
                 "synthesis_segmentation": config.synthesis_segmentation,
+                "prompting_profile": effective_prompting_profile,
                 "words": len(global_words),
                 "character_cost": character_cost,
             },

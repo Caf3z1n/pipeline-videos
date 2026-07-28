@@ -5,6 +5,7 @@ import pytest
 from pipeline_videos.models import ScriptDocument, ScriptSection
 from pipeline_videos.narration_style import (
     validate_authorial_narration_style,
+    validate_biblical_explainer_narration,
     validate_jesus_first_person_narration,
 )
 
@@ -147,3 +148,16 @@ def test_jesus_first_person_voice_rejects_third_person_development() -> None:
 
     with pytest.raises(ValueError, match="terceira pessoa"):
         validate_jesus_first_person_narration(document)
+
+
+def test_biblical_explainer_accepts_third_person_jesus() -> None:
+    validate_biblical_explainer_narration(
+        _document("Jesus usou uma imagem profética conhecida para anunciar juízo e abalo cósmico.")
+    )
+
+
+def test_biblical_explainer_rejects_jesus_first_person_dramatization() -> None:
+    with pytest.raises(ValueError, match="narrador bíblico explicativo"):
+        validate_biblical_explainer_narration(
+            _document("Minha frase anuncia que as estrelas cairão do céu.")
+        )

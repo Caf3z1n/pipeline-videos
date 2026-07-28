@@ -23,6 +23,22 @@ cada token. Depois converte o áudio para WAV mono 48 kHz e soma o offset real d
 - language code: `pt` quando suportado pelo modelo;
 - `jesus_1`: voz padrão `qfOmqDJTQP75MDYJvxKc`;
 - `jesus_2`: variação `rtrpEL7BeMd5aTru4HPq`.
+- `matheus`: narração expressiva `36rVQA1AOIPwpA3Hg1tC`.
+
+## Prompting Eleven v3 no perfil cutout
+
+`biblical_cutout_explainer_7m_v1` usa `eleven_v3_strategic_tags_v1` com a voz Matheus e estabilidade
+Natural. O pipeline mantém `script/narration.txt` sem marcações e cria `audio/tts-prompt.json` para
+a chamada de síntese. Esse prompt:
+
+- preserva todas as palavras e a ordem do roteiro;
+- usa poucas tags de voz contextuais: `[curious]`, `[thoughtful]` e `[surprised]`;
+- nunca usa tags de cena, música ou efeito ambiental;
+- não usa SSML `<break>`, que não é suportado pelo Eleven v3;
+- registra o texto enviado e seu hash, enquanto o alinhamento final remove as tags.
+
+Referência oficial:
+[Prompting Eleven v3](https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices#prompting-eleven-v3).
 
 Os [modelos atuais](https://elevenlabs.io/docs/overview/models) e limites efetivos podem mudar. A
 API oficial `GET /v1/models` informa capacidade TTS, limites por usuário Free/pago e custo relativo.
@@ -33,7 +49,7 @@ API oficial `GET /v1/models` informa capacidade TTS, limites por usuário Free/p
 - voice ID de config do projeto ou `ELEVENLABS_VOICE_ID`; o padrão para novas produções é
   `jesus_1`;
 - os presets podem ser substituídos no ambiente por `ELEVENLABS_VOICE_JESUS_1_ID` e
-  `ELEVENLABS_VOICE_JESUS_2_ID`;
+  `ELEVENLABS_VOICE_JESUS_2_ID`; `matheus` usa `ELEVENLABS_VOICE_MATHEUS_ID`;
 - `ELEVENLABS_MODEL_ID` pode substituir o modelo padrão;
 - chamada bloqueada sem `--allow-external`;
 - headers `request-id`, `character-cost`, `x-trace-id` e concorrência ficam nos metadados;

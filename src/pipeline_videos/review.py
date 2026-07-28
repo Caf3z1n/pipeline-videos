@@ -219,6 +219,17 @@ def approve_script(
 def validate_draft_preflight(layout: ProjectLayout) -> None:
     """Allow a one-shot draft without human gates while preserving biblical blockers."""
     script = read_model(layout.script, ScriptDocument)
+    manifest = layout.load_manifest()
+    if manifest.config.long_form_profile.enabled:
+        from pipeline_videos.long_form_profile import (
+            validate_conversational_script,
+            validate_cutout_script_blueprint,
+        )
+
+        if manifest.config.youtube_growth.generation_mode == "script_package_local_v1":
+            validate_cutout_script_blueprint(script)
+        else:
+            validate_conversational_script(script)
     review = read_model(layout.biblical_review, BiblicalReview)
     if review.script_version != script.version:
         raise RuntimeError("A revisão bíblica não corresponde à versão ativa do roteiro.")

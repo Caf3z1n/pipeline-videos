@@ -122,9 +122,10 @@ handoff mínimo e reconstrói o pacote completo contra os arquivos-fonte do proj
 - os JSON Schemas enviados às filas removem somente metadados de apresentação, preservando tipos,
   enums, referências e campos obrigatórios;
 - os subagentes partem com `fork_turns=none`, evitando herdar o histórico inteiro da conversa;
-- não há arte de capa nem frame zero artificial; o YouTube seleciona uma cena do vídeo;
+- não há frame zero artificial; somente o perfil cutout produz uma thumbnail local dedicada;
 - prompts de imagem armazenam o prefixo compartilhado uma vez e apenas o delta de cada cena;
-- cada etapa de modelo admite uma correção agregada; persistindo erro, usa fallback determinístico.
+- cada etapa de modelo do fluxo padrão admite uma correção agregada; o perfil cutout compila o
+  blueprint sem etapa de correção.
 
 ## Autopilot retomável
 

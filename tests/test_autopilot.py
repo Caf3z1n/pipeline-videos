@@ -80,6 +80,51 @@ def test_external_waits_become_ready_without_model_rounds(tmp_path) -> None:
     assert ready[0]["ready"] is True
 
 
+def test_cutout_waits_follow_plan_then_deduplicated_assets(tmp_path) -> None:
+    layout = create_project(
+        "cutout-waits",
+        "Espera sequencial cutout",
+        projects_dir=tmp_path,
+        target_duration_seconds=420,
+        long_form_profile="biblical_cutout_explainer_7m_v1",
+        project_date=date(2026, 7, 28),
+    )
+    write_json(layout.long_form_edit_plan_queue, {"status": "waiting_external"})
+
+    plan_waits = collect_external_waits(layout)
+
+    assert plan_waits == [
+        {
+            "kind": "long_form_edit_plan",
+            "ready": False,
+            "queue": "visual/edit-plan-queue.json",
+        }
+    ]
+    layout.long_form_edit_plan_staging_file.parent.mkdir(parents=True, exist_ok=True)
+    write_json(layout.long_form_edit_plan_staging_file, {"ready": True})
+    assert collect_external_waits(layout)[0]["ready"] is True
+
+    write_json(layout.long_form_edit_plan, {"ready": True})
+    write_json(
+        layout.long_form_asset_queue,
+        {
+            "items": [
+                {
+                    "status": "waiting_external",
+                    "staging_path": "visual/assets/staging/asset-001.png",
+                }
+            ]
+        },
+    )
+    asset_waits = collect_external_waits(layout)
+    assert asset_waits[0]["kind"] == "cutout_assets"
+    assert asset_waits[0]["ready"] is False
+    staged = layout.root / "visual/assets/staging/asset-001.png"
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    staged.write_bytes(b"ready")
+    assert collect_external_waits(layout)[0]["ready"] is True
+
+
 def test_local_coordinator_job_is_isolated_and_completion_first(tmp_path) -> None:
     layout = create_project(
         "coordenador-compacto",
@@ -213,6 +258,52 @@ def test_autopilot_cli_reports_compact_external_pause(tmp_path, monkeypatch) -> 
     assert "Autopilot aguardando" in result.stdout
     assert "image-worker-1.json" in result.stdout
     assert "autopilot-state.json" in result.stdout
+
+
+def test_autopilot_wait_external_can_cross_multiple_external_stages(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    layout = _waiting_layout(tmp_path)
+    monkeypatch.setattr(cli, "_project", lambda project, projects_dir=None: layout)
+    import pipeline_videos.autopilot as autopilot
+
+    results = iter(
+        [
+            AutopilotResult("waiting_external", [{"kind": "long_form_edit_plan"}]),
+            AutopilotResult("waiting_external", [{"kind": "cutout_assets"}]),
+            AutopilotResult(
+                "completed",
+                [],
+                render_path=Path("render/final.mp4"),
+                validation_ok=True,
+            ),
+        ]
+    )
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append("run")
+        return next(results)
+
+    monkeypatch.setattr(autopilot, "run_autopilot_once", fake_run)
+    monkeypatch.setattr(
+        autopilot,
+        "wait_until_external_ready",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        "pipeline_videos.token_audit.write_local_token_audit",
+        lambda layout: {"codex": {"usage": {"fresh_plus_output_tokens": 10}}},
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["autopilot", "autopilot-test", "--wait-external"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == ["run", "run", "run"]
 
 
 def test_autopilot_can_finish_validation_and_private_upload_in_one_explicit_command(

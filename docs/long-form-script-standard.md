@@ -1,5 +1,29 @@
 # Padrão de roteiro para vídeos longos
 
+## Linguagem do perfil cutout
+
+`biblical_cutout_explainer_7m_v1` acrescenta
+`conversational_concrete_ptbr_v1` ao contrato geral:
+
+- use `biblical_explainer_third_person_v1`: narrador explicativo em terceira pessoa, sem escrever
+  como se Jesus estivesse narrando;
+- use português falado, direto e fluido;
+- identifique sujeito, ação e consequência concreta;
+- prefira verbos visuais que possam orientar a edição;
+- rejeite abstrações passivas como “a ordem foi deslocada” ou “a consequência foi contradita”;
+- não use “isso muda tudo” sem explicar imediatamente o que mudou;
+- mantenha o hook honesto, específico e visualizável nos primeiros trinta segundos.
+
+Nesse perfil, o roteiro entrega uma decisão editorial completa em uma única saída: locução,
+blueprint dos três tipos de bloco, cues semânticos, sequências fullscreen, título, descrição e
+conceito de thumbnail. Depois do áudio e do alinhamento, um compilador local converte essas
+decisões em tempos e caixas. Não existe uma segunda interpretação de modelo, editor visual
+separado ou loop de reparo por bloco.
+
+O roteiro e `script/narration.txt` nunca contêm tags de síntese. O áudio cria
+`audio/tts-prompt.json` com `eleven_v3_strategic_tags_v1`, preservando todas as palavras e
+acrescentando apenas direções auditivas contextuais.
+
 ## Escopo
 
 Vídeos longos novos usam `creative_retention_long_v2`. O modo criativo define a experiência:
@@ -11,6 +35,8 @@ O padrão `retention_story_long_v1` continua válido para projetos existentes. O
 `project.json` é a autoridade e não existe migração automática.
 
 Consulte também [creative-direction.md](creative-direction.md).
+O perfil cutout aplica diretamente [magnetic-long-form-engine.md](magnetic-long-form-engine.md);
+esse material orienta a única saída do roteiro e não cria uma etapa posterior de revisão.
 
 ## Estrutura adaptativa
 
@@ -22,10 +48,16 @@ considerando 145 palavras por minuto.
 - **Hook adaptativo:** `hook_policy` pode ser `required`, `optional` ou `none`. Com hook, o primeiro
   beat termina em até 20 segundos. Sem hook, ele usa `orientation` e entrega valor em até 40
   segundos.
+- **Pergunta magnética:** quando houver hook, abra uma lacuna de informação concreta: uma
+  contradição aparente, consequência visível, decisão humana ou detalhe bíblico que o espectador
+  consiga formular em uma frase. Prometa somente a resposta que o roteiro realmente entregará.
 - **Promessa:** `content_promise` fica clara nos dois primeiros movimentos. Pergunta central é
   opcional.
 - **Desenvolvimento:** cada seção acrescenta fato, evidência, contexto, ação, consequência,
   comparação, argumento, objeção, revelação ou mudança de entendimento.
+- **Progressão causal:** sempre que possível, organize os movimentos como acontecimento,
+  pergunta, evidência, implicação e resposta. Cada movimento precisa alterar o que o espectador
+  entende, e não apenas repetir o tema com outras palavras.
 - **Reengajamentos:** introduzem valor novo antes que a progressão fique previsível. O intervalo
   máximo é de 120 segundos e a quantidade mínima cresce com a duração.
 - **Resolução:** pode ser distribuída, tardia ou reservada ao quarto final. Entrega o valor
@@ -95,12 +127,13 @@ a doze citações verificadas.
 - cada citação cumpre função narrativa ou argumentativa real;
 - versículos não são agrupados apenas para cumprir quantidade.
 
-Use exatamente:
+A referência fica fora das aspas. Ela pode aparecer antes da citação, como `Em Livro, capítulo X,
+versículo Y: “texto literal verificado.”`, ou depois, como `“texto literal verificado.” Livro,
+capítulo X, versículo Y.`. Use a ordem que tornar a fala mais natural e variar a cadência. Não
+repita automaticamente “lemos”.
 
-`Em Livro, capítulo X, versículo Y, lemos: “texto literal verificado.”`
-
-A referência fica fora das aspas. Cada citação registra `biblical_basis`, classifica a afirmação
-como `biblical_text` e aponta para a fonte verificada correspondente em `scripture_anchors`.
+Cada citação registra `biblical_basis`, classifica a afirmação como `biblical_text` e aponta para a
+fonte verificada correspondente em `scripture_anchors`.
 
 O segmento `long_form_anchor` acrescenta 100 passagens curadas, equilibradas entre Antigo e Novo
 Testamento e marcadas com `recommended_formats=["long"]`. Na fonte persistida, `passage` corresponde
@@ -122,6 +155,20 @@ citação e também evita que âncoras longas entrem na seleção automática de
 - aplicação e callback opcionais;
 - exatamente uma ação de CTA.
 
+No perfil cutout, a mesma estratégia registra também:
+
+- `visual_scenes` como partição literal, contígua e completa da narração;
+- `presentation` resolvida em cada bloco, sem deixar a escolha para outro agente;
+- de um a três `asset_cues` com frase literal, descrição concreta e reutilização explícita;
+- de dois a quatro `fullscreen_shots` com ações ou estágios visualmente distintos;
+- até duas `emphasis_terms` relevantes por bloco de texto;
+- `youtube_package` com uma combinação única de título, descrição, palavras-chave, comentário
+  fixado e conceito visual da thumbnail.
+
+O hook do perfil cutout precisa começar com asset ou ação fullscreen. Não abra com uma sequência de
+frases centralizadas. A referência bíblica centralizada é um cartão de orientação; o corpo da
+citação usa asset + texto e as aspas ficam sob responsabilidade exclusiva do renderer.
+
 Em cada seção, `retention_goal` copia `viewer_value` e `visual_direction` copia
 `visual_progression`. O contrato derivado `creative-contract-v2` é compartilhado por cenas,
 crescimento e validação. O perfil visual é `long_creative_v2`.
@@ -140,10 +187,15 @@ Vídeos novos usam `Enfoque concreto | Passagem` e geram um único título. O en
 pode ser fato, personagem, curiosidade, pergunta, comparação, dilema, tese ou promessa prática.
 Não force tensão motivacional em um vídeo factual ou contemplativo.
 
-Depois da produção, o usuário escolhe manualmente uma imagem do próprio vídeo para usar como capa.
-O pipeline não cria conceito, prompt, design, arquivo separado nem chamada de `imagegen` para essa
-seleção. A direção visual muda ação, escala, ângulo, evidência ou consequência nos reengajamentos e
-representa um único momento por imagem. O mesmo contrato visual vale para todo projeto carregado.
+No perfil cutout, roteiro, título e thumbnail formam uma única promessa. O título traz busca e
+contexto cristão de forma natural; a thumbnail traz a tensão visual em duas ou três linhas, sem
+copiar o título. A base 3D em massinha reserva a esquerda para Knewave e concentra personagens e
+objetos bíblicos à direita. O compositor local cria `youtube/thumbnail.png` e
+`youtube/thumbnail.jpg`; criação não autoriza upload.
+
+Nos demais perfis longos, a imagem de capa continua fora da produção automática. A direção visual
+muda ação, escala, ângulo, evidência ou consequência nos reengajamentos e representa um único
+momento por imagem.
 
 ## Critérios de aceitação
 
@@ -155,6 +207,8 @@ Um roteiro novo é aceito quando:
 - cada seção acrescenta informação e direção visual próprias;
 - reengajamentos estão distribuídos conforme a duração;
 - citações verificadas cumprem quantidade e cadência;
+- o blueprint cutout cobre a locução e resolve bloco, cue, ação fullscreen e pacote do YouTube em
+  uma passagem;
 - a resolução é coerente com o modo e não força aplicação;
 - o CTA executa uma única ação;
 - não existe finding bíblico `blocking` aberto.

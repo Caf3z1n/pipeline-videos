@@ -219,6 +219,133 @@ def growth_input_hash(layout: ProjectLayout) -> str:
     return sha256_value(_growth_context_payload(layout))
 
 
+def materialize_cutout_growth_package(
+    layout: ProjectLayout,
+    *,
+    force: bool = False,
+) -> YouTubeGrowthPackage:
+    """Materialize the YouTube package already decided in the long-form script."""
+
+    project = layout.load_manifest()
+    if project.config.youtube_growth.generation_mode != "script_package_local_v1":
+        raise ValueError("O projeto não usa a embalagem local integrada ao roteiro.")
+    script = read_model(layout.script, ScriptDocument)
+    if script.long_form_strategy is None or script.long_form_strategy.youtube_package is None:
+        raise ValueError(
+            "O roteiro cutout precisa trazer título, descrição e conceito de thumbnail "
+            "na mesma decisão editorial."
+        )
+    if (
+        project.stages["youtube_growth"].status == StageStatus.COMPLETED
+        and layout.growth_package.is_file()
+        and not force
+    ):
+        return read_model(layout.growth_package, YouTubeGrowthPackage)
+    seed = script.long_form_strategy.youtube_package
+    scenes = read_model(layout.scenes, SceneManifest)
+    audio = read_model(layout.audio, AudioManifest) if layout.audio.is_file() else None
+    opening_scene = min(scenes.scenes, key=lambda item: item.order)
+    input_hash = sha256_value(
+        {
+            "script": script,
+            "generation_mode": "script_package_local_v1",
+        }
+    )
+    metadata = YouTubeMetadata(
+        title=seed.title,
+        alternative_titles=[],
+        description=seed.description,
+        chapters=_chapters_for_project(layout, scenes, audio),
+        topics=list(dict.fromkeys(seed.topics)),
+        pinned_comment=seed.pinned_comment,
+    )
+    strategy = YouTubeGrowthStrategy(
+        format="long_form",
+        target_viewer=script.long_form_strategy.target_viewer,
+        search_intent=seed.primary_keyword,
+        primary_keyword=seed.primary_keyword,
+        secondary_keywords=seed.secondary_keywords,
+        content_promise=script.long_form_strategy.content_promise,
+        opening_hook=script.long_form_strategy.opening_hook,
+        title_rationale=(
+            "O título entrega a promessa, usa linguagem de busca cristã quando natural e "
+            "complementa a thumbnail sem repetir sua frase."
+        ),
+        description_rationale=(
+            "A descrição foi decidida junto com a pesquisa e o roteiro, sem uma segunda "
+            "interpretação do conteúdo."
+        ),
+        tag_strategy="Tema, passagem, livro e variações diretamente ligadas à pesquisa.",
+        discovery_hypothesis=(
+            "Uma promessa clara e fiel pode melhorar a escolha de assistir; o resultado "
+            "continua sendo uma hipótese editorial."
+        ),
+        promise_match=YouTubePromiseMatch(
+            content_promise=script.long_form_strategy.content_promise,
+            opening_line=script.long_form_strategy.opening_line,
+            opening_scene_id=opening_scene.scene_id,
+            title_delivery=seed.title.split("|", 1)[0].strip(),
+        ),
+        source_ids=script.source_ids,
+        section_ids=[section.section_id for section in script.sections],
+        official_guidelines=list(OFFICIAL_YOUTUBE_GUIDELINES),
+    )
+    package = YouTubeGrowthPackage(
+        job_id=f"script-package-{input_hash[:12]}",
+        input_hash=input_hash,
+        metadata=metadata,
+        strategy=strategy,
+    )
+    write_json(layout.metadata, metadata)
+    write_json(layout.growth_strategy, strategy)
+    write_json(layout.growth_package, package)
+    write_json(
+        layout.growth_queue,
+        {
+            "schema_version": "3.0",
+            "status": StageStatus.COMPLETED.value,
+            "generation_mode": "script_package_local_v1",
+            "input_hash": input_hash,
+            "model_calls": 0,
+            "source": relative_posix(layout.script, layout.root),
+            "output": relative_posix(layout.growth_package, layout.root),
+        },
+    )
+    write_json(
+        layout.growth_warnings,
+        {
+            "generated_at": utc_now(),
+            "validation_mode": "compiled_invariants_once_v2",
+            "warnings": [],
+        },
+    )
+    write_text(layout.description, _description_document(metadata))
+    complete_stage(
+        layout,
+        "youtube_growth",
+        input_hash,
+        [
+            relative_posix(layout.growth_queue, layout.root),
+            relative_posix(layout.growth_package, layout.root),
+            relative_posix(layout.growth_strategy, layout.root),
+        ],
+        provider="script-package-local",
+        usage={"model_calls": 0, "title_variants": 1},
+    )
+    complete_stage(
+        layout,
+        "metadata",
+        sha256_value(package),
+        [
+            relative_posix(layout.metadata, layout.root),
+            relative_posix(layout.description, layout.root),
+            relative_posix(layout.growth_strategy, layout.root),
+        ],
+        provider="script-package-local",
+    )
+    return package
+
+
 def _compact_growth_context(full_context: dict[str, Any]) -> dict[str, Any]:
     contract = full_context["creative_contract"]
     return {
@@ -246,6 +373,16 @@ def prepare_growth_queue(layout: ProjectLayout, *, force: bool = False) -> dict[
     config = project.config.youtube_growth
     if not config.enabled:
         raise RuntimeError("A etapa de crescimento para YouTube está desativada neste projeto.")
+    if config.generation_mode == "script_package_local_v1":
+        package = materialize_cutout_growth_package(layout, force=force)
+        return {
+            "schema_version": "3.0",
+            "status": StageStatus.COMPLETED.value,
+            "generation_mode": config.generation_mode,
+            "input_hash": package.input_hash,
+            "model_calls": 0,
+            "output": relative_posix(layout.growth_package, layout.root),
+        }
 
     full_context = _growth_context_payload(layout)
     input_hash = sha256_value(full_context)

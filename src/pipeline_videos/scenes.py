@@ -94,9 +94,16 @@ def _resolved_style(layout: ProjectLayout) -> StyleProfile:
     if not image_config.enforce_visual_standard:
         return style
 
-    canonical = load_style("biblical-midcentury-gouache")
-    if image_config.visual_standard_id != "biblical-midcentury-gouache-v1":
-        raise RuntimeError("O projeto precisa usar o padrão biblical-midcentury-gouache-v1.")
+    style_by_standard = {
+        "biblical-midcentury-gouache-v1": "biblical-midcentury-gouache",
+        "biblical-cutout-clay-v1": "biblical-cutout-clay",
+    }
+    style_id = style_by_standard.get(image_config.visual_standard_id)
+    if style_id is None:
+        raise RuntimeError(
+            f"Padrão visual oficial desconhecido: {image_config.visual_standard_id}."
+        )
+    canonical = load_style(style_id)
     if style == canonical:
         return style
 
@@ -346,6 +353,14 @@ def build_scenes(
         project.config.images.scene_planning_standard == "narration_block_visual_v1"
         or compact_visual_planning
     )
+    cutout_audio_only_planning = (
+        project.config.long_form_profile.enabled
+        and project.config.images.scene_planning_standard
+        in {
+            "script_audio_edit_plan_assets_v1",
+            "script_visual_blueprint_compiler_v2",
+        }
+    )
     shorts_strategy = (
         read_model(layout.shorts_script_strategy, ShortsScriptStrategy)
         if project.video_format == "short" and layout.shorts_script_strategy.is_file()
@@ -375,6 +390,7 @@ def build_scenes(
         "continuity": continuity,
         "creative_contract": contract,
         "scene_planning_standard": project.config.images.scene_planning_standard,
+        "cutout_audio_only_planning": cutout_audio_only_planning,
         "composition_safety_mode": project.config.images.composition_safety_mode,
         "spoken_reference_image_mode": (project.config.images.spoken_reference_image_mode),
         "spoken_reference_image_path": (project.config.images.spoken_reference_image_path),
@@ -406,7 +422,28 @@ def build_scenes(
             and project.config.images.spoken_reference_image_mode == "fixed_profile_asset_v1"
             else None
         )
-        if visual_strategy is not None:
+        if cutout_audio_only_planning:
+            for section in script.sections:
+                retention_reset = "reengagement" in contract_beats[section.section_id].functions
+                scenes.append(
+                    _scene_from_chunk(
+                        section,
+                        section.narration,
+                        len(scenes),
+                        style,
+                        palette,
+                        recurring,
+                        render_config.width,
+                        render_config.height,
+                        retention_reset=retention_reset,
+                        visual_brief=(
+                            "Marcador técnico exclusivo da segmentação do áudio contínuo; "
+                            "não autoriza imagem, asset ou decisão de edição"
+                        ),
+                        visual_relation="contextual",
+                    )
+                )
+        elif visual_strategy is not None:
             if not visual_strategy.visual_scenes:
                 raise ValueError("O padrão narration_block_visual_v1 exige strategy.visual_scenes.")
             for planned in visual_strategy.visual_scenes:

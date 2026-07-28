@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import wave
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ import httpx
 import pytest
 
 from pipeline_videos.audio import (
+    _eleven_v3_prompt_for_scenes,
     _elevenlabs_source_spec,
     _request_elevenlabs,
     _validate_compact_narration_audio,
@@ -96,6 +98,33 @@ def test_tts_text_guard_rejects_encoding_damage_without_blocking_questions() -> 
 
     with pytest.raises(ValueError, match="substituição Unicode"):
         _validate_tts_text("Texto com caractere inválido: \ufffd")
+
+
+def test_eleven_v3_prompt_adds_strategic_tags_without_changing_spoken_words() -> None:
+    scenes = [
+        _scene("scene-001", 1, "A Bíblia realmente diz isso?"),
+        _scene("scene-002", 2, "Agora observe a imagem profética."),
+        _scene("scene-003", 3, "A resposta exige cuidado e contexto."),
+    ]
+    scenes[0].narrative_function = "hook com pergunta"
+    scenes[1].narrative_function = "reengajamento e revelação"
+    scenes[2].narrative_function = "conclusão"
+
+    prompt, records = _eleven_v3_prompt_for_scenes(scenes)
+
+    assert prompt == (
+        "[curious] A Bíblia realmente diz isso? "
+        "[surprised] Agora observe a imagem profética. "
+        "[thoughtful] A resposta exige cuidado e contexto."
+    )
+    assert [item["tag"] for item in records] == [
+        "curious",
+        "surprised",
+        "thoughtful",
+    ]
+    clean = re.sub(r"\[(?:curious|surprised|thoughtful)\]\s*", "", prompt)
+    assert clean == " ".join(scene.narration for scene in scenes)
+    assert "<break" not in prompt
 
 
 def test_character_alignment_to_words_preserves_unicode_and_punctuation() -> None:
@@ -591,6 +620,13 @@ def test_elevenlabs_speed_defaults_and_bounds() -> None:
         AudioConfig(speed=0.69)
     with pytest.raises(ValueError):
         AudioConfig(speed=1.21)
+    with pytest.raises(ValueError, match="eleven_v3"):
+        AudioConfig(prompting_profile="eleven_v3_strategic_tags_v1")
+    tagged = AudioConfig(
+        model_id="eleven_v3",
+        prompting_profile="eleven_v3_strategic_tags_v1",
+    )
+    assert tagged.prompting_profile == "eleven_v3_strategic_tags_v1"
 
 
 def test_elevenlabs_defaults_and_named_voice_variants(
@@ -600,6 +636,7 @@ def test_elevenlabs_defaults_and_named_voice_variants(
         "ELEVENLABS_VOICE_ID",
         "ELEVENLABS_VOICE_JESUS_1_ID",
         "ELEVENLABS_VOICE_JESUS_2_ID",
+        "ELEVENLABS_VOICE_MATHEUS_ID",
         "ELEVENLABS_MODEL_ID",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -610,6 +647,8 @@ def test_elevenlabs_defaults_and_named_voice_variants(
     assert config.model_id == DEFAULT_ELEVENLABS_MODEL_ID
     assert normalize_elevenlabs_voice_variant("Jesus-2") == "jesus_2"
     assert elevenlabs_voice_id_for_variant("jesus_2") == ELEVENLABS_VOICE_VARIANTS["jesus_2"]
+    assert normalize_elevenlabs_voice_variant("Matheus") == "matheus"
+    assert elevenlabs_voice_id_for_variant("matheus") == "36rVQA1AOIPwpA3Hg1tC"
 
     monkeypatch.setenv("ELEVENLABS_VOICE_JESUS_1_ID", "voice-jesus-1-env")
     monkeypatch.setenv("ELEVENLABS_VOICE_JESUS_2_ID", "voice-jesus-2-env")

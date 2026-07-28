@@ -1460,6 +1460,10 @@ def create_auto_video(
     hook_family_override: HookFamily | None = None,
     requested_character: str | None = None,
     editorial_profile: ShortsEditorialProfile = "verse_led_v1",
+    long_form_profile: Literal[
+        "standard",
+        "biblical_cutout_explainer_7m_v1",
+    ] = "standard",
 ) -> tuple[ProjectLayout, VerseCandidate, float]:
     if creative_mode_override == "auto":
         creative_mode_override = None
@@ -1691,6 +1695,7 @@ def create_auto_video(
             duration_max_seconds=duration_max_seconds,
             exact_duration=exact_duration,
             video_format=video_format,
+            long_form_profile=long_form_profile,
             project_date=project_date,
             production_mode=production_mode,
         )

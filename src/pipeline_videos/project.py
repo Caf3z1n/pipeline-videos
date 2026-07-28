@@ -37,6 +37,9 @@ from pipeline_videos.storage import (
 from pipeline_videos.utils import slugify, utc_now
 
 DEFAULT_STYLE = "biblical-midcentury-gouache"
+DEFAULT_LONG_FORM_PROFILE = "standard"
+CUTOUT_LONG_FORM_PROFILE = "biblical_cutout_explainer_7m_v1"
+CUTOUT_STYLE = "biblical-cutout-clay"
 DEFAULT_PALETTE = "midcentury-devotional-print"
 DEFAULT_SHORT_STYLE = DEFAULT_STYLE
 DEFAULT_SHORT_PALETTE = DEFAULT_PALETTE
@@ -46,6 +49,11 @@ DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_PATH = (
 )
 DEFAULT_FONT_FILE = "visual/fonts/files/Montserrat-ExtraBold.ttf"
 DEFAULT_FONT_LICENSE = "visual/fonts/OFL-Montserrat.txt"
+CUTOUT_FONT_FILE = "visual/fonts/files/Knewave-Regular.ttf"
+CUTOUT_FONT_LICENSE = "visual/fonts/OFL-Knewave.txt"
+CUTOUT_BACKGROUND_FILE = "visual/backgrounds/warm-textured-parchment.png"
+CUTOUT_WHOOSH_FILE = "audio/sfx/whoosh-suave.wav"
+CUTOUT_CLICK_FILE = "audio/sfx/double-click.wav"
 DATED_PROJECT_PATTERN = re.compile(r"^(\d{2}-\d{2}-\d{4})_(.+)$")
 COMPACT_NARRATION_WPM = 170
 COMPACT_MINIMUM_WORD_RATIO = 0.96
@@ -291,6 +299,23 @@ def install_default_short_visual_assets(layout: ProjectLayout) -> None:
     destination.write_bytes(assets.joinpath(DEFAULT_SHORT_SPOKEN_REFERENCE_IMAGE_FILE).read_bytes())
 
 
+def install_default_cutout_assets(layout: ProjectLayout) -> None:
+    """Install the approved V6 resources bundled with the official profile."""
+
+    source_root = resources.files("pipeline_videos").joinpath("assets", "cutout")
+    sources = {
+        CUTOUT_FONT_FILE: source_root.joinpath("fonts", "Knewave-Regular.ttf"),
+        CUTOUT_FONT_LICENSE: source_root.joinpath("fonts", "OFL-Knewave.txt"),
+        CUTOUT_BACKGROUND_FILE: source_root.joinpath("backgrounds", "warm-textured-parchment.png"),
+        CUTOUT_WHOOSH_FILE: source_root.joinpath("sfx", "whoosh-suave.wav"),
+        CUTOUT_CLICK_FILE: source_root.joinpath("sfx", "double-click.wav"),
+    }
+    for destination_name, source in sources.items():
+        destination = layout.root / destination_name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(source.read_bytes())
+
+
 def load_style(style_id: str) -> StyleProfile:
     path = REPO_ROOT / "config" / "styles" / f"{style_id}.json"
     return read_model(path, StyleProfile)
@@ -364,6 +389,10 @@ def create_project(
     palette_id: str | None = None,
     demo: bool = False,
     video_format: Literal["landscape", "short"] = "landscape",
+    long_form_profile: Literal[
+        "standard",
+        "biblical_cutout_explainer_7m_v1",
+    ] = DEFAULT_LONG_FORM_PROFILE,
     project_date: date | None = None,
     production_mode: ProductionMode = "final_candidate_one_shot",
 ) -> ProjectLayout:
@@ -410,11 +439,13 @@ def create_project(
     layout = ProjectLayout(root)
     layout.ensure_directories()
     now = utc_now()
-    if style_id is not None and style_id != DEFAULT_STYLE:
-        raise ValueError(
-            "O pipeline usa exclusivamente o padrão visual biblical-midcentury-gouache."
-        )
-    selected_style_id = DEFAULT_STYLE
+    if video_format == "short" and long_form_profile != DEFAULT_LONG_FORM_PROFILE:
+        raise ValueError("O perfil cutout é exclusivo de vídeos longos em landscape.")
+    selected_style_id = (
+        CUTOUT_STYLE if long_form_profile == CUTOUT_LONG_FORM_PROFILE else DEFAULT_STYLE
+    )
+    if style_id is not None and style_id != selected_style_id:
+        raise ValueError(f"O perfil selecionado usa exclusivamente o estilo {selected_style_id}.")
     selected_palette_id = palette_id or DEFAULT_PALETTE
     config = ProjectConfig()
     config.youtube_publication.category_id = "22" if video_format == "short" else "27"
@@ -425,6 +456,26 @@ def create_project(
     config.images.scene_planning_standard = "narration_block_visual_v1"
     config.images.opening_visual_standard = "scroll_stop_concrete_v1"
     config.images.composition_safety_mode = "unrestricted_scene_v1"
+    if long_form_profile == CUTOUT_LONG_FORM_PROFILE:
+        from pipeline_videos.long_form_profile import official_profile_config
+        from pipeline_videos.models import elevenlabs_voice_id_for_variant
+
+        config.long_form_profile = official_profile_config()
+        config.images.visual_standard_id = "biblical-cutout-clay-v1"
+        config.images.scene_planning_standard = "script_visual_blueprint_compiler_v2"
+        config.images.opening_visual_standard = "magnetic_visual_hook_v2"
+        config.images.composition_safety_mode = "reserved_non_overlapping_zones_v1"
+        config.images.width = 1920
+        config.images.height = 1080
+        config.audio.voice_id = elevenlabs_voice_id_for_variant("matheus")
+        config.audio.model_id = "eleven_v3"
+        config.audio.prompting_profile = "eleven_v3_strategic_tags_v1"
+        config.audio.stability = 0.5
+        config.audio.synthesis_segmentation = "continuous_narration_v1"
+        config.production.image_workers = 2
+        config.production.max_model_repairs_per_stage = 0
+        config.youtube_growth.use_specialist_subagent = False
+        config.youtube_growth.generation_mode = "script_package_local_v1"
     if video_format == "short":
         config.render = RenderConfig(
             width=1080,
@@ -495,6 +546,8 @@ def create_project(
             config.shorts_script.narrative_standard = "creative_retention_v3"
             config.shorts_script.require_independent_biblical_review = False
             configure_short_duration_profile(config, target_duration_seconds)
+        if long_form_profile == CUTOUT_LONG_FORM_PROFILE:
+            config.editorial_policy.authorial_narrator = "biblical_explainer_third_person_v1"
 
     stages = initial_stage_records()
     if video_format != "short" or demo:
@@ -544,6 +597,21 @@ def create_project(
         ),
         hook_family=("emotional_interruption" if compact_short else "auto"),
     )
+    if long_form_profile == CUTOUT_LONG_FORM_PROFILE:
+        briefing.visual_notes = [
+            "Planejar primeiro os blocos cronometrados e somente depois gerar assets.",
+            (
+                "Usar somente asset + texto completo, frase central ou sequência fullscreen "
+                "sem overlay."
+            ),
+            "Reservar zonas independentes para texto e imagem; nunca permitir interseção.",
+            "Variar intensamente os primeiros 30 segundos sem repetir o mesmo asset.",
+        ]
+        briefing.narration_tone = (
+            "narrador bíblico explicativo em terceira pessoa, humano, direto e conversacional, "
+            "com sujeitos e ações concretos; nunca falar como se fosse Jesus e evitar abstrações "
+            "passivas, jargão e frases genéricas"
+        )
     continuity = ContinuityBible(
         global_rules=[
             "Manter roupas, proporções e silhuetas consistentes entre cenas consecutivas.",
@@ -553,10 +621,30 @@ def create_project(
                 "Cada imagem mostra um único momento, um único ambiente contínuo e uma ação "
                 "principal, sem painéis, colagem, cenas empilhadas ou divisórias."
             ),
+            *(
+                [
+                    (
+                        "No perfil cutout, texto e assets usam zonas exclusivas e nunca podem "
+                        "se sobrepor."
+                    ),
+                    (
+                        "Nenhum asset entra como fallback genérico: cada uso aponta para uma "
+                        "frase concreta da narração."
+                    ),
+                    (
+                        "Sequências fullscreen cobrem todo o quadro e não recebem texto, "
+                        "background padrão ou outros overlays."
+                    ),
+                ]
+                if long_form_profile == CUTOUT_LONG_FORM_PROFILE
+                else []
+            ),
         ]
     )
 
     install_default_caption_assets(layout)
+    if long_form_profile == CUTOUT_LONG_FORM_PROFILE:
+        install_default_cutout_assets(layout)
     if (
         video_format == "short"
         and config.images.spoken_reference_image_mode == "fixed_profile_asset_v1"
@@ -580,6 +668,7 @@ def create_project(
             "demo": demo,
             "video_format": video_format,
             "production_mode": production_mode,
+            "long_form_profile": long_form_profile,
         }
     )
     return layout

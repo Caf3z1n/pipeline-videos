@@ -5,8 +5,10 @@ narração, imagens, música, legendas, render final e metadados do YouTube.
 
 ## Contrato editorial atual
 
-- Jesus é o eu lírico de toda locução autoral, em Shorts e vídeos longos.
-- A voz usa primeira pessoa e linguagem humana, direta e fluida.
+- Jesus é o eu lírico da locução autoral padrão em Shorts e vídeos longos.
+- O perfil opt-in `biblical_cutout_explainer_7m_v1` usa narrador bíblico explicativo em terceira
+  pessoa; ele nunca dramatiza a voz autoral como se Jesus narrasse.
+- A voz usa linguagem humana, direta e fluida.
 - Citações bíblicas literais permanecem identificadas por aspas, referência, tradução e fonte.
 - Dramatização autoral nunca é apresentada como uma fala bíblica documentada.
 - Frases metalinguísticas e construções baseadas em listas de ausências são bloqueadas.
@@ -14,7 +16,7 @@ narração, imagens, música, legendas, render final e metadados do YouTube.
 
 ## Contrato visual atual
 
-Todo projeto usa exclusivamente `biblical-midcentury-gouache-v1`:
+O perfil padrão usa `biblical-midcentury-gouache-v1`:
 
 - guache opaco e têmpera;
 - acabamento fosco e impressão editorial limpa;
@@ -30,21 +32,31 @@ cada bloco recebe uma cena concreta e distinta, classificada como `literal`, `co
 A primeira cena usa `scroll_stop_concrete_v1`: sujeito ou objeto dominante, ação já em curso e
 tensão, escolha ou contraste coerente com a abertura.
 
-O pipeline não produz nem envia imagem de capa personalizada. O especialista de crescimento gera
-somente título, descrição, tags e comentário fixado.
+Vídeos longos podem optar por `biblical_cutout_explainer_7m_v1`, com massinha 3D, texto
+sincronizado, assets recortados e sequências fullscreen. Nesse perfil, o plano completo de edição é
+compilado localmente do blueprint do roteiro, texto e imagem nunca se sobrepõem e não existe
+fallback visual genérico. A mesma saída do roteiro decide título, descrição e conceito de thumbnail,
+eliminando editor visual e especialista de crescimento separados. A síntese Matheus/Eleven v3
+recebe tags estratégicas em um prompt separado e auditável, sem contaminar o roteiro, as legendas
+ou o alinhamento. Consulte
+[docs/long-form-cutout-profile.md](docs/long-form-cutout-profile.md).
+
+Somente o perfil cutout produz uma capa personalizada local. Ele gera a base 3D em massinha e usa
+um compositor determinístico para aplicar Knewave, ênfase vermelha e o layout aprovado. A criação
+de `youtube/thumbnail.png` não autoriza upload.
 
 ## Fluxo
 
 ```text
 briefing e fontes
-→ roteiro e validação incorporada de fontes
-→ blocos visuais
-→ imagens em guache
-→ narração e música
+→ roteiro, blueprint visual e pacote do YouTube
+→ narração e alinhamento
+→ compilação local dos blocos
+→ assets ausentes e música
+→ thumbnail local
 → legendas
 → render final
-→ validação
-→ metadados
+→ checagem técnica
 → upload privado, somente quando solicitado
 ```
 
@@ -83,11 +95,14 @@ src/pipeline_videos/
 ├── project.py
 ├── shorts_script.py
 ├── long_form_script.py
+├── long_form_profile.py
 ├── scenes.py
 ├── images.py
+├── thumbnail.py
 ├── audio.py
 ├── captions.py
 ├── render.py
+├── cutout_render.py
 ├── validation.py
 ├── growth.py
 ├── metadata.py
@@ -119,6 +134,20 @@ Novo vídeo longo:
 uv run pipeline-videos new historia-de-andre `
   --title "A história de André" `
   --duration 420
+```
+
+Novo vídeo longo no perfil cutout de aproximadamente sete minutos:
+
+```powershell
+uv run pipeline-videos new primeira-mentira `
+  --title "A primeira mentira no Éden" `
+  --profile cutout-explainer
+```
+
+Novo vídeo longo cutout com um tema verificado ainda não usado:
+
+```powershell
+uv run pipeline-videos new-long --duration 420
 ```
 
 Novo Short:
@@ -199,7 +228,8 @@ segundos e a parte final não passa de 120 segundos sem âncora bíblica.
 
 Em todos os formatos:
 
-- `narrator_identity=jesus_first_person_v1`;
+- `narrator_identity=jesus_first_person_v1` no fluxo padrão e
+  `biblical_explainer_third_person_v1` no perfil cutout;
 - a maior parte do desenvolvimento avança por fatos, ações e acontecimentos;
 - explicações editoriais não aparecem dentro da locução;
 - cada cena cobre um bloco literal da narração.
@@ -452,6 +482,7 @@ Consulte:
 - [docs/creative-direction.md](docs/creative-direction.md)
 - [docs/shorts-script-standard.md](docs/shorts-script-standard.md)
 - [docs/long-form-script-standard.md](docs/long-form-script-standard.md)
+- [docs/long-form-cutout-profile.md](docs/long-form-cutout-profile.md)
 - [docs/image-generation.md](docs/image-generation.md)
 
 ## Testes

@@ -521,13 +521,20 @@ def import_script(layout: ProjectLayout, source: Path, *, force: bool = False) -
         )
         briefing = read_model(layout.briefing, Briefing)
         if project.video_format != "short":
-            validate_long_form_retention_script(
-                document,
-                target_duration_seconds=project.target_duration_seconds,
-                config=project.config.long_form_script,
-                sources=sources,
-                briefing=briefing,
-            )
+            if project.config.long_form_profile.enabled:
+                from pipeline_videos.long_form_profile import (
+                    validate_cutout_script_blueprint,
+                )
+
+                validate_cutout_script_blueprint(document)
+            else:
+                validate_long_form_retention_script(
+                    document,
+                    target_duration_seconds=project.target_duration_seconds,
+                    config=project.config.long_form_script,
+                    sources=sources,
+                    briefing=briefing,
+                )
         previous = _archive_current_script(layout)
         if previous is not None:
             document.version = previous.version + 1
@@ -576,13 +583,20 @@ def save_script(
         )
         briefing = read_model(layout.briefing, Briefing)
         if project.video_format != "short":
-            validate_long_form_retention_script(
-                document,
-                target_duration_seconds=project.target_duration_seconds,
-                config=project.config.long_form_script,
-                sources=sources,
-                briefing=briefing,
-            )
+            if project.config.long_form_profile.enabled:
+                from pipeline_videos.long_form_profile import (
+                    validate_cutout_script_blueprint,
+                )
+
+                validate_cutout_script_blueprint(document)
+            else:
+                validate_long_form_retention_script(
+                    document,
+                    target_duration_seconds=project.target_duration_seconds,
+                    config=project.config.long_form_script,
+                    sources=sources,
+                    briefing=briefing,
+                )
     invalidate(
         layout,
         stages=(

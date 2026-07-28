@@ -9,8 +9,10 @@ O pipeline separa:
 - publicação pública;
 - agendamento.
 
-O especialista de crescimento gera somente título, descrição, tags e comentário fixado. O pipeline
-não produz nem envia imagem de capa personalizada.
+No fluxo padrão, o especialista de crescimento gera somente título, descrição, tags e comentário
+fixado. O perfil `biblical_cutout_explainer_7m_v1` é a exceção: o pacote do roteiro materializa os
+metadados e produz localmente `youtube/thumbnail.png` e `youtube/thumbnail.jpg`. Gerar esses
+arquivos não autoriza enviá-los.
 
 ## Segurança
 

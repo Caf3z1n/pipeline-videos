@@ -1,5 +1,28 @@
 # Produção otimizada
 
+## Perfil cutout de vídeos longos
+
+Quando `project.json` declarar `long_form_profile.profile_id =
+biblical_cutout_explainer_7m_v1`, a ordem otimizada muda para:
+
+```text
+roteiro
+→ blueprint visual e pacote do YouTube na mesma saída
+→ áudio e alinhamento únicos
+→ compilação local do plano cronometrado
+→ inventário deduplicado
+→ até dois workers de imagem
+→ thumbnail e metadados locais
+→ um render final
+```
+
+Não prepare imagens antes de `profile plan-prepare` concluir. Nesse perfil, o próprio roteiro
+declara blocos, cues, sequências fullscreen e embalagem do YouTube. O plano é compilado localmente
+do blueprint e do alinhamento, sem editor visual, especialista de crescimento ou correção de
+modelo. A checagem local confirma apenas hashes, tempos e arquivos. Problemas criativos são evitados
+pelo contrato de entrada e por layouts determinísticos, não por ciclos de inspeção. Consulte
+`docs/long-form-cutout-profile.md`.
+
 ## Objetivo
 
 Conduzir uma produção completa com contexto compacto, escrita serializada, até dois workers de
@@ -51,9 +74,10 @@ aguardar o evento terminal com `pipeline-videos remote wait <job-id>` sem abrir 
 
 ## Roteiro
 
-Toda locução autoral usa `jesus_first_person_v1`, em Shorts e vídeos longos. Jesus fala em primeira
-pessoa; citações literais mantêm aspas, fonte, tradução e referência. Dramatização e elaboração
-criativa nunca são apresentadas como palavras documentadas de Jesus.
+Toda locução autoral padrão usa `jesus_first_person_v1`, em Shorts e vídeos longos. A exceção é
+`biblical_cutout_explainer_7m_v1`, que usa `biblical_explainer_third_person_v1` e fala de Jesus em
+terceira pessoa. Citações literais mantêm aspas, fonte, tradução e referência. Dramatização e
+elaboração criativa nunca são apresentadas como palavras documentadas de Jesus.
 
 O filtro `human_authorial_voice_v1` bloqueia:
 
@@ -71,7 +95,7 @@ Vídeos longos usam progressão por movimentos, reengajamentos, resolução coer
 
 ## Planejamento visual
 
-Todo projeto usa:
+O perfil visual padrão usa:
 
 - `biblical-midcentury-gouache-v1`;
 - `narration_block_visual_v1`;
@@ -84,6 +108,11 @@ classificada como `literal`, `contextual` ou `symbolic`.
 
 A abertura mostra ação já em curso, sujeito ou objeto dominante e tensão, escolha ou contraste
 coerente com a primeira frase.
+
+O perfil cutout substitui esse planejamento por `script_visual_blueprint_compiler_v2`. A única
+saída de roteiro já informa exatamente qual trecho usa asset + texto, frase central ou sequência
+fullscreen. O compilador alterna os lados, dimensiona um a três assets e pagina o texto sem chamar
+modelo.
 
 ## Imagens
 
@@ -111,6 +140,11 @@ O coordenador executa `images import-batch` uma única vez. Não regenere item i
 
 O pedido de produzir, criar ou retomar autoriza ElevenLabs com `--allow-external`. Não use serviço
 externo em áudio manual, mock ou quando o usuário proibir.
+
+No perfil cutout, Matheus/Eleven v3 usa `eleven_v3_strategic_tags_v1`. Preserve o roteiro palavra
+por palavra, grave o prompt separado em `audio/tts-prompt.json`, use apenas tags auditivas
+contextuais e não use SSML `<break>`. O alinhamento, as cenas e as legendas continuam comparados ao
+texto editorial sem tags.
 
 A duração comum usa `preferred_target_v1`. A voz permanece em velocidade natural `1.0`; não use
 silêncio, padding, `atempo` ou time-stretch para preencher a meta.
@@ -197,7 +231,7 @@ retomada; nunca abrem correção, pesquisa, revisão ou reescrita do roteiro.
 ## Metadados
 
 Crie exatamente um `youtube_growth_specialist`, com raciocínio médio, quando a fila estiver
-pendente. Ele produz somente:
+pendente e `generation_mode` não for `script_package_local_v1`. Ele produz somente:
 
 - um título;
 - descrição;
@@ -206,10 +240,16 @@ pendente. Ele produz somente:
 
 Não chama gerador de imagens e não altera ativos visuais.
 
+No perfil cutout, o pacote já pertence ao roteiro. O pipeline materializa os metadados sem modelo e
+o compositor local monta a thumbnail a partir do asset dedicado.
+
 ## Fallbacks
 
 Roteiro visual compacto e metadados aceitam no máximo uma correção agregada do modelo por etapa. Se
 o preflight continuar inválido, execute o `fallback_command` declarado e prossiga.
+
+O perfil cutout não usa essa regra: ele não abre correção de modelo nem possui fallback criativo.
+Seu compilador transforma diretamente o blueprint já decidido.
 
 Orçamentos de tokens são telemetria. Ao ultrapassar um orçamento, use o fallback determinístico da
 etapa e continue até o candidato final.

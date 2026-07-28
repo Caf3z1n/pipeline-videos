@@ -152,3 +152,15 @@ def validate_jesus_first_person_narration(document: ScriptDocument) -> None:
                 "A locução autoral não pode falar de Jesus em terceira pessoa. "
                 f"Reescreva como fala de Jesus: {sentence!r}."
             )
+
+
+def validate_biblical_explainer_narration(document: ScriptDocument) -> None:
+    """Keep the cutout explainer in a third-person authorial voice."""
+
+    for sentence in _authorial_sentences(document):
+        if _FIRST_PERSON_JESUS_MARKER.search(sentence):
+            raise ValueError(
+                "O perfil cutout usa narrador bíblico explicativo em terceira pessoa; "
+                "a locução autoral não pode falar como se fosse Jesus: "
+                f"{sentence!r}."
+            )

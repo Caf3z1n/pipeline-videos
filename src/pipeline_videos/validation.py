@@ -260,6 +260,10 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
 
         if not approved_locked:
             validate_authorial_narration_style(script)
+            if manifest.config.long_form_profile.enabled:
+                from pipeline_videos.long_form_profile import validate_conversational_script
+
+                validate_conversational_script(script)
 
         if (
             not approved_locked
@@ -370,6 +374,34 @@ def validate_project(layout: ProjectLayout, *, require_render: bool = True) -> V
                 "As palavras normalizadas pelo provedor de áudio diferem do roteiro; revise "
                 "números, abreviações e pontuação no alinhamento."
             )
+        report.checks["audio_prompting_profile"] = audio.prompting_profile
+        if manifest.config.audio.prompting_profile == "eleven_v3_strategic_tags_v1":
+            if audio.prompting_profile != "eleven_v3_strategic_tags_v1":
+                report.errors.append(
+                    "O áudio do perfil cutout não registrou o prompting estratégico Eleven v3."
+                )
+            prompt_path = (
+                layout.root / audio.synthesis_prompt_path
+                if audio.synthesis_prompt_path
+                else layout.audio_synthesis_prompt
+            )
+            if not prompt_path.is_file():
+                report.errors.append("O prompt auditável da síntese Eleven v3 está ausente.")
+            else:
+                prompt_data = read_json(prompt_path)
+                if audio.synthesis_prompt_hash != sha256_value(prompt_data):
+                    report.errors.append("O hash do prompt Eleven v3 não corresponde ao artefato.")
+                prompt_text = " ".join(
+                    str(item.get("text", ""))
+                    for item in prompt_data.get("segments", [])
+                    if isinstance(item, dict)
+                )
+                if "<break" in prompt_text.casefold():
+                    report.errors.append("O prompt Eleven v3 contém SSML break não suportado.")
+                if not re.search(r"\[(?:curious|thoughtful|surprised)\]", prompt_text):
+                    report.errors.append(
+                        "O prompt Eleven v3 não contém nenhuma tag estratégica aprovada."
+                    )
         if abs(audio.duration - audio.words[-1].end) > 2.0:
             report.warnings.append(
                 "Há mais de dois segundos entre a última palavra e o fim do áudio."

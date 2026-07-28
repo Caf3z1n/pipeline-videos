@@ -378,14 +378,25 @@ SHORT_AUTOMATIC_EXCLUSIONS = frozenset(
 MULTI_SOURCE_CREATIVE_MODES = frozenset({"thematic_investigation", "comparison_contrast"})
 
 
-def creative_mode_payload(mode: str) -> dict[str, Any]:
+def creative_mode_payload(
+    mode: str,
+    *,
+    narrator_identity: str = "jesus_first_person_v1",
+) -> dict[str, Any]:
     spec = CREATIVE_MODE_SPECS[mode]
-    return {
-        "id": mode,
-        **asdict(spec),
-        "authorial_narration_standard": "human_authorial_voice_v1",
-        "narrator_identity": "jesus_first_person_v1",
-        "global_narration_rules": (
+    if narrator_identity == "biblical_explainer_third_person_v1":
+        narrator_rules = (
+            (
+                "A voz autoral é um narrador bíblico explicativo em terceira pessoa; "
+                "nunca escreva como se Jesus estivesse narrando."
+            ),
+            (
+                "Apresente Jesus em terceira pessoa e preserve como fala bíblica somente "
+                "os trechos verificados colocados entre aspas."
+            ),
+        )
+    else:
+        narrator_rules = (
             (
                 "A voz autoral é Jesus narrando em primeira pessoa; escreva como quem viveu, "
                 "ensinou, chamou e testemunhou os acontecimentos."
@@ -394,6 +405,14 @@ def creative_mode_payload(mode: str) -> dict[str, Any]:
                 "Não apresente dramatização autoral como citação bíblica: somente trechos "
                 "verificados entre aspas são citações literais."
             ),
+        )
+    return {
+        "id": mode,
+        **asdict(spec),
+        "authorial_narration_standard": "human_authorial_voice_v1",
+        "narrator_identity": narrator_identity,
+        "global_narration_rules": (
+            *narrator_rules,
             "Narre diretamente fatos, ações, dúvidas e explicações.",
             "Não descreva o método de leitura nem use frases metalinguísticas.",
             "Não valorize ações por negação retórica ou listas de ausências.",

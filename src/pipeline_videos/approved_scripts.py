@@ -13,6 +13,7 @@ from pydantic import Field, field_validator, model_validator
 from pipeline_videos.models import (
     BiblicalReview,
     Briefing,
+    ElevenLabsVoiceVariant,
     PipelineModel,
     ScriptDocument,
     ShortsScriptStrategy,
@@ -62,7 +63,7 @@ class ApprovedShortScript(PipelineModel):
     metadata: YouTubeMetadata | None = None
     cta_options: list[ApprovedCtaOption] = Field(default_factory=list, max_length=8)
     selected_cta_id: str | None = None
-    voice_variant: Literal["jesus_1", "jesus_2"] = "jesus_1"
+    voice_variant: ElevenLabsVoiceVariant = "jesus_1"
     music_track: Literal["leaning", "aloboi"] = "leaning"
     content_hash: str
     created_at: str
@@ -717,7 +718,7 @@ class ApprovedScriptStore:
         label: str | None = None,
         cta_options: list[ApprovedCtaOption] | None = None,
         selected_cta_id: str | None = None,
-        voice_variant: Literal["jesus_1", "jesus_2"] = "jesus_1",
+        voice_variant: ElevenLabsVoiceVariant = "jesus_1",
         music_track: Literal["leaning", "aloboi"] = "leaning",
         max_scenes: int = 7,
         seo_title: str | None = None,

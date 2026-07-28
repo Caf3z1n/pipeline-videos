@@ -6,7 +6,10 @@ import unicodedata
 from dataclasses import dataclass
 
 from pipeline_videos.models import EditorialPolicyConfig, ScriptDocument, SourceLibrary
-from pipeline_videos.narration_style import validate_authorial_narration_style
+from pipeline_videos.narration_style import (
+    validate_authorial_narration_style,
+    validate_biblical_explainer_narration,
+)
 from pipeline_videos.utils import tokenize_words
 
 _ENGLISH_EDITORIAL_JARGON = (
@@ -163,6 +166,14 @@ def validate_script_editorial_policy(
     sources: SourceLibrary | None = None,
 ) -> None:
     validate_authorial_narration_style(document)
+    if document.long_form_strategy is not None:
+        if document.long_form_strategy.narrator_identity != policy.authorial_narrator:
+            raise ValueError(
+                "long_form_strategy.narrator_identity precisa copiar "
+                "editorial_policy.authorial_narrator."
+            )
+        if policy.authorial_narrator == "biblical_explainer_third_person_v1":
+            validate_biblical_explainer_narration(document)
     if policy.standard == "legacy":
         return
 

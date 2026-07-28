@@ -13,7 +13,8 @@ O coordenador retoma a mesma sessão raiz e delega os checkpoints criativos:
 1. seleção de fontes verificadas, quando necessária, pelo coordenador em Sol/medium;
 2. exatamente um `shorts_script_specialist` em Sol/high;
 3. até dois `image_worker` em Sol/low, paralelos e com staging separado;
-4. exatamente um `youtube_growth_specialist` em Sol/medium após a abertura estar importada.
+4. exatamente um `youtube_growth_specialist` em Sol/medium após a abertura estar importada, exceto
+   quando `generation_mode=script_package_local_v1`.
 
 Cada especialista parte com `fork_turns=none`, recebe somente seu JSON compacto e escreve apenas nos
 arquivos de staging declarados. O coordenador aguarda todos; o Python valida e importa uma vez.

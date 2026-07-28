@@ -11,6 +11,8 @@
 7. Para roteiro novo, leia também `docs/creative-direction.md`.
 8. Para roteiro de Short, leia também `docs/shorts-script-standard.md`.
 9. Para roteiro de vídeo longo, leia também `docs/long-form-script-standard.md`.
+10. Para o perfil cutout, leia também `docs/magnetic-long-form-engine.md` e
+   `docs/long-form-cutout-profile.md`.
 
 ## Organização
 
@@ -74,12 +76,15 @@
   nem defina cenas por listas de ausência como “afirmação, sem A, B ou C”. Também bloqueie a
   fórmula autoral `não A nem B, mas C` e declare `C` diretamente. O filtro vale somente para voz
   autoral: preserve citações bíblicas literais e hooks negativos legítimos como `Nunca faça [X].`.
-- Não diga “o texto fala/diz/registra”. Fora do perfil compacto, prefira “a Bíblia diz” ou “Em
-  Livro, capítulo X, versículo Y, lemos:”. No compacto, não use introdução antes da citação.
-- Em Shorts e vídeos longos, a voz autoral usa `jesus_first_person_v1`: Jesus é o eu lírico e fala
-  em primeira pessoa. Separe claramente a dramatização autoral das citações bíblicas literais,
-  mantendo aspas, fonte e referência exatas; nunca apresente elaboração criativa como fala bíblica
-  documentada.
+- Não diga “o texto fala/diz/registra”. Fora do perfil compacto, prefira “a Bíblia diz” ou uma
+  referência natural. No compacto, não use introdução antes da citação. No perfil cutout, varie
+  entre referência antes e depois da citação e não repita automaticamente “lemos”.
+- Em Shorts e vídeos longos padrão, a voz autoral usa `jesus_first_person_v1`: Jesus é o eu lírico
+  e fala em primeira pessoa. A exceção explícita é `biblical_cutout_explainer_7m_v1`, que usa
+  `biblical_explainer_third_person_v1`: narrador bíblico explicativo em terceira pessoa, sem
+  dramatização autoral como se Jesus narrasse. Em ambos, separe claramente a voz autoral das
+  citações bíblicas literais, mantendo aspas, fonte e referência exatas; nunca apresente elaboração
+  criativa como fala bíblica documentada.
 - Em vídeo longo, use citações literais verificadas distribuídas pela narrativa: alvo de 0,8 a 1,2
   por minuto; dez minutos exigem de oito a doze citações. No padrão novo, a primeira entra até 75
   segundos, o intervalo máximo é de 105 segundos e a parte final não fica mais de 120 segundos sem
@@ -87,14 +92,40 @@
 
 ## Produção otimizada
 
+- O perfil longo opt-in `biblical_cutout_explainer_7m_v1` usa o fluxo econômico
+  `roteiro + blueprint visual + pacote do YouTube -> áudio/alinhamento único -> compilador local
+  -> inventário deduplicado -> assets ausentes -> thumbnail local -> render único`. Nunca gere
+  assets antes de `profile plan-prepare` concluir. Não crie editor visual, especialista de
+  crescimento ou correção criativa para esse perfil. O compilador confere somente hashes, tempos e
+  arquivos; qualidade visual vem das decisões estruturadas do roteiro e dos layouts determinísticos.
+- Esse perfil aceita exatamente `assets_with_full_text_v1`, `center_statement_v1` e
+  `fullscreen_image_sequence_v1`. Asset + texto exibe toda a fala do bloco em zonas reservadas que
+  não se cruzam. Frase central não usa asset. Sequência fullscreen cobre o quadro inteiro e não
+  recebe background padrão, texto, legenda, cutout ou outro overlay.
+- O renderer é o único dono das aspas visuais: o texto das páginas não contém aspas, cada citação
+  abre uma única vez na primeira página e fecha uma única vez depois da última palavra na página
+  final. Texto sobre asset, asset sobre asset, fallback genérico, asset sem cue literal, aparição
+  inferior a dois segundos e repetição do mesmo asset nos primeiros trinta segundos são
+  bloqueantes antes da geração de imagens.
+- A locução desse perfil acrescenta `conversational_concrete_ptbr_v1`: português falado com sujeito,
+  ação e efeito concretos. Bloqueie frases abstratas ou genéricas como “a ordem foi deslocada; a
+  consequência foi contradita” e reescreva declarando diretamente quem fez o quê.
+- A voz autoral desse perfil usa `biblical_explainer_third_person_v1`, nunca
+  `jesus_first_person_v1`. O roteiro editorial permanece limpo e literal; a síntese Matheus usa
+  `eleven_v3_strategic_tags_v1`, com tags auditivas contextuais em um artefato TTS separado. As tags
+  não alteram nenhuma palavra, não entram em legenda/plano/metadados e não usam SSML `<break>`.
+  Registre o prompt exato e seu hash em `audio/tts-prompt.json`; use estabilidade Natural e poucas
+  mudanças intencionais entre curiosidade, reflexão e revelação.
+
 - O agente principal é o único escritor de estado compartilhado.
 - Cada produção local materializa `audit/coordinator-job.json` e deve ser conduzida por uma sessão
   isolada `local_video_coordinator`, em raciocínio médio e `fork_turns=none`; o chat solicitante
   apenas acompanha o resultado e não relê todo o histórico dentro do coordenador.
 - Workers escrevem somente no staging declarado e recebem contexto compacto com
   `fork_turns=none`.
-- Use no máximo dois trabalhadores de imagem simultaneamente. O especialista do YouTube produz
-  somente metadados e não depende de imagens.
+- Use no máximo dois trabalhadores de imagem simultaneamente. Fora do perfil cutout, o especialista
+  do YouTube produz somente metadados e não depende de imagens. No cutout, o próprio pacote do
+  roteiro gera localmente metadados e thumbnail.
 - Imagens usam uma chamada `imagegen` por tentativa. Em `moderation_blocked`, repita o mesmo prompt
   uma vez; se bloquear novamente, tente uma única alternativa de cena preservando identidade, idade
   aparente, rosto, cabelo, figurino, proporções, silhueta, estilo, paleta, ambiente e sentido.
@@ -304,10 +335,12 @@
   desenvolvimento avança por ações e acontecimentos; beats de análise/comparação e títulos
   metalinguísticos continuam bloqueados.
 - Crie exatamente um `youtube_growth_specialist` quando `youtube/growth-queue.json` estiver
-  pendente, localmente ou na VPS, com raciocínio médio. Nenhum especialista publica nem promete
-  CTR/alcance.
+  pendente, localmente ou na VPS, com raciocínio médio. A exceção é
+  `generation_mode=script_package_local_v1`, que materializa o pacote localmente sem especialista.
+  Nenhum especialista publica nem promete CTR/alcance.
 - O especialista gera exatamente um título e os metadados. Não chama `imagegen`, não produz imagem
-  de capa e não altera o primeiro frame.
+  de capa e não altera o primeiro frame. No perfil cutout, o roteiro já entrega o pacote único e a
+  fila de imagens inclui uma base de thumbnail sem texto; o compositor local aplica a tipografia.
 - Shorts e vídeos longos novos seguem `Enfoque concreto | Passagem`. A passagem aparece exatamente
   uma vez e somente depois da barra; o enfoque nunca repete a referência bíblica. O enfoque se
   adapta ao modo criativo sem forçar tensão motivacional. A descrição abre com resumo
@@ -395,8 +428,9 @@
 - Agendas diárias materializam um ou dois jobs independentes por data e slot. Cada ocorrência deve
   ter `not_before`, upload inicial privado, `publication_mode=scheduled` e `publish_at` explícito
   com fuso. A materialização é idempotente e nunca reutiliza a sessão raiz de outro Short.
-- Gere exatamente um título e os metadados em Shorts e vídeos longos. Não chame `imagegen` nessa
-  etapa, não altere o primeiro frame e não envie imagem de capa personalizada.
+- Gere exatamente um título e os metadados em Shorts e vídeos longos. Não chame `imagegen` na etapa
+  de metadados nem altere o primeiro frame. O perfil cutout pode gerar uma thumbnail local dedicada,
+  mas nunca a envia sem pedido explícito.
 - `render-review` funciona em produções locais e remotas, usa os ativos ativos em qualidade final e
   nunca registra aprovação humana. Um candidato assim pode ser enviado automaticamente somente como
   `private`, quando a política do projeto permitir e a validação técnica estiver concluída.

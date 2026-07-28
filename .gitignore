@@ -15,6 +15,11 @@ audits/
 output/
 dist/
 *.egg-info/
+renderers/**/node_modules/
+
+# Artefatos locais de prototipagem nao entram no snapshot de worktree.
+.tmp/
+experiments/
 
 # Exportações locais não fazem parte do código-fonte.
 exports/
