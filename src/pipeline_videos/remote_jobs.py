@@ -3829,6 +3829,7 @@ def job_diagnostics(store: RemoteJobStore, job: RemoteVideoJob) -> dict[str, Any
 
     phase_event_counts: dict[str, int] = {}
     imagegen_events: list[dict[str, Any]] = []
+    shell_events: list[dict[str, Any]] = []
     if phase_paths:
         for line in phase_paths[-1].read_text(encoding="utf-8", errors="replace").splitlines():
             with suppress(json.JSONDecodeError):
@@ -3842,6 +3843,24 @@ def job_diagnostics(store: RemoteJobStore, job: RemoteVideoJob) -> dict[str, Any
                     continue
                 item_type = str(item.get("type") or "")
                 tool_name = str(item.get("tool_name") or item.get("name") or "")
+                if "command" in item_type.casefold() or "bash" in tool_name.casefold():
+                    output = item.get("aggregated_output") or item.get("output")
+                    shell_event = {
+                        "event_type": event_type,
+                        "item_type": item_type or None,
+                        "tool_name": tool_name or None,
+                        "status": item.get("status"),
+                        "exit_code": item.get("exit_code"),
+                        "command": (
+                            str(item["command"])[-2000:]
+                            if isinstance(item.get("command"), str)
+                            else None
+                        ),
+                        "output": str(output)[-2000:] if isinstance(output, str) else None,
+                    }
+                    shell_events.append(
+                        {key: value for key, value in shell_event.items() if value is not None}
+                    )
                 if "image" not in item_type.casefold() and "image" not in tool_name.casefold():
                     continue
                 event = {
@@ -3861,6 +3880,7 @@ def job_diagnostics(store: RemoteJobStore, job: RemoteVideoJob) -> dict[str, Any
         "hook_events": hook_events[-20:],
         "phase_event_counts": phase_event_counts,
         "imagegen_events": imagegen_events[-10:],
+        "shell_events": shell_events[-10:],
     }
 
 

@@ -369,6 +369,25 @@ def test_job_diagnostics_exposes_sanitized_latest_image_handoff(tmp_path) -> Non
         + "\n",
         encoding="utf-8",
     )
+    with (logs_dir / f"{job.job_id}-run-001-image_workers-scene.jsonl").open(
+        "a",
+        encoding="utf-8",
+    ) as phase_log:
+        phase_log.write(
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "status": "failed",
+                        "exit_code": 1,
+                        "command": "uv run pipeline-videos images stage-generated",
+                        "aggregated_output": "savedPath rejeitado",
+                    },
+                }
+            )
+            + "\n"
+        )
 
     diagnostics = job_diagnostics(store, job)
 
@@ -377,8 +396,9 @@ def test_job_diagnostics_exposes_sanitized_latest_image_handoff(tmp_path) -> Non
     assert diagnostics["hook_events"][-1]["materialization_error"] == (
         "imagegen_prompt_or_saved_path_missing"
     )
-    assert diagnostics["phase_event_counts"] == {"item.completed": 1}
+    assert diagnostics["phase_event_counts"] == {"item.completed": 2}
     assert diagnostics["imagegen_events"][-1]["saved_path"].endswith("exec-example.png")
+    assert diagnostics["shell_events"][-1]["output"] == "savedPath rejeitado"
 
 
 def test_remote_character_request_bootstraps_verified_storytelling_sources(tmp_path) -> None:
