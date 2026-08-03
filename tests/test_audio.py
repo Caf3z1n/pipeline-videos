@@ -389,6 +389,38 @@ def test_compact_audio_quality_gate_rejects_short_narration_and_large_gap(tmp_pa
     )
 
 
+def test_preferred_compact_audio_uses_the_persisted_floor_not_target_ratio(
+    tmp_path: Path,
+) -> None:
+    layout = create_project(
+        "compact-preferred-floor",
+        "Short compacto com alvo preferencial",
+        projects_dir=tmp_path,
+        target_duration_seconds=18,
+        video_format="short",
+    )
+    project = layout.load_manifest()
+    words = [
+        WordTiming(
+            index=index,
+            word=f"palavra-{index}",
+            start=index * 0.8,
+            end=index * 0.8 + 0.3,
+            scene_id="scene-001",
+        )
+        for index in range(20)
+    ]
+
+    # 16.58s is below 18 * 0.94 (16.92s), but above the persisted preferred
+    # floor of 15.3s and therefore valid for a natural preferred-target Short.
+    _validate_compact_narration_audio(
+        project,
+        provider="elevenlabs",
+        duration=16.58,
+        words=words,
+    )
+
+
 def test_adaptive_duration_accepts_real_audio_in_range_and_persists_it(tmp_path: Path) -> None:
     layout = create_project(
         "compact-audio-range",

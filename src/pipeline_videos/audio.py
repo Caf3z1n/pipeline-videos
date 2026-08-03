@@ -1054,6 +1054,16 @@ def _validate_compact_narration_audio(
         assert project.requested_duration_max_seconds is not None
         minimum_duration = project.requested_duration_min_seconds
         maximum_duration = project.requested_duration_max_seconds
+    elif project.duration_policy == "preferred_target_v1":
+        # The ordinary duration request is a preferred target, not an exact
+        # timing contract. Keep only the persisted platform/range floor as a
+        # hard guard; the preferred window is reported as an advisory during
+        # final validation. Using target * minimum_audio_duration_ratio here
+        # incorrectly rejected natural 18s Shorts that were still above the
+        # 15-20s-compatible floor.
+        assert project.requested_duration_min_seconds is not None
+        minimum_duration = project.requested_duration_min_seconds
+        maximum_duration = None
     else:
         minimum_duration = project.target_duration_seconds * shorts.minimum_audio_duration_ratio
         maximum_duration = None
